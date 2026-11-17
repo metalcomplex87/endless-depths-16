@@ -6,12 +6,67 @@ import { useState, useEffect, useRef, useGrokTheme } from "grok/canvas";
 // Future edits belong in /workspace/ed16-web/src, not the Cursor canvas.
 
 const TS = 24;
-const VW = 240;
-const VH = 300;
+const BASE_VW = 240;
+const BASE_VH = 300;
+let VW = BASE_VW;
+let VH = BASE_VH;
 const PX = 3;
 const HUD = 30;
 const MSGH = 22;
-const VIEWH = VH - HUD - MSGH;
+let VIEWH = VH - HUD - MSGH;
+// CSS px per game pixel of the old letterboxed 240×300 view on a ~412×344 canvas (~27.5px tiles).
+const VIEW_MARGIN = 4;
+const VIEW_REF_SCALE = 275 / 240;
+const VIEW_MIN_SCALE = 0.8;
+type PlayView = { vw: number; vh: number; cssW: number; cssH: number; scale: number; viewH: number };
+function computePlayView(availW: number, availH: number): PlayView {
+  const aw = Math.max(80, Math.floor(availW - VIEW_MARGIN * 2));
+  const ah = Math.max(72, Math.floor(availH));
+  let scale = Math.min(VIEW_REF_SCALE, ah / BASE_VH, aw / BASE_VW);
+  if (!(scale >= VIEW_MIN_SCALE)) scale = VIEW_MIN_SCALE;
+  const vw = Math.max(BASE_VW, Math.round(aw / scale));
+  scale = aw / Math.max(1, vw);
+  let vh = Math.max(HUD + 80 + MSGH, Math.round(ah / scale));
+  if (vh * scale > ah + 0.5) vh = Math.max(HUD + 80 + MSGH, Math.floor(ah / scale));
+  return { vw, vh, cssW: aw, cssH: Math.min(ah, Math.round(vh * scale)), scale: aw / vw, viewH: vh - HUD - MSGH };
+}
+function setPlayView(v: PlayView): void {
+  const changed = v.vw !== VW || v.vh !== VH;
+  VW = v.vw; VH = v.vh; VIEWH = v.viewH;
+  if (changed) IP.camOk = false;
+  try {
+    (window as unknown as { __ED16_VIEW?: object }).__ED16_VIEW = { vw: VW, vh: VH, viewH: VIEWH, tilesX: VW / TS, tilesY: VIEWH / TS, cssW: v.cssW, cssH: v.cssH, scale: v.scale };
+    if (document.documentElement && document.documentElement.dataset) {
+      document.documentElement.dataset.ed16Vw = String(VW);
+      document.documentElement.dataset.ed16Vh = String(VH);
+    }
+  } catch { /* tests only */ }
+}
+function applyPlayViewToCss(v: PlayView, stageW: number, stageH: number): void {
+  const de = document.documentElement;
+  const left = Math.max(0, (stageW - v.cssW) / 2);
+  const top = Math.max(0, (stageH - v.cssH) / 2);
+  de.style.setProperty("--ed-cv-w", v.cssW + "px");
+  de.style.setProperty("--ed-cv-h", v.cssH + "px");
+  de.style.setProperty("--ed-cv-left", left + "px");
+  de.style.setProperty("--ed-cv-top", top + "px");
+  de.style.setProperty("--ed-hud-css", (HUD * (v.cssH / Math.max(1, v.vh))) + "px");
+}
+function resizeGameCanvas(): void {
+  const cv = document.querySelector("canvas.dc-cv") as HTMLCanvasElement | null;
+  if (!cv) return;
+  const w = VW * PX, h = VH * PX;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+}
+function playScale(): number {
+  try {
+    const w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ed-cv-w"));
+    if (w > 0 && VW > 0) return w / VW;
+  } catch { /* ignore */ }
+  return VIEW_REF_SCALE;
+}
+function hudRightPad(): number { return Math.max(22, Math.round(30 / Math.max(0.6, playScale()))); }
+function noticeLeft(): number { return Math.max(24, Math.round(34 / Math.max(0.6, playScale())) + 2); }
 const MW = 44;
 const MH = 44;
 const BAG = 50;
@@ -704,7 +759,7 @@ function mmBox(boss: boolean, actBoss: boolean, big: boolean, nBoss = 1): HudRec
   return { x: mx0 - 4, y: my0 - 4, w: mw + 8, h: mh + 8 };
 }
 function noticeBox(mm: HudRect, boss: boolean, big = false, nBoss = 1): HudRect {
-  const left = NOTICE_LEFT;
+  const left = noticeLeft();
   if (big) {
     const y = HUD + 2;
     const h = Math.max(16, Math.min(NOTICE_H, mm.y - NOTICE_GAP - y));
@@ -718,26 +773,18 @@ function noticeBox(mm: HudRect, boss: boolean, big = false, nBoss = 1): HudRect 
 function rectsOverlap(a: HudRect, b: HudRect, pad = 0): boolean {
   return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
 }
-function stageCanvasLayout(vpW: number, vpH: number, safeBottom = 0): { stageW: number; stageH: number; canvasW: number; canvasH: number; canvasLeft: number; canvasTop: number } {
-  const m = layoutMetrics(vpW, vpH, safeBottom, 0);
-  const stageW = Math.min(Math.max(1, vpW), WRAP_MAX);
+function stageCanvasLayout(vpW: number, vpH: number, safeBottom = 0, safeTop = 0, safeLeft = 0, safeRight = 0): { stageW: number; stageH: number; canvasW: number; canvasH: number; canvasLeft: number; canvasTop: number; view: PlayView } {
+  const m = layoutMetrics(vpW, vpH, safeBottom, 0, safeTop);
+  const stageW = Math.max(1, Math.min(WRAP_MAX, vpW) - safeLeft - safeRight);
   const stageH = Math.max(1, m.canvasMax + 4);
-  const aspect = VW / VH;
-  let canvasH = Math.min(m.canvasMax, stageW / aspect);
-  let canvasW = canvasH * aspect;
-  if (canvasW > stageW) { canvasW = stageW; canvasH = canvasW / aspect; }
-  return { stageW, stageH, canvasW, canvasH, canvasLeft: (stageW - canvasW) / 2, canvasTop: (stageH - canvasH) / 2 };
-}
-function cssPctToCanvas(leftPct: number, topPct: number, widthPct: number, ly: ReturnType<typeof stageCanvasLayout>, minCss = 22): HudRect {
-  const cssX = leftPct / 100 * ly.stageW;
-  const cssY = topPct / 100 * ly.stageH;
-  const cssW = Math.max(minCss, widthPct / 100 * ly.stageW);
-  const cssH = cssW;
-  return { x: (cssX - ly.canvasLeft) / ly.canvasW * VW, y: (cssY - ly.canvasTop) / ly.canvasH * VH, w: cssW / ly.canvasW * VW, h: cssH / ly.canvasH * VH };
+  const view = computePlayView(stageW, m.canvasMax);
+  return { stageW, stageH, canvasW: view.cssW, canvasH: view.cssH, canvasLeft: Math.max(0, (stageW - view.cssW) / 2), canvasTop: Math.max(0, (stageH - view.cssH) / 2), view };
 }
 function overlayBtnsCanvas(vpW: number, vpH: number, safeBottom = 0): { lock: HudRect; wbrk: HudRect } {
-  const ly = stageCanvasLayout(vpW, vpH, safeBottom);
-  return { lock: cssPctToCanvas(0.6, 4.6, 7, ly), wbrk: cssPctToCanvas(0.6, 13.2, 7, ly) };
+  const sc = playScale();
+  const s = 28 / Math.max(0.6, sc);
+  const y0 = HUD + 4 / Math.max(0.6, sc);
+  return { lock: { x: 4 / Math.max(0.6, sc), y: y0, w: s, h: s }, wbrk: { x: 4 / Math.max(0.6, sc), y: y0 + s + 4 / Math.max(0.6, sc), w: s, h: s } };
 }
 const WARN_SEC = 3.2;
 const NOTICE_WARN_H = 52;
@@ -9792,7 +9839,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-root { position: fixed; top: var(--ed-vv-top, 0px); left: var(--ed-vv-left, 0px); width: var(--ed-vv-w, 100%); height: var(--ed-vv-h, 100dvh); max-height: var(--ed-vv-h, 100dvh); overflow: hidden; overscroll-behavior: none; touch-action: none; box-sizing: border-box; }
 .dc-wrap { position: relative; width: 100%; max-width: 440px; height: 100%; max-height: 100%; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; box-sizing: border-box; padding-top: var(--ed-safe-t, env(safe-area-inset-top, 0px)); padding-right: var(--ed-safe-r, env(safe-area-inset-right, 0px)); padding-bottom: var(--ed-safe-b, env(safe-area-inset-bottom, 0px)); padding-left: var(--ed-safe-l, env(safe-area-inset-left, 0px)); }
 .dc-stage { position: relative; width: 100%; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.dc-cv { width: auto; max-width: 100%; height: auto; aspect-ratio: 240 / 300; max-height: var(--ed-canvas-max, calc(100dvh - 320px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); display: block; margin: 0 auto; image-rendering: pixelated; touch-action: none; outline: none; border-radius: 6px; background: #000; flex: 0 1 auto; }
+.dc-cv { width: var(--ed-cv-w, 100%); height: var(--ed-cv-h, auto); max-width: 100%; max-height: var(--ed-canvas-max, calc(100dvh - 320px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); display: block; margin: 0 auto; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; outline: none; border-radius: 6px; background: #000; flex: 0 1 auto; }
 .dc-util { display: flex; gap: 4px; flex-shrink: 0; padding: 4px 4px 0; align-items: stretch; position: relative; z-index: 2; }
 .dc-util .dc-b { min-height: var(--ed-util-h, 36px); flex: 1; font-size: 11px; }
 .dc-ctrl { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 6px 4px 0; flex-shrink: 0; position: relative; z-index: 2; }
@@ -9879,11 +9926,11 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-msw { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(0, 0, 0, 0.55); border-radius: 6px; touch-action: manipulation; }
 .dc-msw .dc-conf { max-width: 90%; }
 .dc-conf { background: rgba(10, 8, 16, 0.94); border: 1px solid #5a4a7a; border-radius: 10px; padding: 8px; text-align: center; color: #ffffff; font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
-.dc-lock { position: absolute; left: 0.6%; top: 4.6%; width: 7%; min-width: 22px; aspect-ratio: 1; z-index: 25; padding: 0; border: 1px solid #3a3450; border-radius: 6px; background: rgba(12, 10, 18, 0.85); font-size: 11px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.7; -webkit-tap-highlight-color: transparent; }
-.dc-quit { position: absolute; left: 76.5%; top: 1.3%; width: 7%; min-width: 22px; aspect-ratio: 1; z-index: 25; padding: 0; border: 1px solid #4a3040; border-radius: 6px; background: rgba(12, 10, 18, 0.85); color: #e8a0a8; font-size: 10px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.7; -webkit-tap-highlight-color: transparent; }
+.dc-lock { position: absolute; left: calc(var(--ed-cv-left, 0px) + 4px); top: calc(var(--ed-cv-top, 0px) + var(--ed-hud-css, 34px) + 4px); width: 28px; height: 28px; min-width: 28px; z-index: 25; padding: 0; border: 1px solid #3a3450; border-radius: 6px; background: rgba(12, 10, 18, 0.85); font-size: 11px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.7; -webkit-tap-highlight-color: transparent; }
+.dc-quit { position: absolute; left: calc(var(--ed-cv-left, 0px) + var(--ed-cv-w, 100%) - 32px); top: calc(var(--ed-cv-top, 0px) + 3px); width: 28px; height: 28px; min-width: 28px; z-index: 25; padding: 0; border: 1px solid #4a3040; border-radius: 6px; background: rgba(12, 10, 18, 0.85); color: #e8a0a8; font-size: 10px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.7; -webkit-tap-highlight-color: transparent; }
 .dc-qw { z-index: 45; }
 .dc-lock.on { border-color: #6a5a3a; }
-.dc-wbrk { position: absolute; left: 0.6%; top: 13.2%; width: 7%; min-width: 22px; aspect-ratio: 1; z-index: 25; padding: 0; border: 1px solid #3a3450; border-radius: 6px; background: rgba(12, 10, 18, 0.85); color: #c8c0b0; font-size: 13px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.75; -webkit-tap-highlight-color: transparent; }
+.dc-wbrk { position: absolute; left: calc(var(--ed-cv-left, 0px) + 4px); top: calc(var(--ed-cv-top, 0px) + var(--ed-hud-css, 34px) + 36px); width: 28px; height: 28px; min-width: 28px; z-index: 25; padding: 0; border: 1px solid #3a3450; border-radius: 6px; background: rgba(12, 10, 18, 0.85); color: #c8c0b0; font-size: 13px; line-height: 1; cursor: pointer; touch-action: manipulation; opacity: 0.75; -webkit-tap-highlight-color: transparent; }
 .dc-wbrk.on { border-color: #e8c860; background: rgba(80, 60, 16, 0.92); color: #ffe080; box-shadow: 0 0 8px rgba(255, 200, 80, 0.55); opacity: 1; }
 .dc-io { z-index: 30; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: pan-y; }
 .dc-ta { display: block; width: 100%; box-sizing: border-box; min-height: 110px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; background: #14101e; color: #f0ecff; border: 2px solid #6a5a9a; border-radius: 8px; padding: 8px; resize: vertical; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; touch-action: auto; pointer-events: auto; }
@@ -10531,6 +10578,14 @@ export default function App() {
       de.style.setProperty("--ed-canvas-max", m.canvasMax + "px");
       de.style.setProperty("--ed-save-h", m.saveH + "px");
       de.style.setProperty("--ed-util-h", m.utilH + "px");
+      const stageW = Math.max(1, Math.min(WRAP_MAX, w) - sl - sr);
+      const applyView = (maxH: number): void => {
+        const v = computePlayView(stageW, maxH);
+        setPlayView(v);
+        applyPlayViewToCss(v, stageW, maxH + 4);
+        resizeGameCanvas();
+      };
+      applyView(m.canvasMax);
       // If padding or button minima still overflow, shrink the canvas — never clip the HUD or dock.
       requestAnimationFrame(() => {
         const wrap = document.querySelector(".dc-wrap") as HTMLElement | null;
@@ -10538,7 +10593,9 @@ export default function App() {
         const overflow = wrap.scrollHeight - wrap.clientHeight;
         if (overflow > 1) {
           const cur = parseFloat(getComputedStyle(de).getPropertyValue("--ed-canvas-max")) || m.canvasMax;
-          de.style.setProperty("--ed-canvas-max", Math.max(72, cur - overflow - 2) + "px");
+          const next = Math.max(72, cur - overflow - 2);
+          de.style.setProperty("--ed-canvas-max", next + "px");
+          applyView(next);
         }
       });
     };
@@ -11267,7 +11324,8 @@ export default function App() {
       ctx.fillStyle = "#0c0a12"; ctx.fillRect(0, 0, VW, HUD);
       ctx.fillStyle = "#2a2438"; ctx.fillRect(0, HUD - 1, VW, 1);
       text("Lv" + g.lvl, 3, 8, GOLD, "left", 9);
-      const bx = 36, bw = 144;
+      const rightPad = hudRightPad();
+      const bx = 36, bw = Math.max(144, VW - bx - rightPad - 8);
       ctx.fillStyle = "#2a0808"; ctx.fillRect(bx, 3, bw, 9);
       const hpF = Math.max(0, Math.min(1, h.hp / st.maxHp));
       ctx.fillStyle = hpF < 0.3 ? (Math.floor(t * 4) % 2 ? "#ff2020" : "#a01010") : "#d82828"; ctx.fillRect(bx, 3, Math.round(bw * hpF), 9);
@@ -11277,12 +11335,12 @@ export default function App() {
       ctx.fillStyle = "#14102a"; ctx.fillRect(bx, 14, bw, 5);
       ctx.fillStyle = "#8a5aff"; ctx.fillRect(bx, 14, Math.round(bw * Math.min(1, g.xp / xpNeed(g.lvl))), 5);
       text("XP " + g.xp + "/" + xpNeed(g.lvl), bx + bw / 2, 17, "#e0d8ff", "center", 5);
-      text("D" + g.depth, VW - 3, 8, "#80e0ff", "right", 9);
-      text("\u2665" + g.potions, VW - 3, 18, "#ff7090", "right", 7);
+      text("D" + g.depth, VW - 3 - rightPad, 8, "#80e0ff", "right", 9);
+      text("\u2665" + g.potions, VW - 3 - rightPad, 18, "#ff7090", "right", 7);
       text("PL " + powerTotal(g.lvl, g.eq).toLocaleString("en-US"), 3, 25, GOLD, "left", 6);
       text(g.vault ? "Treasure Vault" : themeName(g), 52, 25, g.vault ? GOLD : "#8a80a8", "left", 6);
       text((g.gems ? (g.gems + "\u25c6 ") : "") + g.gold + "g", bx + bw, 25, GOLD, "right", 6);
-      text("BEST D" + g.best, VW - 3, 26, "#8a80a8", "right", 5);
+      text("BEST D" + g.best, VW - 3 - rightPad, 26, "#8a80a8", "right", 5);
       // messages
       ctx.fillStyle = "#0c0a12"; ctx.fillRect(0, VH - MSGH, VW, MSGH);
       const ms = g.msgs.slice(-2);

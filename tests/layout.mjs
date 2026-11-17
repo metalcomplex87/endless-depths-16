@@ -200,7 +200,11 @@ async function inspect(page) {
         canvasMax: getComputedStyle(document.documentElement).getPropertyValue("--ed-canvas-max").trim(),
         safeT: getComputedStyle(document.documentElement).getPropertyValue("--ed-safe-t").trim(),
         safeB: getComputedStyle(document.documentElement).getPropertyValue("--ed-safe-b").trim(),
+        cvW: getComputedStyle(document.documentElement).getPropertyValue("--ed-cv-w").trim(),
+        vw: document.documentElement.dataset.ed16Vw || "",
+        vh: document.documentElement.dataset.ed16Vh || "",
       },
+      view: window.__ED16_VIEW || null,
       scroll: { x: window.scrollX, y: window.scrollY, docH: document.documentElement.scrollHeight, wrapSH: wrap ? wrap.scrollHeight : 0, wrapCH: wrap ? wrap.clientHeight : 0, rootH: root ? root.getBoundingClientRect().height : 0 },
       canvas: cr && { top: cr.top, left: cr.left, bottom: cr.bottom, right: cr.right, width: cr.width, height: cr.height, visible: within(cr) },
       canvasAboveUtil: !!(cr && ur && cr.bottom <= ur.top + 2),
@@ -238,6 +242,14 @@ async function runCase(c) {
     const stickOk = !!(info.stick && info.stick.visible && info.stick.width >= 120 && info.stick.height >= 120 && !info.pauseOnPad);
     record(c.name + " joystick visible and large, no PAUSE button on the pad", stickOk,
       JSON.stringify({ stick: info.stick, pauseOnPad: info.pauseOnPad }));
+    const visW = info.vis && info.vis.w ? info.vis.w : 0;
+    const cw = info.canvas && info.canvas.width ? info.canvas.width : 0;
+    const ch = info.canvas && info.canvas.height ? info.canvas.height : 0;
+    const fillsWidth = !!(info.canvas && info.canvas.visible && cw >= visW - 20);
+    const widerThanOld = cw >= Math.min(visW - 20, 330);
+    const tilesX = info.view && info.view.tilesX ? info.view.tilesX : 0;
+    record(c.name + " canvas fills available width with a wider view", fillsWidth && widerThanOld && tilesX >= 12,
+      JSON.stringify({ canvas: info.canvas && { w: cw, h: ch }, visW, view: info.view, fillsWidth, tilesX }));
     record(c.name + " screenshot", true, shot);
   } catch (err) {
     record(c.name + " ERROR", false, err && err.stack ? err.stack : String(err));
