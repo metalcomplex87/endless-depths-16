@@ -10275,7 +10275,10 @@ export default function App() {
     if (stor === "checking" || !storageReady) return;
     try { ensureJaxSeed(); } catch { /* */ }
     const g = gRef.current;
-    if (g && g.mode === "play") { try { saveGame(g, true); } catch { /* keep the other profiles safe even if this write fails */ } }
+    // Only flush when the player is switching away from an active session (picker
+    // was closed). If the picker is already open (fresh load / resume), writing
+    // here would overwrite the on-disk save with any ticks that leaked first.
+    if (g && g.mode === "play" && !profOpen) { try { saveGame(g, true); } catch { /* keep the other profiles safe even if this write fails */ } }
     setActiveProf(id);
     setProfOpen(false);
     setConfirmNew(false);
@@ -12023,6 +12026,7 @@ export default function App() {
             <button className={"dc-b dc-savegame" + (locked ? "" : " go")} style={btn} disabled={locked || !g || g.mode === "title"} onClick={saveToProfile} aria-label={SAVE_GAME_LBL}>{SAVE_GAME_LBL}</button>
             <button className="dc-b" style={btn} disabled={locked} onClick={showSaveCode} aria-label={SAVE_CODE_LBL}>{SAVE_CODE_LBL}</button>
             <button className="dc-b" style={btn} disabled={locked} onClick={openLoad} aria-label={locked ? "Load (locked)" : "Load"}>{locked ? "\ud83d\udd12 LOAD" : "\ud83d\udcc2 LOAD"}</button>
+            <button className="dc-b" style={btn} onClick={openProfiles} aria-label="Profiles">Profiles</button>
           </div>
           </div>
           <div className="dc-actions">
