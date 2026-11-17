@@ -4327,6 +4327,67 @@ function livingActBoss(g: Game): En | null {
   }
   return null;
 }
+function looksLikeCampMap(map: Uint8Array | null | undefined): boolean {
+  if (!map || map.length !== MW * MH) return false;
+  let plaza = 0;
+  for (let y = 13; y < 31; y++) for (let x = 13; x < 31; x++) if (map[y * MW + x] !== 0) plaza++;
+  if (plaza < 18 * 18 * 0.9) return false;
+  return map[1 * MW + 1] === 0;
+}
+function snapLooksLikeCamp(snap: FloorSnap | null | undefined): boolean {
+  if (!snap || typeof snap.map !== "string") return false;
+  return looksLikeCampMap(unpackMapBits(snap.map, 2, MW * MH));
+}
+function dropCampLikeSnaps(g: Game): void {
+  if (snapLooksLikeCamp(g.snapCur)) g.snapCur = null;
+  if (snapLooksLikeCamp(g.snapPrev)) g.snapPrev = null;
+}
+function persistCurSnap(g: Game): FloorSnap | null {
+  // Never snapshot the camp (or vault) layout as the current dungeon floor.
+  if (g.area === "camp" || g.vault) return pruneFloorSnap(g.snapCur ?? null);
+  if (g.depth === floorFront(g)) return pruneFloorSnap(captureFloor(g));
+  return pruneFloorSnap(g.snapCur ?? null);
+}
+function mapHasTile(map: Uint8Array, tile: number): boolean {
+  for (let i = 0; i < map.length; i++) if (map[i] === tile) return true;
+  return false;
+}
+function rebuildCleanCamp(g: Game): void {
+  const hx = g.hero.x, hy = g.hero.y;
+  dropCampLikeSnaps(g);
+  genCamp(g);
+  if (inb(hx, hy) && g.map[hy * MW + hx] !== 0 && !campBlocked(g, hx, hy)) {
+    g.hero.x = g.hero.ax = hx;
+    g.hero.y = g.hero.ay = hy;
+  }
+}
+function isHybridCampState(g: Game): boolean {
+  const campLayout = looksLikeCampMap(g.map);
+  const wantCamp = g.area === "camp";
+  if (!wantCamp && !campLayout) return false;
+  if (livingActBoss(g)) return true;
+  if (mapHasTile(g.map, TILE_UP)) return true;
+  if (g.en.some((e: En) => e.hp > 0)) return true;
+  if (!g.fireAt || !g.restAt || !g.stashAt) return true;
+  const pk = portalKind(g);
+  if (pk !== "proceed") return true;
+  if (wantCamp && !campLayout) return true;
+  return false;
+}
+// Fix camp/boss hybrids from older saves: a camp run must load as a real camp
+// (no act boss, no Back stairs). A dungeon act floor with no living boss must
+// have its camp portal / exits unlocked.
+function repairCampBossHybrid(g: Game): void {
+  if (!g || g.mode !== "play" || g.vault) return;
+  if (g.area === "camp" || looksLikeCampMap(g.map) || isHybridCampState(g)) {
+    rebuildCleanCamp(g);
+    return;
+  }
+  if (isActFloor(g.depth) && !livingActBoss(g)) {
+    if (!actEverCleared(g)) g.actCleared = Math.max(g.actCleared ?? 0, g.depth);
+    openCampPortal(g);
+  }
+}
 function canEnterCamp(g: Game): boolean {
   if (g.area === "camp" || g.vault || g.mode !== "play") return false;
   if (!isActFloor(g.depth)) return false;
@@ -6021,7 +6082,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
     e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g),
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
-    ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: pruneFloorSnap(g.depth === floorFront(g) && !g.vault ? captureFloor(g) : (g.snapCur ?? null)), ms: unpackMerchSub(g.merchSub),
+    ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
     hx: g.hero.x, hy: g.hero.y, hp: g.hero.hp, dir: heroDir(g.hero), tn: g.turn,
     ar: g.area ?? "dungeon", vt: vault,
   };
@@ -6036,7 +6097,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     turn: g.turn, kills: g.kills, regenAcc: g.regenAcc, muted: g.muted,
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
-    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: (g.depth === floorFront(g) && !g.vault ? captureFloor(g) : (g.snapCur ?? null)), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
+    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
     wallBreak: !!g.wallBreak, cracks: packCracks(g),
   };
 }
@@ -6326,28 +6387,33 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
     g.snapPrev = unpackFloorSnap(s.fp);
     g.snapCur = unpackFloorSnap(s.fc);
-    const here = (g.depth === floorFront(g) ? g.snapCur : (g.depth === floorFront(g) - 1 ? g.snapPrev : null));
-    if (here && here.d === g.depth) restoreFloor(g, here, g.depth === floorFront(g) ? TILE_UP : 2);
+    dropCampLikeSnaps(g);
+    const wantCamp = s.ar === "camp";
+    const here = wantCamp ? null : (g.depth === floorFront(g) ? g.snapCur : (g.depth === floorFront(g) - 1 ? g.snapPrev : null));
+    if (wantCamp) genCamp(g);
+    else if (here && here.d === g.depth && !snapLooksLikeCamp(here)) restoreFloor(g, here, g.depth === floorFront(g) ? TILE_UP : 2);
     else genFloor(g);
-    if (!here || here.d !== g.depth) g.cracks = unpackCracks(s.ck, g.map);
-    else if (!g.cracks || !g.cracks.some((p: number) => p > 0)) g.cracks = unpackCracks(s.ck, g.map);
+    if (!wantCamp) {
+      if (!here || here.d !== g.depth) g.cracks = unpackCracks(s.ck, g.map);
+      else if (!g.cracks || !g.cracks.some((p: number) => p > 0)) g.cracks = unpackCracks(s.ck, g.map);
+    }
     g.hero.hp = calc(g.lvl, g.eq).maxHp;
     if (typeof s.hp === "number" && isFinite(s.hp)) g.hero.hp = Math.max(1, Math.min(calc(g.lvl, g.eq).maxHp, Math.floor(s.hp)));
     if (typeof s.hx === "number" && typeof s.hy === "number" && inb(Math.floor(s.hx), Math.floor(s.hy))) {
       const x = Math.floor(s.hx), y = Math.floor(s.hy);
-      g.hero.x = x; g.hero.y = y; g.hero.ax = x; g.hero.ay = y;
+      if (!wantCamp || (g.map[y * MW + x] !== 0 && !campBlocked(g, x, y))) {
+        g.hero.x = x; g.hero.y = y; g.hero.ax = x; g.hero.ay = y;
+      }
     }
     if (typeof s.dir === "number" && isFinite(s.dir)) {
       const dir = Math.max(0, Math.min(7, Math.floor(s.dir as number)));
       g.hero.dir = dir; g.hero.face = dirFace(dir);
     }
     if (typeof s.tn === "number" && isFinite(s.tn)) g.turn = Math.max(0, Math.floor(s.tn as number));
-    if (s.ar === "camp" || s.ar === "vault") {
-      g.area = s.ar;
-      if (s.ar === "camp") { try { placeMerchant(g); } catch { /* camp extras are best-effort */ } g.seen.fill(1); g.vis.fill(1); }
-    }
+    if (s.ar === "vault") g.area = "vault";
     if (typeof s.vt === "string" && s.vt.length > 0 && s.vt.length < 600000) g.vault = s.vt;
     g.mode = "play";
+    repairCampBossHybrid(g);
     const packed = Array.isArray(s.stsh) ? s.stsh : [];
     const codeItems = packed.map((a: unknown) => unpackItem(a)).filter((it: Item | null): it is Item => !!it);
     const codeGold = typeof s.bg === "number" && isFinite(s.bg) ? Math.max(0, Math.floor(s.bg)) : (typeof s.stg === "number" && isFinite(s.stg) ? Math.max(0, Math.floor(s.stg)) : 0);
@@ -6579,6 +6645,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     placeTorches(g);
     if (g.area === "camp") { g.seen.fill(1); g.vis.fill(1); }
     migrateActFloor(g);
+    repairCampBossHybrid(g);
     if (fromBak && raw) { memSave = raw; lsSet(activeSaveKey(), raw); ssSet(activeSaveKey(), raw); idbPut(activeSaveKey(), raw); saveFlag = true; }
     optimizeEquipped(g);
     return g;
@@ -10400,6 +10467,130 @@ try {
       if (!g) return [];
       return g.parts.filter((p: Part) => p.gib).map((p: Part) => ({ x: p.x, y: p.y, vx: p.vx, vy: p.vy, life: p.life, gib: true }));
     },
+  };
+} catch { /* ignore */ }
+
+
+function inspectRun(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false, error: "no game" };
+  let up = 0, down = 0;
+  for (let i = 0; i < g.map.length; i++) {
+    if (g.map[i] === 2) down++;
+    if (g.map[i] === TILE_UP) up++;
+  }
+  const boss = livingActBoss(g);
+  return {
+    ok: true,
+    mode: g.mode, area: g.area ?? "dungeon", depth: g.depth, front: floorFront(g),
+    actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0,
+    hx: g.hero.x, hy: g.hero.y, tile: g.map[g.hero.y * MW + g.hero.x],
+    campLayout: looksLikeCampMap(g.map), hybrid: isHybridCampState(g),
+    boss: !!boss, bossName: boss ? boss.name : null,
+    enemies: g.en.filter((e: En) => e.hp > 0).length,
+    portal: g.portal ? { x: g.portal.x, y: g.portal.y, kind: portalKind(g) } : null,
+    fireAt: !!g.fireAt, restAt: !!g.restAt, stashAt: !!g.stashAt, merchant: !!g.merchant,
+    stairs: { up, down },
+    canEnterCamp: canEnterCamp(g),
+    canGoBack: canGoBack(g, true),
+    canLeaveCamp: g.area === "camp" && portalKind(g) === "proceed",
+  };
+}
+let SAVE_TEST_G: Game | null = null;
+function withSaveTest<T>(fn: () => T): T {
+  const prev = GIB_SKIP_SAVE;
+  GIB_SKIP_SAVE = true;
+  try { return fn(); } finally { GIB_SKIP_SAVE = prev; }
+}
+try {
+  (window as unknown as { __ED16_SAVE?: object }).__ED16_SAVE = {
+    inspect: (): Record<string, unknown> => inspectRun(SAVE_TEST_G),
+    decode: (code: string): Record<string, unknown> => withSaveTest(() => {
+      const g = decodeCode(String(code || ""), null);
+      SAVE_TEST_G = g;
+      return inspectRun(g);
+    }),
+    code: (): string => (SAVE_TEST_G && SAVE_TEST_G.mode === "play" ? makeCode(SAVE_TEST_G) : ""),
+    reload: (code?: string): Record<string, unknown> => withSaveTest(() => {
+      const c = code || (SAVE_TEST_G && SAVE_TEST_G.mode === "play" ? makeCode(SAVE_TEST_G) : "");
+      const g = decodeCode(c, null);
+      SAVE_TEST_G = g;
+      return inspectRun(g);
+    }),
+    leaveCamp: (): Record<string, unknown> => withSaveTest(() => {
+      if (!SAVE_TEST_G) return { ok: false, error: "no game" };
+      leaveCamp(SAVE_TEST_G);
+      return inspectRun(SAVE_TEST_G);
+    }),
+    enterCamp: (): Record<string, unknown> => withSaveTest(() => {
+      if (!SAVE_TEST_G) return { ok: false, error: "no game" };
+      enterCamp(SAVE_TEST_G);
+      return inspectRun(SAVE_TEST_G);
+    }),
+    killBoss: (): Record<string, unknown> => withSaveTest(() => {
+      const g = SAVE_TEST_G;
+      if (!g) return { ok: false, error: "no game" };
+      const b = livingActBoss(g);
+      if (b) {
+        markHitDir(g, 0, 1);
+        b.hp = 0;
+        // Use the same clear path as a normal act-boss death: open the camp portal.
+        g.en = g.en.filter((e: En) => e !== b && e.hp > 0);
+        if (!actEverCleared(g)) g.actCleared = Math.max(g.actCleared ?? 0, g.depth);
+        openCampPortal(g);
+      }
+      return inspectRun(g);
+    }),
+    setupBoss: (cleared = false): Record<string, unknown> => withSaveTest(() => {
+      const g = newGame(null);
+      g.mode = "play";
+      g.depth = 5;
+      g.front = 5;
+      g.actCleared = cleared ? 5 : 0;
+      g.area = "dungeon";
+      g.vault = null;
+      genFloor(g);
+      if (cleared) {
+        g.en = g.en.filter((e: En) => !e.act && !(e.cls === 2 && !e.hunt && !e.gob));
+        g.actCleared = 5;
+        openCampPortal(g);
+      }
+      SAVE_TEST_G = g;
+      return inspectRun(g);
+    }),
+    setupCamp: (): Record<string, unknown> => withSaveTest(() => {
+      const g = newGame(null);
+      g.mode = "play";
+      g.depth = 5;
+      g.front = 5;
+      g.actCleared = 5;
+      g.area = "dungeon";
+      genFloor(g);
+      g.en = g.en.filter((e: En) => !e.act && !(e.cls === 2 && !e.hunt && !e.gob));
+      openCampPortal(g);
+      enterCamp(g);
+      SAVE_TEST_G = g;
+      return inspectRun(g);
+    }),
+    makeHybrid: (): Record<string, unknown> => withSaveTest(() => {
+      const g = newGame(null);
+      g.mode = "play";
+      g.depth = 10;
+      g.front = 10;
+      g.actCleared = 10;
+      genCamp(g);
+      const k = 32 * MW + 28;
+      if (g.map[k] !== 0) g.map[k] = TILE_UP;
+      const used = new Set<number>([g.hero.y * MW + g.hero.x]);
+      const c = pickWalk(g, used, g.hero.x, g.hero.y, 4, 3) || [24, 24];
+      g.en = [mkActBoss(g, c[0], c[1])];
+      g.portal = { x: 13, y: 13, kind: "camp" };
+      g.fireAt = undefined; g.restAt = undefined; g.stashAt = undefined;
+      const before = inspectRun(g);
+      repairCampBossHybrid(g);
+      SAVE_TEST_G = g;
+      return { ok: true, before, after: inspectRun(g) };
+    }),
+    end: (): void => { SAVE_TEST_G = null; },
   };
 } catch { /* ignore */ }
 
