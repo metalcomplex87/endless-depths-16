@@ -116,7 +116,7 @@ interface En { id: number; x: number; y: number; ax: number; ay: number; f: numb
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[] }
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean }
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
@@ -315,7 +315,7 @@ function applyWepEl(g: Game, e: En, el: El, dmg: number, light: boolean): void {
   else if (el === "elec") {
     let nxt: En | null = null, bd = 4;
     for (const o of g.en) { if (o === e || o.hp <= 0) continue; const dd = Math.abs(o.x - e.x) + Math.abs(o.y - e.y); if (dd > 0 && dd <= bd) { bd = dd; nxt = o; } }
-    if (nxt) { const arc = Math.max(1, Math.round(dmg * 0.35)); hurtEn(g, nxt, arc); floatTxt(g, nxt.x, nxt.y - 0.2, String(arc), ELC.elec); if (nxt.hp <= 0) kill(g, nxt); }
+    if (nxt) { const arc = Math.max(1, Math.round(dmg * 0.35)); withHit({ dx: nxt.x - e.x, dy: nxt.y - e.y }, () => { hurtEn(g, nxt, arc); floatTxt(g, nxt.x, nxt.y - 0.2, String(arc), ELC.elec); if (nxt.hp <= 0) kill(g, nxt); }); }
   }
 }
 function magicWepRaw(e: En, el: El, raw: number): number {
@@ -2760,6 +2760,50 @@ function burst(g: Game, x: number, y: number, n: number, cols: string[], sp: num
     g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v - sp * 0.2, life, max: life, c: pick(cols), s: R() < 0.3 ? 2 : 1, g: grav });
   }
 }
+type HitCtx = { dx?: number; dy?: number; ox?: number; oy?: number };
+let HIT_CTX: HitCtx | null = null;
+let GIB_SKIP_SAVE = false;
+const HIT_DIR = new WeakMap<En, { dx: number; dy: number }>();
+function normDir(dx: number, dy: number): { dx: number; dy: number } | null {
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1e-6)) return null;
+  return { dx: dx / len, dy: dy / len };
+}
+function heroToEn(g: Game, e: En): { dx: number; dy: number } | null {
+  return normDir(e.x - g.hero.x, e.y - g.hero.y) || normDir((e.ax ?? e.x) - (g.hero.ax ?? g.hero.x), (e.ay ?? e.y) - (g.hero.ay ?? g.hero.y));
+}
+function withHit<T>(ctx: HitCtx, fn: () => T): T {
+  const prev = HIT_CTX;
+  HIT_CTX = ctx;
+  try { return fn(); } finally { HIT_CTX = prev; }
+}
+function markHitDir(g: Game, e: En): void {
+  const ctx = HIT_CTX;
+  let d: { dx: number; dy: number } | null = null;
+  if (ctx) {
+    if (ctx.ox !== undefined && ctx.oy !== undefined) d = normDir(e.x - ctx.ox, e.y - ctx.oy);
+    if (!d && (ctx.dx !== undefined || ctx.dy !== undefined)) d = normDir(ctx.dx ?? 0, ctx.dy ?? 0);
+  }
+  if (!d) d = heroToEn(g, e);
+  if (d) HIT_DIR.set(e, d);
+  else HIT_DIR.delete(e);
+}
+function hitDirOf(g: Game, e: En): { dx: number; dy: number } {
+  const stamped = HIT_DIR.get(e);
+  HIT_DIR.delete(e);
+  if (stamped && (stamped.dx !== 0 || stamped.dy !== 0)) return stamped;
+  return heroToEn(g, e) || ((): { dx: number; dy: number } => { const an = R() * 6.2832; return { dx: Math.cos(an), dy: Math.sin(an) }; })();
+}
+function burstGib(g: Game, x: number, y: number, n: number, cols: string[], sp: number, grav: number, dx: number, dy: number): void {
+  let dir = normDir(dx, dy);
+  if (!dir) { const an = R() * 6.2832; dir = { dx: Math.cos(an), dy: Math.sin(an) }; }
+  const base = Math.atan2(dir.dy, dir.dx);
+  const CONE = 0.65;
+  for (let i = 0; i < n && g.parts.length < 500; i++) {
+    const an = base + (R() - 0.5) * 2 * CONE, v = sp * (0.55 + R() * 0.55), life = 0.45 + R() * 0.55;
+    g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v, life, max: life, c: pick(cols), s: R() < 0.4 ? 3 : 2, g: grav, ang: R() * 6.2832, spin: (R() - 0.5) * 10, gib: true });
+  }
+}
 function floatTxt(g: Game, x: number, y: number, txt: string, c: string): void { const p = visOf(g, x, y); g.floats.push({ x: p[0] * TS + 12, y: p[1] * TS + 2, txt, c, life: 0.9 }); }
 function setBanner(g: Game, txt: string, sub: string, c: string, rar: number, t: number): void {
   if (g.banner && g.banner.t > 0.4 && g.banner.rar > rar) return;
@@ -3151,6 +3195,7 @@ function efSfx(g: Game, id: number): void { if (EFX[id] && EFX[id].s) g.sfx("mx"
 function efDmg(g: Game, e: En, raw: number, c: string, pierce: number = 0.5): number {
   if (e.hp <= 0 || !(raw > 0)) return 0;
   const dmg = Math.max(1, Math.round(dmgF(raw, e.def * pierce) * (0.9 + R() * 0.2)));
+  markHitDir(g, e);
   e.hp -= dmg; e.hit = 0.18; e.awake = true;
   floatTxt(g, e.x + (R() - 0.5) * 0.6, e.y - 0.3, String(dmg), c);
   if (e.hp <= 0) kill(g, e);
@@ -3209,7 +3254,7 @@ function efHit1(g: Game, id: number, p: number, tg: En, dmg: number, crit: boole
     } break;
     case 2: if (alive && R() < efc(0.25, p)) { tg.burn = Math.max(tg.burn, 3); tg.burnD = Math.max(tg.burnD, Math.max(1, Math.round(dmg * 0.15 * p))); burst(g, tx, ty, 8, [c, "#ffe060"], 50, -40); snd(); } break;
     case 3: if (alive && R() < efc(0.25, p)) { tg.slow = Math.max(tg.slow, 2); if (okMinor(tg) && R() < 0.15) { tg.stun = Math.max(tg.stun, 1); floatTxt(g, tg.x, tg.y - 0.6, "FROZEN", "#c8f4ff"); } burst(g, tx, ty, 8, [c, "#ffffff"], 40, 20); snd(); } break;
-    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); tg.hp = 0; kill(g, tg); snd(); } break;
+    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); markHitDir(g, tg); tg.hp = 0; kill(g, tg); snd(); } break;
     case 5: if (crit && alive && R() < efc(0.35, p)) { efDmg(g, tg, st.atk * 0.6, c); if (R() < 0.5) efDmg(g, tg, st.atk * 0.3, c); floatTxt(g, tg.x, tg.y - 0.9, "CASCADE", c); burst(g, tx, ty, 10, [c, "#ffffff"], 90, 40); snd(); } break;
     case 6: if (R() < efc(0.05, p) && g.allies.length < 4) { g.allies.push({ t: 4, el: "holy", pw: st.atk * 0.3 * p, ph: R() * 6.28 }); fxAdd(g, "ring", hx, hy, 0, 0, 0.35, c, "#ffffff", TS); floatTxt(g, h.x, h.y - 0.9, "SPIRIT", c); snd(); } break;
     case 7: if (R() < efc(0.04, p)) { for (const o of nearEnemies(g, h.x, h.y, 2)) { if (okMinor(o)) o.stun = Math.max(o.stun, 1); else o.slow = Math.max(o.slow, 2); } fxAdd(g, "ring", hx, hy, 0, 0, 0.6, c, "#ffffff", 2.5 * TS); floatTxt(g, h.x, h.y - 0.9, "TIME WARP", c); snd(); } break;
@@ -3317,9 +3362,9 @@ function efOnKill(g: Game, e: En): void {
 const efGoldMul = (g: Game, e: En | null): number => 1 + 0.2 * efP(g, 53) + (e && e.cls >= 1 ? 0.5 * efP(g, 89) : 0) + (setCounts(g.eq)[7] >= 2 ? 0.25 : 0);
 // enemy status ticks from effects (bleed, poison, doom, marks); returns true if it died
 function efEnemyTick(g: Game, e: En): boolean {
-  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; e.hp -= d; e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
-  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); e.hp -= d; floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
-  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; e.hp -= d; e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
+  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); e.hp -= d; e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
+  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); markHitDir(g, e); e.hp -= d; floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
+  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; markHitDir(g, e); e.hp -= d; e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
   if ((e.mk ?? 0) > 0) e.mk = (e.mk ?? 1) - 1;
   if (e.hp <= 0) { kill(g, e); return true; }
   return false;
@@ -3329,7 +3374,7 @@ function charmAct(g: Game, e: En): void {
   let best: En | null = null, bd = 99;
   for (const o of g.en) { if (o === e || o.hp <= 0) continue; const d = Math.abs(o.x - e.x) + Math.abs(o.y - e.y); if (d <= 4 && d < bd) { bd = d; best = o; } }
   if (!best) return;
-  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); best.hp -= d; best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }
+  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); withHit({ dx: best.x - e.x, dy: best.y - e.y }, () => { markHitDir(g, best); best.hp -= d; best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }); }
   else stepToward(g, e, best.x, best.y);
 }
 // armor effects every turn (+ the echo queue)
@@ -3454,8 +3499,7 @@ function tryPetPhoenix(g: Game, st: Stats): boolean {
   for (const e of nearEnemies(g, g.hero.x, g.hero.y, 3)) {
     if (e.hp <= 0) continue;
     const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
-    hurtEn(g, e, dmg);
-    if (e.hp <= 0) kill(g, e);
+    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); });
   }
   g.sfx("sparkle");
   return true;
@@ -3484,9 +3528,7 @@ function petStorm(g: Game, mul: number): void {
   const stunT = petAbiSec(1 * mul / RT_TICK);
   for (const e of nearEnemies(g, g.hero.x, g.hero.y, 3)) {
     const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
-    hurtEn(g, e, dmg);
-    if (e.cls === 0) e.stun = Math.max(e.stun, stunT);
-    if (e.hp <= 0) kill(g, e);
+    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg); if (e.cls === 0) e.stun = Math.max(e.stun, stunT); if (e.hp <= 0) kill(g, e); });
   }
   g.sfx("sparkle");
 }
@@ -3644,12 +3686,14 @@ function petTurn(g: Game, st: Stats): void {
   const pp = petPos(g);
   if (!g.pshots) g.pshots = [];
   if (g.pshots.length < 10) g.pshots.push({ x0: pp[0], y0: pp[1], x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.16 + bd * 0.03, pt: it.pt, rar: it.rar, hit: false });
-  hurtEn(g, best, dmg);
-  g.petDmg = (g.petDmg ?? 0) + dmg;
-  floatTxt(g, best.x + 0.3, best.y - 0.1, String(dmg), petCol(it.pt));
-  g.sfx("mx", petSnd(it.pt));
-  if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2); if (g.pshots && g.pshots.length < 10) g.pshots.push({ x0: pp[0], y0: pp[1], x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
-  if (best.hp <= 0) kill(g, best);
+  withHit({ dx: best.ax * TS + 12 - pp[0], dy: best.ay * TS + 12 - pp[1] }, () => {
+    hurtEn(g, best, dmg);
+    g.petDmg = (g.petDmg ?? 0) + dmg;
+    floatTxt(g, best.x + 0.3, best.y - 0.1, String(dmg), petCol(it.pt));
+    g.sfx("mx", petSnd(it.pt));
+    if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2); if (g.pshots && g.pshots.length < 10) g.pshots.push({ x0: pp[0], y0: pp[1], x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
+    if (best.hp <= 0) kill(g, best);
+  });
   petSnap(g);
 }
 function petShotTick(g: Game, dt: number): void {
@@ -4602,12 +4646,13 @@ function actBossPhaseFx(g: Game, e: En): void {
   if ((e.abt as number) === 3 || (e.abt as number) === 7) fxAdd(g, "vortex", cx, cy, 0, 0, 0.5, d.glow, e.pal[2], 22);
   g.flash = Math.max(g.flash, 0.3); g.flashC = d.glow;
 }
-function actBossDeathFx(g: Game, e: En): void {
+function actBossDeathFx(g: Game, e: En, dir?: { dx: number; dy: number }): void {
   bindActBoss(e);
   const d = actBossDef(e.abt as number);
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
   const n = Math.min(90 + (e.abc ?? 0) * 12, Math.max(0, 520 - g.parts.length));
-  burst(g, cx, cy, n, [d.glow, e.pal[0], e.pal[1], e.pal[3], "#ffffff"], 170, 30);
+  const gd = dir || hitDirOf(g, e);
+  burstGib(g, cx, cy, n, [d.glow, e.pal[0], e.pal[1], e.pal[3], "#ffffff"], 170, 30, gd.dx, gd.dy);
   fxAdd(g, "ring", cx, cy, 0, 0, 0.8, d.glow, "#ffffff", 44);
   g.shake = Math.max(g.shake, 11);
   g.flash = 0.55; g.flashC = d.glow;
@@ -6063,6 +6108,7 @@ function writeDurable(key: string, raw: string): boolean {
   return durable;
 }
 function saveGame(g: Game, quiet = false, force = false): boolean {
+  if (GIB_SKIP_SAVE) return false;
   if (g.mode !== "play") return false;
   lastPersistOk = false;
   lastPersistErr = "";
@@ -6822,7 +6868,18 @@ function drawPart(ctx: CanvasRenderingContext2D, p: Part, camX: number, camY: nu
   const x = p.x - camX, y = p.y - camY;
   ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
   ctx.fillStyle = p.c;
-  if (!p.k) { ctx.fillRect(Math.round(x), Math.round(y), p.s, p.s); return; }
+  if (!p.k) {
+    if (p.ang != null) {
+      ctx.save();
+      ctx.translate(x + p.s * 0.5, y + p.s * 0.5);
+      ctx.rotate(p.ang);
+      ctx.fillRect(-p.s * 0.5, -p.s * 0.5, p.s, p.s);
+      ctx.restore();
+      return;
+    }
+    ctx.fillRect(Math.round(x), Math.round(y), p.s, p.s); return;
+  }
+
   const s = Math.max(1.2, p.s);
   if (p.k === 1 || p.k === 5) {
     ctx.beginPath(); ctx.moveTo(x, y - s - 1); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s + 1); ctx.lineTo(x - s, y); ctx.closePath(); ctx.fill();
@@ -7109,8 +7166,9 @@ function kill(g: Game, e: En): void {
   g.kills++;
   petHarvestOnKill(g);
   const gm = efGoldMul(g, e);
-  if (e.act) actBossDeathFx(g, e);
-  else burst(g, cx, cy, e.cls === 2 ? 90 : 18, [e.pal[0], e.pal[1], e.pal[2]], e.cls === 2 ? 120 : 60, 80);
+  const gibDir = hitDirOf(g, e);
+  if (e.act) actBossDeathFx(g, e, gibDir);
+  else burstGib(g, cx, cy, e.cls === 2 ? 90 : 18, [e.pal[0], e.pal[1], e.pal[2]], e.cls === 2 ? 120 : 60, 80, gibDir.dx, gibDir.dy);
   floatTxt(g, e.x, e.y - 0.4, "+" + e.xp + " XP", "#b090ff");
   if (!e.act) g.sfx(e.cls === 2 ? "boss" : "kill");
   gainXp(g, Math.round(e.xp * (1 + 0.1 * efP(g, 72))));
@@ -7122,7 +7180,7 @@ function kill(g: Game, e: En): void {
     const n = Math.max(2, Math.min(6, Math.round(2 + d * 0.08 + R() * 2)));
     for (let i = 0; i < n; i++) giveDroppedGem(g, e.x, e.y, d, true);
     runAutoCombine(g);
-    burst(g, cx, cy, 90, ["#40e0ff", "#ff60e0", "#ffffff", GOLD], 140, 50);
+    burstGib(g, cx, cy, 90, ["#40e0ff", "#ff60e0", "#ffffff", GOLD], 140, 50, gibDir.dx, gibDir.dy);
     g.sfx("sparkle"); g.sfx("gob");
     setBanner(g, "GEM GOBLIN SLAIN!", n + " gemstones!", "#40e0ff", 5, 3);
     msg(g, "You caught the Gem Goblin! " + n + " gemstones", "#40e0ff");
@@ -7136,8 +7194,8 @@ function kill(g: Game, e: En): void {
       if (!inb(nx, ny) || g.map[ny * MW + nx] === 0) continue;
       g.drops.push({ x: nx, y: ny, item: null, pot: false, gold: Math.max(200, Math.round(gg * (0.04 + R() * 0.04))) });
     }
-    burst(g, cx, cy, 220, [GOLD, "#fff8c0", "#ffffff", "#ffb040", "#ffe080"], 240, 70);
-    burst(g, cx, cy - 8, 140, [GOLD, "#ffffff", "#ffe080"], 200, 90);
+    burstGib(g, cx, cy, 220, [GOLD, "#fff8c0", "#ffffff", "#ffb040", "#ffe080"], 240, 70, gibDir.dx, gibDir.dy);
+    burstGib(g, cx, cy - 8, 140, [GOLD, "#ffffff", "#ffe080"], 200, 90, gibDir.dx, gibDir.dy);
     g.sfx("coin"); g.sfx("sparkle"); g.sfx("coin");
     setBanner(g, "GOLD GOBLIN SLAIN!", "A rain of coins! +" + gg + " gold!", GOLD, 7, 3.4);
     msg(g, "You caught the Gold Goblin! +" + gg + " gold", GOLD);
@@ -7148,7 +7206,7 @@ function kill(g: Game, e: En): void {
     for (let i = 0; i < n; i++) { const r = jackpotRar(d); drop(makeItem(d + 1, r)); }
     const gg = Math.round(Math.min(6000, Math.max(2000, (2000 + d * 80) * (0.9 + R() * 0.2))));
     g.gold += gg; floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
-    burst(g, cx, cy, 70, [GOLD, "#ffffff", "#fff0a0", "#40ff60"], 130, 50);
+    burstGib(g, cx, cy, 70, [GOLD, "#ffffff", "#fff0a0", "#40ff60"], 130, 50, gibDir.dx, gibDir.dy);
     g.sfx("sparkle"); g.sfx("coin");
     if (e.hunt) {
       setBanner(g, "HUNTER SLAIN!", n + " treasures + " + gg + " gold", "#e040ff", 8, 3.2);
@@ -7314,13 +7372,22 @@ function castSpell(g: Game, sp: Spell, tg: En, st: Stats, echo: boolean): void {
       for (let yy = -sp.r; yy <= sp.r; yy++) for (let xx = -sp.r; xx <= sp.r; xx++) addGround(g, tg.x + xx, tg.y + yy, sp.el, 3 + (sp.mod === 4 ? 2 : 0), Math.max(1, Math.round(base * 0.8)));
       fxAdd(g, "cloud", tx, ty, 0, 0, 0.8, c, c2, (sp.r + 0.5) * TS);
     }
-    for (const e of targets) elHit(g, e, sp.el, base, false, sp.mod);
+    let prev: En | { x: number; y: number } = h;
+    for (const e of targets) {
+      let ctx: HitCtx;
+      if (sp.sh === "nova" || sp.sh === "blades") ctx = { ox: h.x, oy: h.y };
+      else if (sp.sh === "meteor" || sp.sh === "pillar" || sp.sh === "cloud") ctx = { ox: tg.x, oy: tg.y };
+      else if (sp.sh === "chain") { ctx = { dx: e.x - prev.x, dy: e.y - prev.y }; prev = e; }
+      else if (sp.sh === "beam" || sp.sh === "rupture") ctx = { dx: tg.x - h.x, dy: tg.y - h.y };
+      else ctx = { dx: e.x - h.x, dy: e.y - h.y };
+      withHit(ctx, () => { elHit(g, e, sp.el, base, false, sp.mod); });
+    }
   }
   if (sp.el === "holy") heal(g, st.maxHp * 0.03, true);
   if (sp.el === "elec" && sp.sh !== "chain") {
     let nx: En | null = null, bd = 99;
     for (const e of g.en) { if (e.hp <= 0 || e === tg) continue; const dd = Math.abs(e.x - tg.x) + Math.abs(e.y - tg.y); if (dd <= 3 && dd < bd) { bd = dd; nx = e; } }
-    if (nx) { fxAdd(g, "arc", tx, ty, nx.ax * TS + 12, nx.ay * TS + 12, 0.3, c, c2, 1); elHit(g, nx, "elec", base * 0.5, true, sp.mod); }
+    if (nx) { fxAdd(g, "arc", tx, ty, nx.ax * TS + 12, nx.ay * TS + 12, 0.3, c, c2, 1); withHit({ dx: nx.x - tg.x, dy: nx.y - tg.y }, () => { elHit(g, nx, "elec", base * 0.5, true, sp.mod); }); }
   }
   if (sp.el === "void") fxAdd(g, "vortex", tx, ty, 0, 0, 0.6, c, c2, 20 + inten * 6);
   burst(g, tx, ty, Math.round(10 + inten * 14), [c, c2, "#ffffff"], 80 + inten * 20, sp.el === "fire" || sp.el === "hell" || sp.el === "holy" ? -40 : 40);
@@ -7337,22 +7404,22 @@ function passiveTick(g: Game, st: Stats): void {
     const base = st.atk * p.pw, vast = p.mod === 0 ? 1 : 0, twin = p.mod === 3 ? 2 : 1, rapid = p.mod === 1;
     const c = ELC[p.el], c2 = EL2[p.el];
     if (p.ty === "orbs") {
-      for (let i = 0; i < twin; i++) { const e = randomNear(g, 2 + vast); if (e) { if (i === 0) g.sfx("mx", pasSnd(p)); const a = g.time * 2.6 + (pi + i) * 2.1; fxAdd(g, "bolt", hx + Math.cos(a) * 16, hy + Math.sin(a) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.2, c, c2, 3); elHit(g, e, p.el, base * 0.7, true, p.mod); } }
+      for (let i = 0; i < twin; i++) { const e = randomNear(g, 2 + vast); if (e) { if (i === 0) g.sfx("mx", pasSnd(p)); const a = g.time * 2.6 + (pi + i) * 2.1; fxAdd(g, "bolt", hx + Math.cos(a) * 16, hy + Math.sin(a) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.2, c, c2, 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, p.el, base * 0.7, true, p.mod); }); } }
     } else if (p.ty === "aura") {
       const ae = nearEnemies(g, h.x, h.y, 1 + vast);
-      for (const e of ae) elHit(g, e, p.el, base * 0.45 * twin, true, p.mod);
+      for (const e of ae) withHit({ ox: h.x, oy: h.y }, () => { elHit(g, e, p.el, base * 0.45 * twin, true, p.mod); });
       if (ae.length && g.turn % 3 === pi % 3) g.sfx("mx", pasSnd(p));
     } else if (p.ty === "pulse") {
-      if (g.turn % (rapid ? 2 : 4) === 0) { const r = 2 + vast; const es = nearEnemies(g, h.x, h.y, r); fxAdd(g, "ring", hx, hy, 0, 0, 0.45, c, c2, (r + 0.5) * TS); for (const e of es) elHit(g, e, p.el, base * 1.4 * twin, true, p.mod); if (es.length) g.sfx("mx", pasSnd(p)); }
+      if (g.turn % (rapid ? 2 : 4) === 0) { const r = 2 + vast; const es = nearEnemies(g, h.x, h.y, r); fxAdd(g, "ring", hx, hy, 0, 0, 0.45, c, c2, (r + 0.5) * TS); for (const e of es) withHit({ ox: h.x, oy: h.y }, () => { elHit(g, e, p.el, base * 1.4 * twin, true, p.mod); }); if (es.length) g.sfx("mx", pasSnd(p)); }
     } else if (p.ty === "halo") {
       heal(g, st.maxHp * p.pw * 0.025 * twin, false);
-      if (g.turn % (rapid ? 2 : 3) === 0) { const e = randomNear(g, 2 + vast); if (e) { fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.35, c, c2, 8); elHit(g, e, p.el, base * 0.9, true, p.mod); g.sfx("mx", pasSnd(p)); } }
+      if (g.turn % (rapid ? 2 : 3) === 0) { const e = randomNear(g, 2 + vast); if (e) { fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.35, c, c2, 8); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, p.el, base * 0.9, true, p.mod); }); g.sfx("mx", pasSnd(p)); } }
     } else if (p.ty === "field") {
       const fe = nearEnemies(g, h.x, h.y, 2 + vast);
-      for (const e of fe) { if (R() < 0.5) e.slow = Math.max(e.slow, 1); elHit(g, e, p.el, base * 0.25 * twin, true, p.mod); }
+      for (const e of fe) { if (R() < 0.5) e.slow = Math.max(e.slow, 1); withHit({ ox: h.x, oy: h.y }, () => { elHit(g, e, p.el, base * 0.25 * twin, true, p.mod); }); }
       if (fe.length && g.turn % 3 === pi % 3) g.sfx("mx", pasSnd(p));
     } else if (p.ty === "sentinel") {
-      if (g.turn % (rapid ? 1 : 2) === 0) { const e = nearestEnemy(g, 5 + vast); if (e) { fxAdd(g, "bolt", hx - 14, hy - 16, e.ax * TS + 12, e.ay * TS + 12, 0.22, c, c2, 3); elHit(g, e, p.el, base * 1.1 * twin, true, p.mod); g.sfx("mx", pasSnd(p)); } }
+      if (g.turn % (rapid ? 1 : 2) === 0) { const e = nearestEnemy(g, 5 + vast); if (e) { fxAdd(g, "bolt", hx - 14, hy - 16, e.ax * TS + 12, e.ay * TS + 12, 0.22, c, c2, 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, p.el, base * 1.1 * twin, true, p.mod); }); g.sfx("mx", pasSnd(p)); } }
     }
   });
 }
@@ -7362,6 +7429,7 @@ function worldTick(g: Game, st: Stats): void {
     gr.t--;
     const e = enemyAt(g, gr.x, gr.y);
     if (e && e.hp > 0) {
+      markHitDir(g, e);
       e.hp -= gr.dmg; e.hit = 0.15; e.awake = true;
       floatTxt(g, e.x, e.y - 0.1, String(gr.dmg), ELC[gr.el]);
       if (gr.el === "frost") e.slow = Math.max(e.slow, 1);
@@ -7374,7 +7442,7 @@ function worldTick(g: Game, st: Stats): void {
   for (const a of g.allies) {
     a.t--;
     const e = nearestEnemy(g, 5);
-    if (e) { const an = g.time * 1.8 + a.ph; fxAdd(g, "bolt", h.ax * TS + 12 + Math.cos(an) * 24, h.ay * TS + 6 + Math.sin(an) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.22, ELC[a.el], EL2[a.el], 3); elHit(g, e, a.el, a.pw * (1 + 0.4 * efP(g, 94)), true, -1); }
+    if (e) { const an = g.time * 1.8 + a.ph; fxAdd(g, "bolt", h.ax * TS + 12 + Math.cos(an) * 24, h.ay * TS + 6 + Math.sin(an) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.22, ELC[a.el], EL2[a.el], 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, a.el, a.pw * (1 + 0.4 * efP(g, 94)), true, -1); }); }
   }
   g.allies = g.allies.filter((a: Ally) => a.t > 0);
   if (g.echo.length) { const list = g.echo; g.echo = []; for (const sp of list) { const e = nearestEnemy(g, 6); if (e) castSpell(g, sp, e, st, true); } }
@@ -7647,6 +7715,7 @@ function gemTick(g: Game, st: Stats): void {
       if (e.hp <= 0) continue;
       const md = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y));
       if (md > 2 || md < 1) continue;
+      markHitDir(g, e);
       e.hp -= dmg; e.hit = 0.12; e.awake = true; e.burn = Math.max(e.burn, 1);
       floatTxt(g, e.x, e.y - 0.15, String(dmg), "#ff3030");
       if (e.hp <= 0) kill(g, e);
@@ -8383,6 +8452,7 @@ function rollAffix(e: En, lesser = false): void {
 function elMul(e: En, el: El): number { if (e.elW === el) return 1.7; if (e.elR && e.elR.includes(el)) return 0.55; return 1; }
 function hurtEn(g: Game, e: En, dmg: number): number {
   if (dmg <= 0 || e.hp <= 0) return 0;
+  markHitDir(g, e);
   const fortune = petAbiOf(g, 5);
   if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.20 * petAbiMul(fortune))));
   if ((e.shd ?? 0) > 0) {
@@ -9156,13 +9226,16 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
       const dd = tg.def * (1 - st.pierce);
       dmg = Math.max(1, Math.round(dmgF(st.atk * mul * efDmgMul(g, tg, st), dd) * (0.85 + R() * 0.3) * cm));
     }
-    dmg = hurtEn(g, tg, dmg);
-    if (st.magic && wel) applyWepEl(g, tg, wel, dmg, true);
+    const hitV = { dx: tg.x - h.x, dy: tg.y - h.y };
+    withHit(hitV, () => {
+      dmg = hurtEn(g, tg, dmg);
+    });
+    if (st.magic && wel) withHit(hitV, () => { applyWepEl(g, tg, wel, dmg, true); });
     else if (main && main.kind === "beamsword" && wel && tg.hp > 0) {
       const slice = Math.max(1, Math.round(st.atk * mul * 0.22 * elMul(tg, wel)));
-      const sd = hurtEn(g, tg, slice);
+      const sd = withHit(hitV, () => hurtEn(g, tg, slice));
       floatTxt(g, tg.x + 0.3, tg.y - 0.15, String(sd), ELC[wel]);
-      applyWepEl(g, tg, wel, sd, true);
+      withHit(hitV, () => { applyWepEl(g, tg, wel, sd, true); });
     }
     const burstC = st.magic && wel ? [ELC[wel], EL2[wel], "#ffffff"] : (main && main.kind === "beamsword" && wel ? [ELC[wel], "#ffffff", GOLD] : scrit ? ["#ff60e0", GOLD, "#ffffff"] : crit ? [GOLD, "#ffffff"] : ["#ffffff", tg.pal[1]]);
     floatTxt(g, tg.x, tg.y, (scrit ? "SUPER CRIT " : crit ? "CRIT " : "") + dmg, scrit ? "#ff60e0" : crit ? GOLD : (st.magic && wel ? ELC[wel] : "#ffffff"));
@@ -9172,7 +9245,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     const wk = main ? main.kind : "";
     if (wk === "flail" && tg.hp > 0 && R() < 0.15) { if (pushEn(g, tg, h.x, h.y, 1)) floatTxt(g, tg.x, tg.y - 0.7, "KNOCK", "#e0c080"); }
     const died = tg.hp <= 0;
-    if (died) kill(g, tg);
+    if (died) withHit(hitV, () => { kill(g, tg); });
     efOnHit(g, tg, dmg, crit || scrit, st, died);
     starOnHit(g, tg, dmg, crit || scrit, st, died);
     setOnHit(g, tg, dmg, crit || scrit, st, died);
@@ -9323,7 +9396,7 @@ function endTurn(g: Game, lockMove = true): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; } // the Hunter shrugs off slow and fear - it never stops coming
@@ -9375,7 +9448,7 @@ function rtWorld(g: Game): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; }
@@ -9609,9 +9682,11 @@ function castUlt(g: Game, _slot?: EqKey): boolean {
   for (const e of targets) {
     const dmg = ultDamage(g, st, w, e, n);
     if (dmg <= 0) continue;
-    hurtEn(g, e, dmg); e.hit = 0.4; e.awake = true;
-    floatTxt(g, e.x, e.y - 0.3, String(dmg), n >= 6 ? GOLD : u.c2);
-    if (e.hp <= 0) { killed++; kill(g, e); }
+    withHit({ ox: h.x, oy: h.y }, () => {
+      hurtEn(g, e, dmg); e.hit = 0.4; e.awake = true;
+      floatTxt(g, e.x, e.y - 0.3, String(dmg), n >= 6 ? GOLD : u.c2);
+      if (e.hp <= 0) { killed++; kill(g, e); }
+    });
   }
   setFusedUltCd(g, Date.now() + ULT_CD);
   g.flash = n >= 6 ? 1.7 : (anyG ? 0.9 : 0.55) + 0.14 * n;
@@ -10204,6 +10279,129 @@ function prisArcOverlay() {
     </span>
   );
 }
+
+
+type GibKind = "melee" | "proj" | "aoe";
+type GibHold = {
+  map: Uint8Array; vis: Uint8Array; seen: Uint8Array;
+  en: En[]; pend: En[]; drops: Drop[]; parts: Part[]; floats: Float[]; shots: Shot[];
+  pshots: PShot[] | undefined; fx: Fx[]; ground: Ground[];
+  gold: number; xp: number; lvl: number; hp: number; potions: number; kills: number;
+  msgs: { t: string; c: string }[]; banner: Banner | null; toast: number; flash: number; shake: number;
+  hero: { x: number; y: number; ax: number; ay: number; face: number; dir?: number; bump: number; bdx: number; bdy: number };
+};
+let GIB_HOLD: GibHold | null = null;
+function gibRestore(): void {
+  const g = LIVE, hld = GIB_HOLD;
+  GIB_HOLD = null;
+  GIB_SKIP_SAVE = false;
+  HIT_CTX = null;
+  if (!g || !hld) return;
+  g.map.set(hld.map); g.vis.set(hld.vis); g.seen.set(hld.seen);
+  g.en = hld.en; g.pend = hld.pend; g.drops = hld.drops;
+  g.parts = hld.parts; g.floats = hld.floats; g.shots = hld.shots;
+  g.pshots = hld.pshots; g.fx = hld.fx; g.ground = hld.ground;
+  g.gold = hld.gold; g.xp = hld.xp; g.lvl = hld.lvl; g.hero.hp = hld.hp;
+  g.potions = hld.potions; g.kills = hld.kills; g.msgs = hld.msgs;
+  g.banner = hld.banner; g.toast = hld.toast; g.flash = hld.flash; g.shake = hld.shake;
+  const h = g.hero, s = hld.hero;
+  h.x = s.x; h.y = s.y; h.ax = s.ax; h.ay = s.ay; h.face = s.face; h.dir = s.dir; h.bump = s.bump; h.bdx = s.bdx; h.bdy = s.bdy;
+  IP.camOk = false;
+  try { g.notify(); } catch { /* ignore */ }
+}
+function gibTick(dt: number): number {
+  const g = LIVE;
+  if (!g) return 0;
+  for (const p of g.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * dt; p.life -= dt; }
+  if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
+  try { g.notify(); } catch { /* ignore */ }
+  return g.parts.filter((p: Part) => p.gib).length;
+}
+function gibBegin(kind: GibKind, dx: number, dy: number, faceDx?: number, faceDy?: number): Record<string, unknown> {
+  const g = LIVE;
+  if (!g || g.mode !== "play") return { ok: false, error: "not in play" };
+  if (GIB_HOLD) gibRestore();
+  GIB_SKIP_SAVE = true;
+  GIB_HOLD = {
+    map: g.map.slice(), vis: g.vis.slice(), seen: g.seen.slice(),
+    en: g.en.slice(), pend: g.pend.slice(), drops: g.drops.slice(),
+    parts: g.parts.slice(), floats: g.floats.slice(), shots: g.shots.slice(),
+    pshots: g.pshots ? g.pshots.slice() : g.pshots, fx: g.fx.slice(), ground: g.ground.slice(),
+    gold: g.gold, xp: g.xp, lvl: g.lvl, hp: g.hero.hp, potions: g.potions, kills: g.kills,
+    msgs: g.msgs.slice(), banner: g.banner, toast: g.toast, flash: g.flash, shake: g.shake,
+    hero: { x: g.hero.x, y: g.hero.y, ax: g.hero.ax, ay: g.hero.ay, face: g.hero.face, dir: g.hero.dir, bump: g.hero.bump, bdx: g.hero.bdx, bdy: g.hero.bdy },
+  };
+  try {
+    const span = kind === "proj" ? 3 : (kind === "aoe" ? 2 : 1);
+    // Keep the hero on-camera; nudge inward only enough for the dummy to fit.
+    let hx = g.hero.x, hy = g.hero.y;
+    const margin = span + 1;
+    if (hx < margin) hx = margin;
+    if (hy < margin) hy = margin;
+    if (hx > MW - 1 - margin) hx = MW - 1 - margin;
+    if (hy > MH - 1 - margin) hy = MH - 1 - margin;
+    g.hero.x = g.hero.ax = hx;
+    g.hero.y = g.hero.ay = hy;
+    for (let y = hy - margin; y <= hy + margin; y++) for (let x = hx - margin; x <= hx + margin; x++) {
+      if (inb(x, y) && x > 0 && y > 0 && x < MW - 1 && y < MH - 1) g.map[y * MW + x] = 1;
+    }
+    IP.camOk = false;
+    const tx = hx + dx * span, ty = hy + dy * span;
+    const e = mkEnemy(g, tx, ty, 0);
+    e.hp = e.mhp = 1; e.xp = 0; e.cls = 0; e.child = true;
+    e.gob = undefined; e.hunt = undefined; e.rare = 0; e.act = undefined; e.se = undefined;
+    e.tr = []; e.ax = tx; e.ay = ty;
+    e.pal = ["#9cff4a", "#f0ffe8", "#3cff9a", "#ffffff"];
+    g.en = [e]; g.pend = []; g.parts = []; g.floats = []; g.shots = []; g.fx = [];
+    computeVis(g);
+    if (kind === "melee") {
+      const fdx = faceDx !== undefined ? faceDx : -dx;
+      const fdy = faceDy !== undefined ? faceDy : -dy;
+      if (fdx !== 0 || fdy !== 0) setHeroDir(g.hero, fdx, fdy);
+      const st = { ...calc(g.lvl, g.eq), range: 0, cleave: false, reach: 1 };
+      heroAttack(g, e, st, 1, dx, dy);
+    } else if (kind === "proj") {
+      const st = { ...calc(g.lvl, g.eq), range: 5, cleave: false };
+      heroAttack(g, e, st, span, dx, dy);
+    } else {
+      const sp: Spell = { el: "fire", sh: "nova", mod: 1, ch: 100, pw: 8, r: 6, name: "Test Nova" };
+      castSpell(g, sp, e, calc(g.lvl, g.eq), true);
+    }
+    const gibs = g.parts.filter((p: Part) => p.gib);
+    let sx = 0, sy = 0;
+    for (const q of gibs) { sx += q.vx; sy += q.vy; }
+    const n = gibs.length;
+    const mx = n ? sx / n : 0, my = n ? sy / n : 0;
+    const len = Math.hypot(mx, my), dlen = Math.hypot(dx, dy);
+    const align = (n && dlen && len) ? (mx * dx + my * dy) / (len * dlen) : 0;
+    const faceDir = heroDir(g.hero);
+    const faceV = DIR_DXY[faceDir] || [g.hero.face, 0];
+    const faceDot = faceV[0] * dx + faceV[1] * dy;
+    try { g.notify(); } catch { /* ignore */ }
+    return {
+      ok: n >= 8 && align > 0.65,
+      n, mean: { vx: mx, vy: my }, align,
+      hit: { dx, dy }, kind,
+      face: { dir: faceDir, face: g.hero.face, dx: faceV[0], dy: faceV[1], dot: faceDot },
+      dead: e.hp <= 0,
+    };
+  } catch (err) {
+    gibRestore();
+    return { ok: false, error: String(err) };
+  }
+}
+try {
+  (window as unknown as { __ED16_GIBS?: object }).__ED16_GIBS = {
+    begin: gibBegin,
+    tick: gibTick,
+    end: gibRestore,
+    particles: (): object[] => {
+      const g = LIVE;
+      if (!g) return [];
+      return g.parts.filter((p: Part) => p.gib).map((p: Part) => ({ x: p.x, y: p.y, vx: p.vx, vy: p.vy, life: p.life, gib: true }));
+    },
+  };
+} catch { /* ignore */ }
 
 export default function App() {
   const theme = useGrokTheme();
@@ -10948,7 +11146,7 @@ export default function App() {
       const h = g.hero;
       h.bump = Math.max(0, h.bump - dt * 7);
       for (const e of g.en) { e.bump = Math.max(0, e.bump - dt * 7); e.hit = Math.max(0, e.hit - dt); }
-      for (const p of g.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 0.98; p.life -= dt; }
+      for (const p of g.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * dt; p.life -= dt; }
       if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
       for (const f of g.floats) { f.y -= dt * 22; f.life -= dt; }
       if (g.floats.length) g.floats = g.floats.filter((f: Float) => f.life > 0);
