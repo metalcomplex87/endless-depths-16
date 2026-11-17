@@ -416,6 +416,11 @@ const rng32 = (seed: number): (() => number) => {
   };
 };
 const isArmor = (k: Kind): k is AK => k === "head" || k === "chest" || k === "arms" || k === "legs";
+function isPrisWep(it: Item | null | undefined): boolean {
+  if (!it || it.rar < 7) return false;
+  if (isArmor(it.kind) || it.kind === "pet" || it.kind === "gem" || it.kind === "shield") return false;
+  return !!WI[it.kind as WT];
+}
 const isTwo = (it: Item | null): boolean => !!it && !isArmor(it.kind) && it.kind !== "pet" && !!(WI[it.kind as WT] && WI[it.kind as WT].two);
 const isOneHand = (it: Item | null): boolean => !!it && !isArmor(it.kind) && it.kind !== "pet" && it.kind !== "shield" && !!(WI[it.kind as WT] && !WI[it.kind as WT].two);
 // 8-direction facing: 0=S, 1=SE, 2=E, 3=NE, 4=N, 5=NW, 6=W, 7=SW
@@ -1977,11 +1982,45 @@ function prisTint(c: string, t: number, seed: number): string {
   const L = lum < 40 ? 38 : lum < 100 ? 55 : lum < 180 ? 68 : 82;
   return hsl(hue, 100, L);
 }
+function plotPrisLine(p: Pt, x0: number, y0: number, x1: number, y1: number, c: string): void {
+  let x = Math.round(x0), y = Math.round(y0);
+  const tx = Math.round(x1), ty = Math.round(y1);
+  const dx = Math.abs(tx - x), dy = Math.abs(ty - y);
+  const sx = x < tx ? 1 : -1, sy = y < ty ? 1 : -1;
+  let err = dx - dy, steps = 0;
+  while (steps++ < 24) {
+    p(x, y, 1, 1, c);
+    if (x === tx && y === ty) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 < dx) { err += dx; y += sy; }
+  }
+}
+function drawPrisWeaponArcs(p: Pt, x: number, y: number, w: number, h: number, t: number, seed: number): void {
+  // A few jagged rainbow bolts crackling off the weapon sprite itself (capped, no backdrop).
+  const cx = x + w / 2, cy = y + h * 0.35;
+  for (let i = 0; i < 3; i++) {
+    const phase = t * 11 + seed * 0.13 + i * 2.15;
+    if (((Math.floor(phase * 4) + seed + i * 3) & 3) === 0) continue;
+    const ang = phase * 0.7 + i * 2.094;
+    let px = cx + Math.sin(phase + i) * (w * 0.25);
+    let py = cy + Math.cos(phase * 1.1 + i) * (h * 0.2);
+    const len = Math.max(4, Math.max(w, h) * (0.45 + 0.3 * Math.sin(phase * 1.7)));
+    const segs = 4;
+    for (let s = 0; s < segs; s++) {
+      const jitter = Math.sin(phase * 3.1 + s * 2.7 + i) * 2.4;
+      const nx = px + Math.cos(ang) * (len / segs) + Math.cos(ang + 1.57) * jitter;
+      const ny = py + Math.sin(ang) * (len / segs) + Math.sin(ang + 1.57) * jitter;
+      const col = s >= segs - 1 ? "#ffffff" : hsl(Math.floor(prisHue(t, seed, i * 70 + s * 40)), 100, s === 0 ? 85 : 70);
+      plotPrisLine(p, px, py, nx, ny, col);
+      px = nx; py = ny;
+    }
+  }
+}
 function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
   if (it.rar < 7) { draw(p); return; }
   const box = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 };
   const t = DRAW_T, seed = (it.seed || it.id) | 0;
-  const oc = hsl(Math.floor(prisHue(t, seed, 50)), 100, 78);
   const pp: Pt = (x: number, y: number, w: number, h: number, c: string): void => {
     if (x < box.x0) box.x0 = x;
     if (y < box.y0) box.y0 = y;
@@ -1992,8 +2031,7 @@ function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
   draw(pp);
   if (box.x1 < box.x0) return;
   const x = box.x0, y = box.y0, w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1;
-  // 1px hue-cycling outline around this piece (a tight silhouette at s=1, a clear rim on the large portrait).
-  p(x - 1, y, 1, h, oc); p(x + w, y, 1, h, oc); p(x, y - 1, w, 1, oc); p(x, y + h, w, 1, oc);
+  // Keep sparkles on the model itself. Do not draw a bounding-box rectangle.
   const n = 3;
   for (let i = 0; i < n; i++) {
     const ph = t * 3.2 + seed * 0.17 + i * 1.7;
@@ -2001,6 +2039,7 @@ function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
     const sy = Math.round(y + (Math.cos(ph * 1.31 + i) * 0.5 + 0.5) * Math.max(0, h - 1));
     p(sx, sy, 1, 1, i % 2 ? "#ffffff" : hsl(Math.floor(prisHue(t, seed, i * 80)), 100, 90));
   }
+  if (isPrisWep(it)) drawPrisWeaponArcs(p, x, y, w, h, t, seed);
 }
 function painter(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, flip: boolean, fw: number): Pt {
   return (x: number, y: number, w: number, h: number, c: string): void => {
@@ -4541,7 +4580,7 @@ function drawPet(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: num
   ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x + 3, y + 17, 10, 2);
   if (r >= 2) { ctx.globalAlpha = 0.1 + r * 0.035 + Math.sin(t * 3) * 0.04; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x + 8, y + 8, 8 + r * 1.2, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; }
   if (r >= 4) for (let i = 0; i < r - 2; i++) { const a = t * (1.5 + r * 0.2) + i * 6.283 / (r - 2); ctx.fillStyle = i % 2 ? "#ffffff" : c; ctx.fillRect(Math.round(x + 8 + Math.cos(a) * (10 + r)), Math.round(y + 8 + Math.sin(a) * (5 + r * 0.5)), 2, 2); }
-  if (r >= 6) { ctx.globalAlpha = 0.45 + 0.25 * Math.sin(t * 5); ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.strokeRect(x - 2.5, y - 2.5, 21, 21); ctx.globalAlpha = 1; }
+  if (r === 6) { ctx.globalAlpha = 0.45 + 0.25 * Math.sin(t * 5); ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.strokeRect(x - 2.5, y - 2.5, 21, 21); ctx.globalAlpha = 1; }
   ctx.save();
   if (r >= 7) {
     const flip = g.hero.face < 0;
@@ -6606,6 +6645,7 @@ function setActiveProf(id: ProfId): void {
 // The running game survives a component remount (host re-render, error recovery) even when page storage is wiped.
 let LIVE: Game | null = null;
 let installTestGame: ((g: Game | null) => void) | null = null;
+let openTestInvFn: ((on: boolean) => void) | null = null;
 function lsGet(k: string): string | null {
   try { probeStores(); return lsHandle ? lsHandle.getItem(k) : null; } catch (err) { lastLsErr = storeDeniedReason("localStorage", err); return null; }
 }
@@ -9570,28 +9610,20 @@ function ultsOf(eq: Eq): { slot: EqKey; it: Item }[] {
   }
   return o;
 }
-// Fused Prismatic ultimate: every equipped Prismatic ult, plus an equipped Prismatic
-// pet, is one button / one attack. Pets are never an ult source (no extra button).
+// Each equipped Prismatic item (armor/weapon, not pet or shield) is its own
+// ultimate with its own button and independent cooldown. Pets never grant an ult.
 const PRIS_FUSE_MUL = 2.5;
 const PRIS_FUSE_CAP = 7; // 4 armor + 2 weapons + 1 Prismatic pet
-function prisPetFuse(eq: Eq): number {
-  const it = eq.pet;
-  return (it && it.kind === "pet" && it.rar >= 7) ? 1 : 0;
-}
-function prisFuseCount(eq: Eq): number { return Math.max(0, Math.min(PRIS_FUSE_CAP, ultsOf(eq).length + prisPetFuse(eq))); }
-function prisFuseMul(n: number): number {
-  const k = Math.max(1, Math.min(PRIS_FUSE_CAP, n | 0));
-  return k <= 1 ? 1 : safePow(PRIS_FUSE_MUL, k - 1);
-}
+function prisPetFuse(_eq: Eq): number { return 0; }
+function prisFuseCount(eq: Eq): number { return ultsOf(eq).length; }
+function prisFuseMul(_n: number): number { return 1; }
 function prisUltMul(g: Game, w?: Item | null): number {
   const it = w || fusedBaseItem(g.eq);
   if (!it) return 1;
-  const n = Math.max(1, Math.min(PRIS_FUSE_CAP, prisFuseCount(g.eq)));
   let m = 1;
   if (it.rar >= 7) m *= 2.5;
-  m = safeMul(m, fusedStarMul(g.eq));
-  if (fusedGolden(g.eq) || it.golden) m = safeMul(m, 4);
-  m = safeMul(m, prisFuseMul(n));
+  m = safeMul(m, prisStarMul(it));
+  if (it.golden) m = safeMul(m, 4);
   return m;
 }
 function fmtUltMul(m: number): string {
@@ -9600,20 +9632,22 @@ function fmtUltMul(m: number): string {
   const r = Math.round(x * 10) / 10;
   return Math.abs(r - Math.round(r)) < 1e-9 ? String(Math.round(r)) : r.toFixed(1);
 }
-function ultBtnName(g: Game): string {
-  const it = fusedBaseItem(g.eq);
+function ultBtnName(g: Game, w?: Item | null): string {
+  const it = w || fusedBaseItem(g.eq);
   const u = it && it.ult !== undefined ? (ULTS[it.ult] ?? ULTS[0]) : null;
   return u ? u.n : "ULTIMATE";
 }
 function ultCdText(left: number): string {
   return Math.floor(left / 60000) + ":" + String(Math.floor((left % 60000) / 1000)).padStart(2, "0");
 }
-function ultMulText(g: Game): string {
-  const n = prisFuseCount(g.eq);
-  const mul = "x" + fmtUltMul(prisUltMul(g));
-  return n > 1 ? mul + " Prismatic fused" : mul;
+function ultMulText(g: Game, w?: Item | null): string {
+  return "x" + fmtUltMul(prisUltMul(g, w));
 }
-function ultBtnLabel(g: Game): string { return ultBtnName(g) + " " + ultMulText(g); }
+function ultBtnLabel(g: Game, w?: Item | null, left?: number): string {
+  const name = ultBtnName(g, w);
+  if (left !== undefined && left > 0) return name + " " + ultCdText(left);
+  return name + " " + ultMulText(g, w);
+}
 // Prismatic ults count as every element at once. Resolve against the target's
 // resist/weakness table by picking the single best existing magicWepRaw path
 // (highest multiplicative score: elMul, holy-vs-undead 1.75, hell 1.3).
@@ -9700,16 +9734,21 @@ function setUltCd(g: Game, slot: EqKey, t: number): void {
 }
 
 const ULT_LAYOUT = { wrapMax: 440, ar: 300 / 240, inset: 4, ultW: 96, ultH: 64, ultWSm: 80, ultHSm: 56, ultGap: 8, minTap: 48, padGap: 16 };
-function ultBtnSize(vw: number, vh: number): { w: number; h: number } {
-  if (vh < 500 || vw <= 360) return { w: ULT_LAYOUT.ultWSm, h: ULT_LAYOUT.ultHSm };
-  return { w: ULT_LAYOUT.ultW, h: ULT_LAYOUT.ultH };
+function ultBtnSize(vw: number, vh: number, n: number = 1): { w: number; h: number; gap: number; cols: number } {
+  const sm = vh < 500 || vw <= 360;
+  const many = n >= 5;
+  const mid = n >= 3;
+  if (many) return { w: sm ? 70 : 72, h: 48, gap: 3, cols: 2 };
+  if (mid) return { w: sm ? 80 : 88, h: sm ? 48 : 52, gap: 4, cols: 1 };
+  return { w: sm ? ULT_LAYOUT.ultWSm : ULT_LAYOUT.ultW, h: sm ? ULT_LAYOUT.ultHSm : ULT_LAYOUT.ultH, gap: 4, cols: 1 };
 }
 function layoutPlay(vw: number, vh: number, nUlt: number, safeBottom: number = 0): { vw: number; vh: number; wrapW: number; stageW: number; stageH: number; ctrlY: number; ults: { x: number; y: number; w: number; h: number }[]; visible: boolean; overStage: boolean; padW: number } {
   const wrapW = Math.min(ULT_LAYOUT.wrapMax, Math.max(1, vw));
   const n = Math.max(0, Math.min(6, Math.floor(nUlt)));
-  const sz = ultBtnSize(vw, vh);
-  const btnW = sz.w, btnH = sz.h;
-  const ultColH = n <= 0 ? 0 : btnH;
+  const sz = ultBtnSize(vw, vh, n);
+  const btnW = sz.w, btnH = sz.h, gap = sz.gap, cols = sz.cols;
+  const rows = n <= 0 ? 0 : Math.ceil(n / cols);
+  const ultColH = rows <= 0 ? 0 : rows * btnH + Math.max(0, rows - 1) * gap;
   const padSize = layoutMetrics(vw, vh, safeBottom).padSize;
   const padW = padSize;
   const padH = padSize;
@@ -9720,9 +9759,14 @@ function layoutPlay(vw: number, vh: number, nUlt: number, safeBottom: number = 0
   let stageW = wrapW, stageH = stageW * ULT_LAYOUT.ar;
   if (stageH > maxStageH) { stageH = maxStageH; stageW = stageH / ULT_LAYOUT.ar; }
   const ctrlY = stageH + 4;
-  const xRight = wrapW - ULT_LAYOUT.inset - btnW;
+  const colW = cols * btnW + Math.max(0, cols - 1) * gap;
+  const x0 = wrapW - ULT_LAYOUT.inset - colW;
   const ults: { x: number; y: number; w: number; h: number }[] = [];
-  if (n > 0) ults.push({ x: xRight, y: ctrlY, w: btnW, h: btnH });
+  for (let i = 0; i < n; i++) {
+    const col = cols === 2 ? (i % 2) : 0;
+    const row = cols === 2 ? Math.floor(i / 2) : i;
+    ults.push({ x: x0 + col * (btnW + gap), y: ctrlY + row * (btnH + gap), w: btnW, h: btnH });
+  }
   const overStage = ults.some((b) => b.y < stageH - 0.5);
   const farFromPad = n === 0 || ults[0].x >= padW + ULT_LAYOUT.padGap - 0.5;
   const visible = n === 0 || (farFromPad && ults.every((b) => b.x >= -0.5 && b.y >= stageH - 0.5 && b.x + b.w <= wrapW + 0.5 && b.y + b.h <= vh + 0.5 && b.w >= ULT_LAYOUT.minTap && b.h >= ULT_LAYOUT.minTap) && !overStage);
@@ -10512,13 +10556,12 @@ function openChest(g: Game, c: Chest): void {
   if (R() < (vlt ? GEM_CH_VAULT : GEM_CH_CHEST)) giveDroppedGem(g, c.x, c.y, g.depth);
 }
 
-function ultDamage(g: Game, st: Stats, w: Item, e: En, nFuse?: number): number {
-  const n = Math.max(1, Math.min(6, nFuse !== undefined ? nFuse : prisFuseCount(g.eq)));
-  let pow = st.atk * (14 + w.ilvl * 0.35) * Math.max(0.6, Math.min(1.6, g.lvl / Math.max(1, g.depth))) * (0.85 + R() * 0.3);
+function ultDamage(g: Game, st: Stats, w: Item, e: En, jitter?: number): number {
+  const jit = jitter === undefined ? (0.85 + R() * 0.3) : jitter;
+  let pow = st.atk * (14 + w.ilvl * 0.35) * Math.max(0.6, Math.min(1.6, g.lvl / Math.max(1, g.depth))) * jit;
   if (w.rar >= 7) pow *= 2.5;
-  pow = safeMul(pow, fusedStarMul(g.eq));
-  if (fusedGolden(g.eq) || w.golden) pow = safeMul(pow, 4);
-  pow = safeMul(pow, prisFuseMul(n));
+  pow = safeMul(pow, prisStarMul(w));
+  if (w.golden) pow = safeMul(pow, 4);
   pow = magicWepRaw(e, ultBestEl(e), pow);
   return Math.max(0, safeRound(pow));
 }
@@ -10580,43 +10623,42 @@ function ultFxFused(g: Game, pieces: { slot: EqKey; it: Item }[], hx: number, hy
     ultFx(g, u, hx, hy, ts, !!it.golden || anyG, n, cap, scale, i * 0.09);
   }
 }
-function castUlt(g: Game, _slot?: EqKey): boolean {
+function castUlt(g: Game, slot?: EqKey): boolean {
   if (g.mode !== "play" || uiBlocked(g) || g.paused) return false;
   const all = ultsOf(g.eq);
   if (!all.length) return false;
-  if (Date.now() < fusedUltReadyAt(g)) return false;
-  const n = prisFuseCount(g.eq);
-  const w = fusedBaseItem(g.eq);
-  if (!w || w.ult === undefined) return false;
+  const now = Date.now();
+  const pick = slot
+    ? all.find((u: { slot: EqKey; it: Item }) => u.slot === slot)
+    : all.find((u: { slot: EqKey; it: Item }) => now >= ultCd(g, u.slot));
+  if (!pick) return false;
+  if (now < ultCd(g, pick.slot)) return false;
+  const w = pick.it;
+  if (w.ult === undefined) return false;
   const u = ULTS[w.ult] ?? ULTS[0];
   const st = calc(g.lvl, g.eq);
   const h = g.hero;
-  const anyG = fusedGolden(g.eq);
   const targets = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x] === 1);
-  if (anyG || n >= 4) {
-    const reach = anyG || n >= 6 ? 16 : 14;
-    for (const e of g.en) if (e.hp > 0 && Math.abs(e.x - h.x) + Math.abs(e.y - h.y) <= reach && !targets.includes(e)) targets.push(e);
-  }
   const hx = h.ax * TS + 12, hy = h.ay * TS + 12;
-  ultFxFused(g, all, hx, hy, targets);
+  ultFx(g, u, hx, hy, targets, !!w.golden, 1, 220, 1, 0);
   let killed = 0;
   for (const e of targets) {
-    const dmg = ultDamage(g, st, w, e, n);
+    const dmg = ultDamage(g, st, w, e);
     if (dmg <= 0) continue;
     withHit({ ox: h.x, oy: h.y }, () => {
       hurtEn(g, e, dmg); e.hit = 0.4; e.awake = true;
-      floatTxt(g, e.x, e.y - 0.3, String(dmg), n >= 6 ? GOLD : u.c2);
+      floatTxt(g, e.x, e.y - 0.3, String(dmg), w.golden ? GOLD : u.c2);
       if (e.hp <= 0) { killed++; kill(g, e); }
     });
   }
-  setFusedUltCd(g, Date.now() + ultCdLen(g));
-  g.flash = n >= 6 ? 1.7 : (anyG ? 0.9 : 0.55) + 0.14 * n;
-  g.flashC = n >= 6 ? "#ffffff" : (anyG ? GOLD : ELC[u.el]);
-  g.shake = n >= 6 ? 32 : 10 + 4 * n;
-  const title = n >= 6 ? "PRISMATIC FINALE" : (n > 1 ? "FUSED ULTIMATE x" + n : (anyG ? "GOLDEN ULTIMATE: " : "ULTIMATE: ") + u.n.toUpperCase());
-  const sub = (n > 1 ? n + " Prismatics fused \u00b7 " : "") + targets.length + " struck, " + killed + " slain";
-  setBanner(g, title, sub, n >= 6 ? GOLD : (anyG ? GOLD : u.c2), 7, n >= 6 ? 4.4 : (anyG ? 3.4 : 2.6));
-  msg(g, title + (n > 1 ? " (" + u.n + ")" : " - " + u.n) + "!", n >= 6 || anyG ? GOLD : u.c2);
+  setUltCd(g, pick.slot, now + ultCdLen(g));
+  g.flash = w.golden ? 0.9 : 0.55;
+  g.flashC = w.golden ? GOLD : ELC[u.el];
+  g.shake = w.golden ? 16 : 10;
+  const title = (w.golden ? "GOLDEN ULTIMATE: " : "ULTIMATE: ") + u.n.toUpperCase();
+  const sub = targets.length + " struck, " + killed + " slain";
+  setBanner(g, title, sub, w.golden ? GOLD : u.c2, 7, w.golden ? 3.4 : 2.6);
+  msg(g, title + " - " + u.n + "!", w.golden ? GOLD : u.c2);
   g.sfx("ult", u.i);
   endTurn(g, false);
   saveGame(g);
@@ -10939,11 +10981,8 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-tb { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 .dc-cell.r7, .dc-prisbox {
   background: #1a1028;
-  animation: pr 1.4s linear infinite;
   position: relative;
   overflow: hidden;
-  border-color: #ff60a0;
-  box-shadow: 0 0 14px #ff40c0, 0 0 4px #40d0ff, inset 0 0 8px rgba(255, 64, 192, 0.35);
 }
 .dc-cell.r7 img, .dc-prisbox img { animation: hue 2s linear infinite; position: relative; z-index: 1; }
 .dc-cell.r7::before, .dc-prisbox::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
@@ -11065,14 +11104,19 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-pwr b { color: #ffd840; font-size: 15px; }
 .dc-reco { margin-top: 6px; font-size: 11px; color: #ffd840; line-height: 1.35; }
 .dc-reco .dc-dbg { color: #a8a0b8; font-size: 10px; }
-.dc-ults { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 0; flex-shrink: 0; margin-left: auto; width: 96px; }
-.dc-ults .dc-ult { width: 96px; height: 64px; min-height: 64px !important; min-width: 96px; padding: 2px 4px !important; font-size: 11px; line-height: 1.1; border-radius: 12px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.dc-ults { display: grid; justify-content: end; align-items: stretch; gap: 4px; flex-shrink: 0; margin-left: auto; width: auto; max-width: 156px; }
+.dc-ults .dc-ult { position: relative; padding: 2px 4px !important; font-size: 11px; line-height: 1.1; border-radius: 12px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .dc-ults .dc-ultn { display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .dc-ults .dc-ultm { display: block; font-size: 10px; font-weight: 700; color: #ffe080; line-height: 1.15; }
+.dc-ults .dc-ultk { position: absolute; left: 4px; top: 2px; font-size: 8px; font-weight: 800; opacity: 0.75; pointer-events: none; }
 .dc-ults .dc-ult.rdy { box-shadow: 0 0 10px #ffd840, 0 1px 6px rgba(0, 0, 0, 0.5); }
+.dc-ults.n1, .dc-ults.n2 { width: 96px; grid-template-columns: 1fr; }
+.dc-ults.n3, .dc-ults.n4 { width: 88px; grid-template-columns: 1fr; }
+.dc-ults.n5, .dc-ults.n6 { width: 148px; grid-template-columns: 1fr 1fr; }
 @media (max-width: 360px), (max-height: 500px) {
-  .dc-ults { width: 80px; }
-  .dc-ults .dc-ult { width: 80px; height: 56px; min-height: 56px !important; min-width: 80px; font-size: 10px; }
+  .dc-ults.n1, .dc-ults.n2 { width: 80px; }
+  .dc-ults.n3, .dc-ults.n4 { width: 80px; }
+  .dc-ults.n5, .dc-ults.n6 { width: 144px; }
   .dc-ults .dc-ultn { font-size: 10px; }
   .dc-ults .dc-ultm { font-size: 9px; }
 }
@@ -11757,7 +11801,9 @@ function petsHands(): Record<string, unknown> {
 function petsFuse(): Record<string, unknown> {
   const g = PETS_TEST_G;
   if (!g) return { ok: false, error: "not begun" };
-  return { ok: true, count: prisFuseCount(g.eq), ults: ultsOf(g.eq).length, pet: prisPetFuse(g.eq), mul: prisUltMul(g), hasUlt: !!fusedBaseItem(g.eq), btn: ultBtnName(g), label: ultBtnLabel(g) };
+  const all = ultsOf(g.eq);
+  const first = all[0] ? all[0].it : null;
+  return { ok: true, count: all.length, ults: all.length, buttons: all.length, pet: 0, mul: first ? prisUltMul(g, first) : 1, hasUlt: all.length > 0, btn: ultBtnName(g, first), label: ultBtnLabel(g, first), slots: all.map((u: { slot: EqKey; it: Item }) => u.slot) };
 }
 function petsRoll(n = 2000): Record<string, unknown> {
   const pab = new Array(PET_ABI_N_MAX).fill(0);
@@ -11829,7 +11875,7 @@ function petsShot(kind: "traits" | "dual"): Record<string, unknown> {
     lh: g.eq.lh ? g.eq.lh.name : null,
     rhTwo: isTwo(g.eq.rh), lhTwo: isTwo(g.eq.lh),
     atk: st.atk, dual: canDualTwo(g.eq),
-    fuse: { count: prisFuseCount(g.eq), mul: prisUltMul(g) },
+    fuse: { count: ultsOf(g.eq).length, mul: prisUltMul(g, fusedBaseItem(g.eq)), pet: 0 },
   };
 }
 try {
@@ -11848,6 +11894,301 @@ try {
     shot: petsShot,
     traits: (): object => ({ commons: PET_ABI_N, rares: PET_RARE_N.slice(1), rareChance: PET_RARE_CH }),
     end: (): void => { PETS_TEST_G = null; GIB_SKIP_SAVE = false; STAT_G = null; },
+  };
+} catch { /* ignore */ }
+
+
+let PRIS_TEST_G: Game | null = null;
+function withPrisTest<T>(fn: () => T): T {
+  const prev = GIB_SKIP_SAVE;
+  GIB_SKIP_SAVE = true;
+  try { return fn(); } finally { GIB_SKIP_SAVE = prev; }
+}
+function prisClearBanners(g: Game): void {
+  g.warn = ""; g.banner = ""; g.flash = 0; g.shake = 0;
+}
+function prisEmptyEq(): Eq { return { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null }; }
+function prisBegin(opts?: { depth?: number; lvl?: number }): Record<string, unknown> {
+  return withPrisTest(() => {
+    const g = newGame(null);
+    g.mode = "play"; g.paused = false;
+    g.lvl = (opts && opts.lvl) || 10;
+    g.depth = (opts && opts.depth) || 10;
+    g.area = "dungeon";
+    g.eq = prisEmptyEq();
+    g.bag = [];
+    g.en = [];
+    g.ultAts = {};
+    g.ultAt = 0; g.ultAtA = 0;
+    moveCarveRoom(g, MOVE_CX, MOVE_CY, 8);
+    g.hero.x = g.hero.ax = MOVE_CX; g.hero.y = g.hero.ay = MOVE_CY;
+    g.vis.fill(1); g.seen.fill(1);
+    prisClearBanners(g);
+    PRIS_TEST_G = g; STAT_G = g;
+    if (installTestGame) installTestGame(g);
+    return { ok: true, x: g.hero.x, y: g.hero.y, depth: g.depth, lvl: g.lvl };
+  });
+}
+function prisEnd(): void {
+  withPrisTest(() => {
+    PRIS_TEST_G = null; STAT_G = null;
+    if (openTestInvFn) openTestInvFn(false);
+    if (installTestGame) installTestGame(null);
+    GIB_SKIP_SAVE = false;
+  });
+}
+function prisMake(kind: "pet" | "wep" | "armor", opts?: { slot?: EqKey; wep?: Kind; armor?: AK; stars?: number; golden?: boolean; pab?: number; prt?: number; ult?: number }): Item {
+  let it: Item;
+  if (kind === "pet") {
+    it = makePet(20, 7, 20);
+    if (opts && opts.pab !== undefined) it.pab = opts.pab;
+    if (opts && opts.prt !== undefined) it.prt = opts.prt;
+    ensurePetAbi(it);
+  } else if (kind === "armor") {
+    it = makeItem(20, 7, (opts && opts.armor) || "chest", 20);
+  } else {
+    it = makeItem(20, 7, (opts && opts.wep) || "sword", 20);
+  }
+  if (opts && opts.stars !== undefined) forceStars(it, Math.max(0, Math.min(10, opts.stars)));
+  if (opts && opts.golden) it.golden = true;
+  if (opts && opts.ult !== undefined && kind !== "pet") it.ult = opts.ult;
+  return it;
+}
+function prisGive(kind: "pet" | "wep" | "armor", opts?: { slot?: EqKey; wep?: Kind; armor?: AK; stars?: number; golden?: boolean; pab?: number; prt?: number; ult?: number }): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPrisTest(() => {
+    const it = prisMake(kind, opts);
+    const slot = (opts && opts.slot) || (kind === "pet" ? "pet" : kind === "armor" ? ((opts && opts.armor) || "chest") : "rh");
+    if (kind === "pet") g.eq.pet = it;
+    else if (itemFitsSlot(it, slot, g.eq)) equipIntoSlot(g, it, slot);
+    else g.bag.push(it);
+    enforceHandRules(g);
+    const fitted = kind === "pet" ? g.eq.pet === it : g.eq[slot] === it;
+    if (g.notify) g.notify();
+    return { ok: true, kind: it.kind, slot, fitted, ult: it.ult !== undefined ? it.ult : null, stars: it.st ? it.st.length : 0, golden: !!it.golden, mul: prisUltMul(g, it), name: it.name };
+  });
+}
+function prisIsBg(d: Uint8ClampedArray, w: number, x: number, y: number): boolean {
+  const i = (y * w + x) * 4;
+  return Math.abs(d[i] - 0x14) < 12 && Math.abs(d[i + 1] - 0x10) < 12 && Math.abs(d[i + 2] - 0x1c) < 12;
+}
+function prisTight(d: Uint8ClampedArray, w: number, h: number): { x0: number; y0: number; x1: number; y1: number; n: number } | null {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1, n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (prisIsBg(d, w, x, y)) continue;
+    n++; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+  }
+  return n ? { x0, y0, x1, y1, n } : null;
+}
+function prisFill(d: Uint8ClampedArray, w: number, xa: number, ya: number, xb: number, yb: number): number {
+  let n = 0, hit = 0;
+  for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) { n++; if (!prisIsBg(d, w, x, y)) hit++; }
+  return n ? hit / n : 0;
+}
+function prisHasRect(d: Uint8ClampedArray, w: number, b: { x0: number; y0: number; x1: number; y1: number }, band: number): boolean {
+  if (b.x1 - b.x0 < band * 2 || b.y1 - b.y0 < band * 2) return false;
+  const top = prisFill(d, w, b.x0, b.y0, b.x1, b.y0 + band - 1);
+  const bot = prisFill(d, w, b.x0, b.y1 - band + 1, b.x1, b.y1);
+  const left = prisFill(d, w, b.x0, b.y0, b.x0 + band - 1, b.y1);
+  const right = prisFill(d, w, b.x1 - band + 1, b.y0, b.x1, b.y1);
+  const cTL = prisFill(d, w, b.x0, b.y0, b.x0 + band - 1, b.y0 + band - 1);
+  const cTR = prisFill(d, w, b.x1 - band + 1, b.y0, b.x1, b.y0 + band - 1);
+  const cBL = prisFill(d, w, b.x0, b.y1 - band + 1, b.x0 + band - 1, b.y1);
+  const cBR = prisFill(d, w, b.x1 - band + 1, b.y1 - band + 1, b.x1, b.y1);
+  return top > 0.72 && bot > 0.72 && left > 0.72 && right > 0.72 && cTL > 0.55 && cTR > 0.55 && cBL > 0.55 && cBR > 0.55;
+}
+function prisPaint(it: Item, t: number): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D; w: number; h: number; s: number; ox: number; oy: number } {
+  DRAW_T = t;
+  const s = 5, pad = 18;
+  const w = (32 + pad * 2) * s, h = (32 + pad * 2) * s;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#14101c";
+  ctx.fillRect(0, 0, w, h);
+  const ox = pad * s, oy = pad * s;
+  const p = painter(ctx, ox, oy, s, false, 0);
+  drawPrisPiece(p, it, (q: Pt) => {
+    if (it.kind === "pet") drawPetSprite(q, it.pt ?? 0);
+    else if (isArmor(it.kind) || it.kind === "shield") drawItem(q, it);
+    else drawWeapon(q, it);
+  });
+  return { c, ctx, w, h, s, ox, oy };
+}
+function prisInspect(kind: "pet" | "wep" | "armor"): Record<string, unknown> {
+  const it = prisMake(kind, { stars: 5 });
+  const times = [0.15, 0.37, 0.62, 0.88, 1.19, 1.44, 1.73, 2.05];
+  let anyRect = false, maxOutside = 0, shimmer = 0;
+  const frames: Record<string, unknown>[] = [];
+  let firstData: Uint8ClampedArray | null = null;
+  for (const t of times) {
+    const { ctx, w, h, s, ox, oy } = prisPaint(it, t);
+    const img = ctx.getImageData(0, 0, w, h);
+    const b = prisTight(img.data, w, h);
+    const hasRect = !!(b && prisHasRect(img.data, w, b, s));
+    anyRect = anyRect || hasRect;
+    const cx0 = ox - s, cy0 = oy - s, cx1 = ox + 16 * s, cy1 = oy + 20 * s;
+    let outside = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (prisIsBg(img.data, w, x, y)) continue;
+      if (x < cx0 || y < cy0 || x > cx1 || y > cy1) outside++;
+    }
+    if (outside > maxOutside) maxOutside = outside;
+    if (!firstData) firstData = img.data;
+    else {
+      let diff = 0;
+      for (let i = 0; i < img.data.length; i += 16) {
+        if (Math.abs(img.data[i] - firstData[i]) > 8 || Math.abs(img.data[i + 1] - firstData[i + 1]) > 8 || Math.abs(img.data[i + 2] - firstData[i + 2]) > 8) diff++;
+      }
+      if (diff > shimmer) shimmer = diff;
+    }
+    frames.push({ t, hasRect, outside, tight: b });
+  }
+  return { ok: true, kind, rar: it.rar, hasRect: anyRect, outsidePx: maxOutside, shimmer, frames: frames.length, isWep: isPrisWep(it) };
+}
+function prisPortrait(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const portrait = bagPortraitDataUrl(g.eq);
+  return { ok: true, portrait, eq: EQK.map((k: EqKey) => g.eq[k] ? { slot: k, kind: g.eq[k]!.kind, rar: g.eq[k]!.rar, name: g.eq[k]!.name } : null).filter(Boolean) };
+}
+function prisOpenInv(on: boolean): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  if (openTestInvFn) openTestInvFn(on);
+  if (g.notify) g.notify();
+  return { ok: true, inv: on };
+}
+function prisSlotCss(): Record<string, unknown> {
+  const cells = Array.from(document.querySelectorAll(".dc-cell.r7")) as HTMLElement[];
+  const styles = cells.map((el: HTMLElement) => {
+    const s = getComputedStyle(el);
+    return { shadow: s.boxShadow, anim: s.animationName, border: s.borderColor, cls: el.className };
+  });
+  const glowing = styles.filter((s) => /255,\s*64,\s*192|ff40c0|pr\b/i.test((s.shadow || "") + " " + (s.anim || "")));
+  return { ok: true, n: cells.length, styles, glowing: glowing.length };
+}
+function prisLogical(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const now = Date.now();
+  const cdLen = ultCdLen(g);
+  const all = ultsOf(g.eq);
+  const buttons = all.map((u: { slot: EqKey; it: Item }) => {
+    const left = Math.max(0, ultCd(g, u.slot) - now);
+    return { slot: u.slot, name: ultBtnName(g, u.it), mul: prisUltMul(g, u.it), mulText: ultMulText(g, u.it), left, cdText: left > 0 ? ultCdText(left) : "", ready: left <= 0, stars: u.it.st ? u.it.st.length : 0, golden: !!u.it.golden };
+  });
+  return { ok: true, n: all.length, buttons, cdLen, ultCdMs: ULT_CD, petFuse: prisPetFuse(g.eq), atk: calc(g.lvl, g.eq).atk };
+}
+function prisCast(slot?: EqKey): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPrisTest(() => {
+    const fired = castUlt(g, slot);
+    if (g.notify) g.notify();
+    return { ok: fired, fired, ...(prisLogical() as object) };
+  });
+}
+function prisSpawnBoss(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPrisTest(() => {
+    const x = Math.min(MW - 2, g.hero.x + 2), y = g.hero.y;
+    g.en = [];
+    const e = mkActBoss(g, x, y);
+    e.x = e.ax = x; e.y = e.ay = y; e.awake = true;
+    g.en.push(e);
+    g.vis[y * MW + x] = 1;
+    prisClearBanners(g);
+    return { ok: true, id: e.id, hp: e.hp, mhp: e.mhp, shd: e.shd || 0, mshd: e.mshd || 0, x: e.x, y: e.y, name: e.name, pool: (e.hp || 0) + (e.shd || 0) };
+  });
+}
+function prisDmg(slot?: EqKey): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const all = ultsOf(g.eq);
+  const pick = slot ? all.find((u: { slot: EqKey; it: Item }) => u.slot === slot) : all[0];
+  if (!pick) return { ok: false, error: "no ult" };
+  let e = g.en.find((en: En) => en.hp > 0);
+  if (!e) {
+    prisSpawnBoss();
+    e = g.en.find((en: En) => en.hp > 0);
+  }
+  if (!e) return { ok: false, error: "no enemy" };
+  const st = calc(g.lvl, g.eq);
+  const mid = ultDamage(g, st, pick.it, e, 1);
+  const lo = ultDamage(g, st, pick.it, e, 0.85);
+  const hi = ultDamage(g, st, pick.it, e, 1.15);
+  const mul = prisUltMul(g, pick.it);
+  return { ok: true, slot: pick.slot, mid, lo, hi, mul, atk: st.atk, ratio: st.atk ? mid / st.atk : 0, bossHp: e.hp, bossMhp: e.mhp, oneShotMid: mid >= e.hp };
+}
+function prisQuiet(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  g.en = []; g.fx = []; g.parts = [];
+  prisClearBanners(g);
+  g.floats = [];
+  if (g.notify) g.notify();
+  return { ok: true };
+}
+function prisBoss(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const e = g.en.find((en: En) => en.hp > 0) || g.en[0];
+  if (!e) return { ok: false, error: "no enemy" };
+  return { ok: true, id: e.id, hp: e.hp, mhp: e.mhp, shd: e.shd || 0, mshd: e.mshd || 0, name: e.name, dead: e.hp <= 0, pool: (e.hp || 0) + (e.shd || 0) };
+}
+function prisClearCds(): Record<string, unknown> {
+  const g = PRIS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  g.ultAts = {}; g.ultAt = 0; g.ultAtA = 0;
+  if (g.notify) g.notify();
+  return prisLogical();
+}
+function prisUi(): Record<string, unknown> {
+  const btns = Array.from(document.querySelectorAll("button.dc-ult")) as HTMLButtonElement[];
+  const stick = document.querySelector(".dc-stick") as HTMLElement | null;
+  const potion = document.querySelector(".dc-actions > button") as HTMLElement | null;
+  const cv = document.querySelector("canvas.dc-cv") as HTMLElement | null;
+  const br = (el: HTMLElement | null) => el ? el.getBoundingClientRect() : null;
+  const overlap = (a: DOMRect, b: DOMRect) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+  const sb = br(stick), pb = br(potion), cb = br(cv);
+  const buttons = btns.map((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      slot: el.getAttribute("data-ult-slot"),
+      ready: el.getAttribute("data-ult-ready"),
+      cd: Number(el.getAttribute("data-ult-cd") || 0),
+      label: (el.innerText || "").replace(/\s+/g, " ").trim(),
+      aria: el.getAttribute("aria-label") || "",
+      x: r.x, y: r.y, w: r.width, h: r.height,
+      overlapsStick: !!(sb && overlap(r, sb)),
+      overlapsPotion: !!(pb && overlap(r, pb)),
+      overlapsCanvas: !!(cb && overlap(r, cb)),
+    };
+  });
+  return { ok: true, n: buttons.length, buttons, vw: window.innerWidth, vh: window.innerHeight };
+}
+try {
+  (window as unknown as { __ED16_PRIS?: object }).__ED16_PRIS = {
+    begin: prisBegin,
+    end: prisEnd,
+    give: prisGive,
+    inspect: prisInspect,
+    portrait: prisPortrait,
+    openInv: prisOpenInv,
+    slotCss: prisSlotCss,
+    logical: prisLogical,
+    cast: prisCast,
+    spawnBoss: prisSpawnBoss,
+    dmg: prisDmg,
+    clearCds: prisClearCds,
+    boss: prisBoss,
+    quiet: prisQuiet,
+    ui: prisUi,
+    cdLen: (): number => (PRIS_TEST_G ? ultCdLen(PRIS_TEST_G) : ULT_CD),
+    ultCd: (): number => ULT_CD,
   };
 } catch { /* ignore */ }
 
@@ -12156,6 +12497,7 @@ export default function App() {
   const bump = (): void => setTick((n: number) => n + 1);
   const openInv = (): void => { const g = gRef.current; if (!g || g.mode !== "play") return; sortInventory(g); holdRef.current = null; setPadHeld(""); invRef.current = true; setInv(true); setNote(""); };
   const closeInv = (): void => { invRef.current = false; setInv(false); setSel(""); setNote(""); setConfirmMS(false); setConfirmSL(false); };
+  openTestInvFn = (on: boolean): void => { if (on) openInv(); else closeInv(); };
   apiRef.current = { openInv, closeInv, closeShop, closeStash };
 
   const beginNew = (): void => {
@@ -12774,6 +13116,7 @@ export default function App() {
           gRef.current = g; LIVE = g;
           setProfOpen(false); setIoOpen(false);
           setConfirmNew(false); setConfirmMS(false); setConfirmSL(false); setConfirmQuit(false);
+          invRef.current = false; setInv(false); setSel(""); setNote("");
         } else {
           const t = newGame(null);
           t.notify = bump; t.sfx = sfx;
@@ -13410,7 +13753,8 @@ export default function App() {
       }
       const dd = keyDir(ev);
       const tok = keyTok(ev);
-      const handled = !!dd || kl === " " || kl === "." || kl === "enter" || kl === "i" || kl === "b" || kl === "tab" || kl === ">" || kl === "m" || kl === "r" || kl === "n" || kl === "k";
+      const isUltDigit = kl >= "1" && kl <= "6";
+      const handled = !!dd || kl === " " || kl === "." || kl === "enter" || kl === "i" || kl === "b" || kl === "tab" || kl === ">" || kl === "m" || kl === "r" || kl === "n" || kl === "k" || isUltDigit;
       if (!handled) return;
       ev.preventDefault();
       ensureAudio();
@@ -13428,6 +13772,7 @@ export default function App() {
       else if (kl === "i" || kl === "b" || kl === "tab") api?.openInv();
       else if (kl === ">" || kl === "enter") { try { useStairsOrPortal(g); } catch (err) { console.error("Endless Depths: input error (recovered, run kept)", err); } }
       else if (kl === "r") { if (castUlt(g)) g.notify(); }
+      else if (isUltDigit) { const u = ultsOf(g.eq)[Number(kl) - 1]; if (u && castUlt(g, u.slot)) g.notify(); }
       else if (kl === "n") g.mmBig = !g.mmBig;
       else if (kl === "k") { if (g.mode === "play") toggleWallBreak(g); }
       else if (kl === "m") { mutedRef.current = !mutedRef.current; g.muted = mutedRef.current; setMuted(mutedRef.current); }
@@ -13480,6 +13825,7 @@ export default function App() {
     raf = requestAnimationFrame(frame);
     return () => {
       installTestGame = null;
+      openTestInvFn = null;
       cancelAnimationFrame(raf);
       cv.removeEventListener("pointerdown", onDown);
       cv.removeEventListener("pointermove", onMove);
@@ -13555,7 +13901,7 @@ export default function App() {
     return (
     <button key={key} className={"dc-cell" + (it ? " r" + it.rar : "") + (it && it.ult !== undefined ? " ult" : "") + (it && it.set !== undefined ? " setp" : "") + (isSel ? " sel" : "")} style={{ borderColor: it && it.golden ? GOLD : it && it.set !== undefined ? SET_COL : it && isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : it ? RC[it.rar] : "#2e2840" }} onClick={onClick} aria-label={it ? it.name : label}>
       {it ? <img src={iconURL(it)} alt="" draggable={false} /> : <span className="lb">{label}</span>}
-      {it && it.rar >= 7 ? prisArcOverlay() : null}
+      {it && isPrisWep(it) ? prisArcOverlay() : null}
       {it && it.kind === "pet" && (it.prt ?? 0) >= 1 && <span className="dc-rarepet">RARE</span>}
       {it && it.st && it.st.length > 0 && <span className="dc-stars">{"\u2605" + it.st.length}</span>}
       {it && it.sk && it.sk.length > 0 && <span className="dc-pips">{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <i key={"p" + i} style={{ background: z.g ? GEMT[z.g.typ].c : "transparent", borderColor: GEMT[z.c].c }} />)}</span>}
@@ -13781,7 +14127,7 @@ export default function App() {
                               {it.rar >= 7 ? (
                                 <div className="dc-prisbox">
                                   <img className="dc-reveal-ico" src={iconURL(it)} alt="" width={96} height={96} draggable={false} />
-                                  {prisArcOverlay()}
+                                  {isPrisWep(it) ? prisArcOverlay() : null}
                                 </div>
                               ) : (
                                 <img className="dc-reveal-ico" src={iconURL(it)} alt="" width={96} height={96} draggable={false} />
@@ -14088,23 +14434,31 @@ export default function App() {
           </div>
           <div className="dc-actions">
             <button className="dc-b" style={btn} disabled={!playing || !g || g.potions <= 0} onPointerDown={(ev: { button?: number; preventDefault?: () => void; stopPropagation?: () => void }) => { ev.preventDefault?.(); ev.stopPropagation?.(); if (!potionPointerShouldFire(ev)) return; potionPtrAt.current = performance.now(); potion(); }} onClick={() => { if (potionClickIsDuplicate(performance.now(), potionPtrAt.current)) return; potion(); }}>{"\ud83e\uddea"} Potion {g ? g.potions : 0}</button>
-          {g && g.mode === "play" && ultsOf(g.eq).length > 0 && (
-            <div className="dc-ults">
-              {(() => {
-                const left = Math.max(0, fusedUltReadyAt(g) - Date.now());
+          {g && g.mode === "play" && ultsOf(g.eq).length > 0 && (() => {
+            const list = ultsOf(g.eq);
+            const vw = typeof window !== "undefined" ? window.innerWidth : 390;
+            const vh = typeof window !== "undefined" ? window.innerHeight : 844;
+            const sz = ultBtnSize(vw, vh, list.length);
+            const cdLen = ultCdLen(g);
+            const now = Date.now();
+            return (
+            <div className={"dc-ults n" + Math.min(6, list.length)} style={{ gap: sz.gap }}>
+              {list.map((u: { slot: EqKey; it: Item }, i: number) => {
+                const left = Math.max(0, ultCd(g, u.slot) - now);
                 const ready = left <= 0;
-                const frac = 1 - left / ultCdLen(g);
-                const lab = ultBtnLabel(g);
-                const sz = ultBtnSize(typeof window !== "undefined" ? window.innerWidth : 390, typeof window !== "undefined" ? window.innerHeight : 844);
+                const frac = cdLen > 0 ? 1 - left / cdLen : 1;
+                const lab = ultBtnLabel(g, u.it, left);
                 return (
-                  <button className={"dc-b dc-ult" + (ready ? " rdy" : "")} style={{ ...btn, width: sz.w, height: sz.h, minWidth: sz.w, minHeight: sz.h, padding: 2, fontSize: 11, background: ready ? undefined : "conic-gradient(#ffd840 " + Math.round(frac * 360) + "deg, #2a2438 0deg)" }} disabled={!playing || !ready} onClick={() => { const gg = gRef.current; if (gg && castUlt(gg)) bump(); }} aria-label={lab} title={lab}>
-                    <span className="dc-ultn">{ultBtnName(g)}</span>
-                    <span className="dc-ultm">{ready ? ultMulText(g) : ultCdText(left)}</span>
+                  <button key={u.slot} type="button" className={"dc-b dc-ult" + (ready ? " rdy" : "")} data-ult-slot={u.slot} data-ult-ready={ready ? "1" : "0"} data-ult-cd={left} style={{ ...btn, width: sz.w, height: sz.h, minWidth: sz.w, minHeight: sz.h, padding: 2, fontSize: 11, background: ready ? undefined : "conic-gradient(#ffd840 " + Math.round(frac * 360) + "deg, #2a2438 0deg)" }} disabled={!playing || !ready} onClick={() => { const gg = gRef.current; if (gg && castUlt(gg, u.slot)) bump(); }} aria-label={lab} title={lab}>
+                    <span className="dc-ultk">{i + 1}</span>
+                    <span className="dc-ultn">{ultBtnName(g, u.it)}</span>
+                    <span className="dc-ultm">{ready ? ultMulText(g, u.it) : ultCdText(left)}</span>
                   </button>
                 );
-              })()}
+              })}
             </div>
-          )}
+            );
+          })()}
           </div>
         </div>
       </div>

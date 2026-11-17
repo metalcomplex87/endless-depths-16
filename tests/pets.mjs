@@ -135,18 +135,18 @@ async function main() {
     }
     record("old prismatic pets keep pab 0-5 and gain no rare", oldOk, oldBits.join(" "));
 
-    // Multiplier: one Prismatic ult weapon, then add a Prismatic pet
+    // Independent ultimates: a Prismatic pet must not add a button or multiply damage
     await api(page, "begin");
     const ult = await api(page, "give", "ult", { slot: "rh", wep: "sword" });
     const fuse0 = await api(page, "fuse");
-    record("pris weapon alone is 1 fuse piece", !!(fuse0 && fuse0.count === 1 && fuse0.ults === 1 && fuse0.pet === 0), JSON.stringify(fuse0));
+    record("pris weapon alone is 1 ult button", !!(fuse0 && fuse0.count === 1 && fuse0.ults === 1 && fuse0.pet === 0), JSON.stringify(fuse0));
     const mul0 = fuse0 && fuse0.mul;
     await api(page, "give", "pet", { slot: "pet", pab: 7, prt: 0 });
     const fuse1 = await api(page, "fuse");
     const mul1 = fuse1 && fuse1.mul;
-    record("pris pet counts as a fuse piece (cap includes pet)", !!(fuse1 && fuse1.count === 2 && fuse1.ults === 1 && fuse1.pet === 1), JSON.stringify(fuse1));
-    record("pris pet multiplies the ultimate like gear (x2.5)", !!(mul0 > 0 && mul1 > 0 && Math.abs(mul1 / mul0 - 2.5) < 0.05), `mul ${mul0} -> ${mul1} ratio=${mul1 && mul0 ? (mul1 / mul0).toFixed(3) : "?"}`);
-    record("pet is not an ult button source", !!(fuse1 && fuse1.hasUlt && fuse1.btn && fuse1.btn !== "ULTIMATE"), String(fuse1 && fuse1.btn));
+    record("pris pet does not add an ult button or fuse piece", !!(fuse1 && fuse1.count === 1 && fuse1.ults === 1 && fuse1.pet === 0), JSON.stringify(fuse1));
+    record("pris pet does not multiply ultimate damage", !!(mul0 > 0 && mul1 > 0 && Math.abs(mul1 / mul0 - 1) < 0.05), `mul ${mul0} -> ${mul1} ratio=${mul1 && mul0 ? (mul1 / mul0).toFixed(3) : "?"}`);
+    record("pet is not an ult button source", !!(fuse1 && fuse1.hasUlt && fuse1.btn && fuse1.btn !== "ULTIMATE" && (fuse1.buttons === undefined || fuse1.buttons === 1)), String(fuse1 && fuse1.btn));
 
     // Crystal Bastion / Gale Stride impact
     await api(page, "begin");
