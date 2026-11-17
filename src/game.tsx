@@ -116,7 +116,7 @@ interface En { id: number; x: number; y: number; ax: number; ay: number; f: numb
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[] }
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean }
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
@@ -126,7 +126,7 @@ interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: nu
 interface Hero { x: number; y: number; ax: number; ay: number; face: number; dir?: number; hp: number; bump: number; bdx: number; bdy: number; as?: number }
 interface FloorSnap {
   d: number; map: string; seen: string; chests: Chest[]; drops: Drop[];
-  trader: Trader | null; portal: { x: number; y: number; kind?: "vault" | "camp" | "proceed" } | null; ground: Ground[];
+  trader: Trader | null; portal: { x: number; y: number; kind?: "vault" | "camp" | "proceed"; w?: number; h?: number } | null; ground: Ground[];
   theme: number; campSpot?: { x: number; y: number }; gobT: number; floorTurn: number;
   cracks?: string;
 }
@@ -138,7 +138,7 @@ interface Game {
   flash: number; flashC: string; shake: number; regenAcc: number; kills: number; lvlFx: number; deadT: number; time: number;
   fx: Fx[]; ground: Ground[]; allies: Ally[]; echo: Spell[]; ward: number; autoEq: boolean; music: boolean;
   trader: Trader | null; merchant?: Merchant | null; shopOpen: boolean; gambOpen?: boolean; chestShop?: Partial<Record<MerchId, ChestDeal>>; chestTypes?: Record<string, ChestDeal>; chestTypeMig?: boolean; chestReveal?: { it: Item; t: number; phase: "open" | "show"; sku?: string } | null; merchSub?: { oneHand?: WT; twoHand?: WT }; ultAt: number; ultAtA?: number; ultAts?: Partial<Record<EqKey, number>>; mmBig: boolean; toast: number; saveT: number; floorTurn: number; deaths: number; spT?: number;
-  portal: { x: number; y: number; kind?: "vault" | "camp" | "proceed" } | null; vault: string | null; gobT: number; locked: boolean;
+  portal: { x: number; y: number; kind?: "vault" | "camp" | "proceed"; w?: number; h?: number } | null; vault: string | null; gobT: number; locked: boolean;
   torches: Torch[];
   area?: "dungeon" | "camp" | "vault"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
   campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number };
@@ -836,7 +836,7 @@ function scanScreenAlerts(g: Game): void {
   const prev = new Set(g.warnGobs ?? []);
   const newGobs = visGobs.filter((e: En) => !prev.has(e.id));
   const port = lootCavePortal(g);
-  const portVis = !!(port && g.vis[port.y * MW + port.x]);
+  const portVis = !!(port && portalVis(g, g.vis));
   const portKey = portVis && port ? (g.depth + ":" + port.x + "," + port.y) : "";
   const newPort = portVis && portKey !== (g.warnPort ?? "");
   g.warnGobs = visGobs.map((e: En) => e.id);
@@ -911,7 +911,7 @@ function packDrop(d: Drop): Drop {
 function captureFloor(g: Game): FloorSnap {
   const portal = g.portal && g.portal.kind === "camp" && needReturnStairs(g) === false && !actEverCleared(g)
     ? null
-    : (g.portal ? { x: g.portal.x, y: g.portal.y, kind: g.portal.kind } : null);
+    : packPortal(g.portal);
   return {
     d: g.depth,
     map: packMapBits(g.map, 2),
@@ -933,8 +933,7 @@ function unpackFloorSnap(raw: unknown): FloorSnap | null {
   const s = raw as Record<string, unknown>;
   if (typeof s.d !== "number" || !isFinite(s.d) || s.d < 1) return null;
   if (typeof s.map !== "string" || typeof s.seen !== "string") return null;
-  const portalIn = s.portal as { x: number; y: number; kind?: "vault" | "camp" | "proceed" } | undefined;
-  const portal = portalIn && typeof portalIn === "object" && inb(portalIn.x, portalIn.y) ? { x: portalIn.x, y: portalIn.y, kind: portalIn.kind } : null;
+  const portal = unpackPortal(s.portal);
   const camp = s.campSpot as { x?: number; y?: number } | undefined;
   return {
     d: Math.floor(s.d),
@@ -953,25 +952,22 @@ function unpackFloorSnap(raw: unknown): FloorSnap | null {
   };
 }
 function ensureStairTile(g: Game, tile: number, preferFar = true): { x: number; y: number } | null {
-  for (let k = 0; k < MW * MH; k++) if (g.map[k] === tile) return { x: k % MW, y: (k / MW) | 0 };
-  const hx = g.hero.x, hy = g.hero.y;
-  let best: { x: number; y: number; sc: number } | null = null;
-  for (let y = 1; y < MH - 1; y++) for (let x = 1; x < MW - 1; x++) {
-    if (g.map[y * MW + x] !== 1) continue;
-    if (x === hx && y === hy) continue;
-    const sc = preferFar ? Math.abs(x - hx) + Math.abs(y - hy) : -(Math.abs(x - hx) + Math.abs(y - hy));
-    if (!best || sc > best.sc) best = { x, y, sc };
+  expandStairsOnLoad(g);
+  for (let k = 0; k < MW * MH; k++) if (g.map[k] === tile) {
+    const x = k % MW, y = (k / MW) | 0;
+    if (inb(x, y - 1) && g.map[(y - 1) * MW + x] === tile) return { x, y: y - 1 };
+    return { x, y };
   }
-  if (!best) return null;
-  g.map[best.y * MW + best.x] = tile;
-  return { x: best.x, y: best.y };
+  const hx = g.hero.x, hy = g.hero.y;
+  const pos = placeStairPair(g, tile, preferFar ? Math.max(2, MW - 4) : hx, preferFar ? Math.max(2, MH - 4) : hy, preferFar);
+  return pos;
 }
 function placeNearTile(g: Game, tile: number): void {
   const st = ensureStairTile(g, tile, tile === 2);
   const cands: number[][] = [];
   const consider = (x: number, y: number): void => {
     if (!inb(x, y) || g.map[y * MW + x] === 0 || g.map[y * MW + x] === 2 || g.map[y * MW + x] === TILE_UP) return;
-    if (chestAt(g, x, y) || (g.portal && g.portal.x === x && g.portal.y === y) || merchAt(g, x, y)) return;
+    if (chestAt(g, x, y) || portalAt(g, x, y) || merchAt(g, x, y)) return;
     cands.push([x, y]);
   };
   if (st) {
@@ -1024,7 +1020,7 @@ function spawnMonstersOnMap(g: Game): void {
   for (const c of g.chests) used.add(c.y * MW + c.x);
   for (const d of g.drops) used.add(d.y * MW + d.x);
   if (g.merchant) used.add(g.merchant.y * MW + g.merchant.x);
-  if (g.portal) used.add(g.portal.y * MW + g.portal.x);
+  if (g.portal) markPortalUsed(g, used);
   const d = g.depth;
   const actFl = isActFloor(d);
   const cell = (ri0: number): number[] | null => {
@@ -1091,7 +1087,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.drops = snap.drops.slice();
   g.trader = null;
   g.ground = Array.isArray(snap.ground) ? snap.ground.slice() : [];
-  g.portal = snap.portal && inb(snap.portal.x, snap.portal.y) ? { x: snap.portal.x, y: snap.portal.y, kind: snap.portal.kind } : null;
+  g.portal = unpackPortal(snap.portal);
   g.campSpot = snap.campSpot;
   g.gobT = 0;
   g.floorTurn = 0;
@@ -1104,6 +1100,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   spawnMonstersOnMap(g);
   if (isActFloor(g.depth) && actEverCleared(g)) openCampPortal(g);
   if (needReturnStairs(g)) ensureStairTile(g, 2, true);
+  expandFeaturesOnLoad(g);
   computeVis(g);
   placeTorches(g);
 }
@@ -1130,6 +1127,508 @@ function priceOf(it: Item): number {
 }
 const sellVal = (it: Item): number => Math.round(salvageVal(it) * 1.5);
 const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < MW && y < MH;
+
+const PORTAL_W = 2;
+const PORTAL_H = 2;
+const STAIR_W = 1;
+const STAIR_H = 2;
+const GOB_TRAIL_CAP = 48;
+const PORTAL_FX_CAP = 64;
+const PARTS_SOFT_CAP = 380;
+type PortalSpot = { x: number; y: number; kind?: "vault" | "camp" | "proceed"; w?: number; h?: number };
+type PlaceOpt = { allowStair?: number; allowHero?: boolean; allowCorr?: boolean; ignorePortal?: boolean };
+const GOB_LAST = new Map<number, { x: number; y: number }>();
+
+function packPortal(p: PortalSpot | null | undefined): PortalSpot | null {
+  if (!p || typeof p.x !== "number" || typeof p.y !== "number" || !inb(Math.floor(p.x), Math.floor(p.y))) return null;
+  const kind = p.kind === "camp" || p.kind === "proceed" || p.kind === "vault" ? p.kind : undefined;
+  const w = typeof p.w === "number" && p.w >= 1 && p.w <= 4 ? Math.floor(p.w) : 1;
+  const h = typeof p.h === "number" && p.h >= 1 && p.h <= 4 ? Math.floor(p.h) : 1;
+  const o: PortalSpot = { x: Math.floor(p.x), y: Math.floor(p.y), kind };
+  if (w !== 1) o.w = w;
+  if (h !== 1) o.h = h;
+  return o;
+}
+function unpackPortal(raw: unknown): PortalSpot | null {
+  if (!raw || typeof raw !== "object") return null;
+  return packPortal(raw as PortalSpot);
+}
+function portalCells(p: PortalSpot | null | undefined): { x: number; y: number }[] {
+  if (!p) return [];
+  const w = Math.max(1, p.w ?? 1), h = Math.max(1, p.h ?? 1);
+  const out: { x: number; y: number }[] = [];
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
+    const x = p.x + dx, y = p.y + dy;
+    if (inb(x, y)) out.push({ x, y });
+  }
+  return out;
+}
+function portalAt(g: Game, x: number, y: number): boolean {
+  return portalCells(g.portal).some((t) => t.x === x && t.y === y);
+}
+function markPortalUsed(g: Game, used: Set<number>): void {
+  for (const t of portalCells(g.portal)) used.add(t.y * MW + t.x);
+}
+function portalVis(g: Game, vis: Uint8Array): boolean {
+  return portalCells(g.portal).some((t) => vis[t.y * MW + t.x]);
+}
+function portalSeen(g: Game, seen: Uint8Array): boolean {
+  return portalCells(g.portal).some((t) => seen[t.y * MW + t.x]);
+}
+function portalCenterPx(p: PortalSpot): { x: number; y: number; rw: number; rh: number } {
+  const w = Math.max(1, p.w ?? 1), h = Math.max(1, p.h ?? 1);
+  return { x: (p.x + w / 2) * TS, y: (p.y + h / 2) * TS, rw: (w * TS) / 2, rh: (h * TS) / 2 };
+}
+function isCorridorCell(map: Uint8Array, x: number, y: number): boolean {
+  if (!inb(x, y) || map[y * MW + x] === 0) return false;
+  const n = inb(x, y - 1) && map[(y - 1) * MW + x] !== 0;
+  const s = inb(x, y + 1) && map[(y + 1) * MW + x] !== 0;
+  const e = inb(x + 1, y) && map[y * MW + x + 1] !== 0;
+  const w = inb(x - 1, y) && map[y * MW + x - 1] !== 0;
+  const floors = (n ? 1 : 0) + (s ? 1 : 0) + (e ? 1 : 0) + (w ? 1 : 0);
+  return floors === 2 && ((n && s && !e && !w) || (e && w && !n && !s));
+}
+function cellFeatureBlocked(g: Game, x: number, y: number, opts?: PlaceOpt): boolean {
+  if (!inb(x, y) || isOuterBarrier(x, y)) return true;
+  const t = g.map[y * MW + x];
+  if (t === 0) return true;
+  if ((t === 2 || t === TILE_UP) && !(opts && opts.allowStair === t)) return true;
+  if (chestAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y)) return true;
+  if (!(opts && opts.ignorePortal) && portalAt(g, x, y)) return true;
+  if (!(opts && opts.allowHero) && g.hero && g.hero.x === x && g.hero.y === y) return true;
+  if (!(opts && opts.allowCorr) && isCorridorCell(g.map, x, y)) return true;
+  return false;
+}
+function canPlaceRect(g: Game, x: number, y: number, w: number, h: number, opts?: PlaceOpt): boolean {
+  if (!inb(x, y) || !inb(x + w - 1, y + h - 1)) return false;
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
+    if (cellFeatureBlocked(g, x + dx, y + dy, opts)) return false;
+  }
+  return true;
+}
+function findFeatureRect(g: Game, w: number, h: number, px: number, py: number, opts?: PlaceOpt, preferFar = false): { x: number; y: number } | null {
+  const tryFind = (o: PlaceOpt): { x: number; y: number } | null => {
+    let best: { x: number; y: number; sc: number } | null = null;
+    for (let y = 1; y <= MH - h - 1; y++) for (let x = 1; x <= MW - w - 1; x++) {
+      if (!canPlaceRect(g, x, y, w, h, o)) continue;
+      const cx = x + (w - 1) / 2, cy = y + (h - 1) / 2;
+      const d = Math.abs(cx - px) + Math.abs(cy - py);
+      let open = 0;
+      for (let dy = -1; dy <= h; dy++) for (let dx = -1; dx <= w; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (inb(tx, ty) && g.map[ty * MW + tx] !== 0) open++;
+      }
+      const sc = (preferFar ? d : -d) * 8 + open;
+      if (!best || sc > best.sc) best = { x, y, sc };
+    }
+    return best;
+  };
+  const base: PlaceOpt = { ...(opts || {}) };
+  return tryFind({ ...base, allowCorr: false }) || tryFind({ ...base, allowCorr: true });
+}
+function stampStairs(g: Game, x: number, y: number, tile: number): void {
+  if (inb(x, y) && g.map[y * MW + x] !== 0) g.map[y * MW + x] = tile;
+  if (inb(x, y + 1) && g.map[(y + 1) * MW + x] !== 0) g.map[(y + 1) * MW + x] = tile;
+}
+function placeStairPair(g: Game, tile: number, px: number, py: number, preferFar = false): { x: number; y: number } | null {
+  const tries = [{ x: px, y: py }, { x: px, y: py - 1 }];
+  for (const allowHero of [false, true]) {
+    for (const t of tries) {
+      if (canPlaceRect(g, t.x, t.y, STAIR_W, STAIR_H, { allowStair: tile, allowCorr: false, allowHero })) {
+        stampStairs(g, t.x, t.y, tile);
+        return t;
+      }
+    }
+  }
+  // If a 1-tile stamp already exists here, do not start a second staircase elsewhere.
+  if (inb(px, py) && g.map[py * MW + px] === tile) return { x: px, y: py };
+  const found = findFeatureRect(g, STAIR_W, STAIR_H, px, py, { allowStair: tile, allowHero: false }, preferFar)
+    || findFeatureRect(g, STAIR_W, STAIR_H, px, py, { allowStair: tile, allowHero: true }, preferFar);
+  if (found) { stampStairs(g, found.x, found.y, tile); return found; }
+  if (inb(px, py) && g.map[py * MW + px] !== 0 && !chestAt(g, px, py) && !merchAt(g, px, py) && !campBlocked(g, px, py) && !portalAt(g, px, py)) {
+    g.map[py * MW + px] = tile;
+    return { x: px, y: py };
+  }
+  return null;
+}
+function placePortalNear(g: Game, kind: "vault" | "camp" | "proceed" | undefined, px: number, py: number): void {
+  const origins: { x: number; y: number }[] = [];
+  for (const dy of [0, -1]) for (const dx of [0, -1]) origins.push({ x: px + dx, y: py + dy });
+  for (const allowHero of [false, true]) {
+    for (const o of origins) {
+      if (canPlaceRect(g, o.x, o.y, PORTAL_W, PORTAL_H, { allowCorr: false, allowHero })) {
+        g.portal = { x: o.x, y: o.y, kind, w: PORTAL_W, h: PORTAL_H };
+        return;
+      }
+    }
+  }
+  const found = findFeatureRect(g, PORTAL_W, PORTAL_H, px, py, { allowHero: false })
+    || findFeatureRect(g, PORTAL_W, PORTAL_H, px, py, { allowHero: true });
+  if (found) { g.portal = { x: found.x, y: found.y, kind, w: PORTAL_W, h: PORTAL_H }; return; }
+  if (inb(px, py) && g.map[py * MW + px] !== 0) g.portal = { x: px, y: py, kind };
+}
+function expandPortalOnLoad(g: Game): void {
+  const p = g.portal;
+  if (!p) return;
+  const w = Math.max(1, p.w ?? 1), h = Math.max(1, p.h ?? 1);
+  if (w >= PORTAL_W && h >= PORTAL_H) return;
+  const cells = portalCells(p);
+  const origins: { x: number; y: number }[] = [{ x: p.x, y: p.y }];
+  for (const c of cells) {
+    origins.push({ x: c.x, y: c.y }, { x: c.x - 1, y: c.y }, { x: c.x, y: c.y - 1 }, { x: c.x - 1, y: c.y - 1 });
+  }
+  const seen = new Set<string>();
+  for (const allowCorr of [false, true]) {
+    for (const o of origins) {
+      const key = o.x + "," + o.y + "," + allowCorr;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const covers = cells.every((c) => c.x >= o.x && c.x < o.x + PORTAL_W && c.y >= o.y && c.y < o.y + PORTAL_H);
+      if (!covers) continue;
+      if (canPlaceRect(g, o.x, o.y, PORTAL_W, PORTAL_H, { ignorePortal: true, allowHero: true, allowCorr })) {
+        g.portal = { x: o.x, y: o.y, kind: p.kind, w: PORTAL_W, h: PORTAL_H };
+        return;
+      }
+    }
+  }
+}
+function expandStairsOnLoad(g: Game): void {
+  for (const tile of [2, TILE_UP]) {
+    const list: { x: number; y: number }[] = [];
+    for (let k = 0; k < MW * MH; k++) if (g.map[k] === tile) list.push({ x: k % MW, y: (k / MW) | 0 });
+    const paired = new Set<number>();
+    for (const s of list) {
+      const hasB = list.some((o) => o.x === s.x && o.y === s.y + 1);
+      const hasA = list.some((o) => o.x === s.x && o.y === s.y - 1);
+      if (hasB || hasA) paired.add(s.y * MW + s.x);
+    }
+    const free = (x: number, y: number, allowCorr: boolean): boolean => {
+      if (!inb(x, y) || isOuterBarrier(x, y) || g.map[y * MW + x] !== 1) return false;
+      if (chestAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y) || portalAt(g, x, y)) return false;
+      if (!allowCorr && isCorridorCell(g.map, x, y)) return false;
+      return true;
+    };
+    for (const s of list) {
+      if (paired.has(s.y * MW + s.x)) continue;
+      let placed = false;
+      for (const allowCorr of [false, true]) {
+        if (free(s.x, s.y + 1, allowCorr)) { g.map[(s.y + 1) * MW + s.x] = tile; placed = true; break; }
+        if (free(s.x, s.y - 1, allowCorr)) { g.map[(s.y - 1) * MW + s.x] = tile; placed = true; break; }
+      }
+      if (placed) { /* partner added; leave isolated tiles alone if no room */ }
+    }
+  }
+}
+function expandFeaturesOnLoad(g: Game): void {
+  expandStairsOnLoad(g);
+  expandPortalOnLoad(g);
+}
+function nudgeHeroOffFeatures(g: Game): void {
+  const hx = g.hero.x, hy = g.hero.y;
+  const occ = (x: number, y: number): boolean => portalAt(g, x, y) || g.map[y * MW + x] === 2 || g.map[y * MW + x] === TILE_UP;
+  if (!occ(hx, hy)) return;
+  const dirs = [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+  for (const [dx, dy] of dirs) {
+    const x = hx + dx, y = hy + dy;
+    if (!inb(x, y) || g.map[y * MW + x] === 0 || isOuterBarrier(x, y)) continue;
+    if (occ(x, y) || chestAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y)) continue;
+    g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y;
+    return;
+  }
+}
+function stairDrawKind(map: Uint8Array, x: number, y: number): "pair-top" | "pair-bot" | "single" | "none" {
+  const v = map[y * MW + x];
+  if (v !== 2 && v !== TILE_UP) return "none";
+  const above = inb(x, y - 1) && map[(y - 1) * MW + x] === v;
+  const below = inb(x, y + 1) && map[(y + 1) * MW + x] === v;
+  if (below && !above) return "pair-top";
+  if (above) {
+    const above2 = inb(x, y - 2) && map[(y - 2) * MW + x] === v;
+    if (!above2) return "pair-bot";
+    return "single";
+  }
+  return "single";
+}
+function stairPairs(g: Game): { tile: number; x: number; y: number; h: number }[] {
+  const out: { tile: number; x: number; y: number; h: number }[] = [];
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    const k = stairDrawKind(g.map, x, y);
+    if (k === "pair-top") out.push({ tile: g.map[y * MW + x], x, y, h: 2 });
+    else if (k === "single" && (g.map[y * MW + x] === 2 || g.map[y * MW + x] === TILE_UP)) out.push({ tile: g.map[y * MW + x], x, y, h: 1 });
+  }
+  return out;
+}
+function paintStair(ctx: CanvasRenderingContext2D, dir: "down" | "up", tiles: 1 | 2, floor: string): void {
+  const H = tiles === 2 ? 48 : 24;
+  const p = (x: number, y: number, w: number, h: number, c: string): void => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+  p(0, 0, 24, H, floor);
+  if (dir === "down") {
+    if (tiles === 2) {
+      p(3, 3, 18, 42, "#6e665c");
+      p(4, 4, 16, 40, "#3c382e");
+      p(3, 3, 18, 1, "#948c80");
+      p(3, 3, 1, 42, "#948c80");
+      p(6, 6, 12, 36, "#0a0810");
+      p(7, 7, 10, 8, "#1a1418");
+      p(7, 15, 10, 10, "#120e14");
+      p(7, 25, 10, 16, "#08060c");
+      p(6, 6, 1, 36, "#241c18");
+      p(17, 6, 1, 36, "#140e10");
+      p(4, 4, 3, 3, "#f0c840");
+      p(17, 4, 3, 3, "#f0c840");
+      p(5, 5, 1, 1, "#fff0a0");
+      p(18, 5, 1, 1, "#fff0a0");
+      p(4, 22, 2, 2, "#c09020");
+      p(18, 22, 2, 2, "#c09020");
+      p(8, 7, 2, 32, "#8a6a40");
+      p(14, 7, 2, 32, "#8a6a40");
+      p(8, 7, 1, 32, "#d4b07a");
+      p(14, 7, 1, 32, "#d4b07a");
+      const rungs = [10, 15, 20, 25, 30, 35];
+      for (let i = 0; i < rungs.length; i++) {
+        const y = rungs[i];
+        const col = i < 3 ? "#e8c888" : i < 5 ? "#8a6840" : "#4a3828";
+        p(8, y, 8, 2, col);
+        if (i < 3) p(9, y, 6, 1, "#fff0c0");
+      }
+      p(8, 36, 2, 6, "#3a2a18");
+      p(14, 36, 2, 6, "#3a2a18");
+      p(7, 40, 10, 3, "#000000");
+      p(10, 6, 4, 1, "#f0c840");
+      p(11, 7, 2, 1, "#f0c840");
+    } else {
+      p(3, 3, 18, 18, "#6e665c");
+      p(4, 4, 16, 16, "#3c382e");
+      p(3, 3, 18, 1, "#948c80");
+      p(6, 6, 12, 15, "#0a0810");
+      p(7, 7, 10, 6, "#1a1418");
+      p(4, 4, 3, 3, "#f0c840");
+      p(17, 4, 3, 3, "#f0c840");
+      p(8, 7, 2, 12, "#8a6a40");
+      p(14, 7, 2, 12, "#8a6a40");
+      p(8, 7, 1, 12, "#d4b07a");
+      p(14, 7, 1, 12, "#d4b07a");
+      p(8, 9, 8, 2, "#e8c888");
+      p(8, 13, 8, 2, "#a08050");
+      p(8, 17, 8, 2, "#4a3828");
+      p(10, 6, 4, 1, "#f0c840");
+      p(11, 7, 2, 1, "#f0c840");
+    }
+  } else if (tiles === 2) {
+    p(3, 5, 18, 40, "#5e6a68");
+    p(4, 6, 16, 38, "#2c3838");
+    p(3, 5, 18, 1, "#90a8a0");
+    p(3, 5, 1, 40, "#90a8a0");
+    p(6, 16, 12, 26, "#08141c");
+    p(7, 17, 10, 10, "#145060");
+    p(7, 27, 10, 10, "#0c2838");
+    p(7, 37, 10, 5, "#060e14");
+    p(7, 16, 10, 3, "#40c8c0");
+    p(8, 15, 8, 2, "#80ffe0");
+    p(4, 40, 3, 3, "#f0c840");
+    p(17, 40, 3, 3, "#f0c840");
+    p(5, 41, 1, 1, "#fff0a0");
+    p(18, 41, 1, 1, "#fff0a0");
+    p(8, 2, 2, 40, "#6a9088");
+    p(14, 2, 2, 40, "#6a9088");
+    p(8, 2, 1, 40, "#d0fff4");
+    p(14, 2, 1, 40, "#d0fff4");
+    const rungs = [6, 11, 16, 21, 26, 31, 36];
+    for (let i = 0; i < rungs.length; i++) {
+      const y = rungs[i];
+      const col = i < 3 ? "#e8fff8" : i < 5 ? "#90d8c8" : "#4a786c";
+      p(8, y, 8, 2, col);
+    }
+    p(10, 1, 4, 2, "#80ffd0");
+    p(9, 3, 6, 2, "#80ffd0");
+    p(8, 5, 8, 2, "#80ffd0");
+    p(11, 0, 2, 2, "#e8fff8");
+  } else {
+    p(3, 3, 18, 18, "#5e6a68");
+    p(4, 4, 16, 16, "#2c3838");
+    p(3, 3, 18, 1, "#90a8a0");
+    p(6, 12, 12, 9, "#08141c");
+    p(7, 12, 10, 4, "#145060");
+    p(4, 17, 3, 3, "#f0c840");
+    p(17, 17, 3, 3, "#f0c840");
+    p(8, 4, 2, 16, "#6a9088");
+    p(14, 4, 2, 16, "#6a9088");
+    p(8, 4, 1, 16, "#d0fff4");
+    p(14, 4, 1, 16, "#d0fff4");
+    p(8, 8, 8, 2, "#e8fff8");
+    p(8, 13, 8, 2, "#90d8c8");
+    p(8, 18, 8, 2, "#4a786c");
+    p(10, 1, 4, 2, "#80ffd0");
+    p(9, 3, 6, 2, "#80ffd0");
+    p(11, 0, 2, 1, "#e8fff8");
+  }
+}
+function countTaggedParts(g: Game, key: "trail" | "pfx"): number {
+  let n = 0;
+  for (const p of g.parts) if ((key === "trail" && p.trail) || (key === "pfx" && p.pfx)) n++;
+  return n;
+}
+function gobTrailTick(g: Game, _dt: number): void {
+  const live = new Set<number>();
+  let trails = countTaggedParts(g, "trail");
+  for (const e of g.en) {
+    if (!e.gob || e.hp <= 0) continue;
+    live.add(e.id);
+    const x = e.ax * TS + 12, y = e.ay * TS + 14;
+    const prev = GOB_LAST.get(e.id);
+    if (prev) {
+      const dist = Math.hypot(x - prev.x, y - prev.y);
+      if (dist > 1.2 && trails < GOB_TRAIL_CAP && g.parts.length < PARTS_SOFT_CAP) {
+        const n = Math.min(2, GOB_TRAIL_CAP - trails, dist > 4 ? 2 : 1);
+        const cols = gobSpark(e.gob);
+        for (let i = 0; i < n; i++) {
+          const u = (i + 1) / (n + 1);
+          g.parts.push({
+            x: prev.x + (x - prev.x) * u + (R() - 0.5) * 3,
+            y: prev.y + (y - prev.y) * u + (R() - 0.5) * 3,
+            vx: (R() - 0.5) * 16, vy: -8 - R() * 18,
+            life: 0.7 + R() * 0.5, max: 1.2, c: pick(cols), s: 1.2 + R() * 1.6, g: 4, k: 1, trail: true,
+          });
+          trails++;
+        }
+      }
+    }
+    GOB_LAST.set(e.id, { x, y });
+  }
+  for (const id of [...GOB_LAST.keys()]) if (!live.has(id)) GOB_LAST.delete(id);
+}
+function portalFxTick(g: Game, dt: number): void {
+  const p = lootCavePortal(g);
+  if (!p || !portalVis(g, g.vis)) return;
+  let n = countTaggedParts(g, "pfx");
+  if (n >= PORTAL_FX_CAP || g.parts.length >= PARTS_SOFT_CAP) return;
+  if (R() > dt * 18) return;
+  const c = portalCenterPx(p);
+  const hues = ["#ffd040", "#ff80e0", "#80ffff", "#a0ff60", "#ffffff", "#ffc078"];
+  const ang = R() * 6.2832;
+  const rad = Math.max(c.rw, c.rh) * (0.35 + R() * 0.7);
+  g.parts.push({
+    x: c.x + Math.cos(ang) * rad, y: c.y + Math.sin(ang) * rad,
+    vx: Math.cos(ang + 1.2) * 14, vy: Math.sin(ang + 1.2) * 14 - 6,
+    life: 0.4 + R() * 0.45, max: 0.85, c: pick(hues), s: 1.2 + R() * 1.6, g: -4, k: 1, pfx: true,
+  });
+}
+function hexRgba(c: string, a: number): string {
+  const n = c.startsWith("#") ? c.slice(1) : c;
+  const r = n.length === 3 ? parseInt(n[0] + n[0], 16) : parseInt(n.slice(0, 2), 16);
+  const g = n.length === 3 ? parseInt(n[1] + n[1], 16) : parseInt(n.slice(2, 4), 16);
+  const b = n.length === 3 ? parseInt(n[2] + n[2], 16) : parseInt(n.slice(4, 6), 16);
+  return "rgba(" + r + "," + g + "," + b + "," + Math.max(0, Math.min(1, a)) + ")";
+}
+function drawPortalGfx(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const p = g.portal;
+  if (!p || !portalVis(g, g.vis)) return;
+  const c = portalCenterPx(p);
+  const cx = c.x - camX, cy = c.y - camY;
+  const rad = Math.max(6, Math.min(c.rw, c.rh) - 2);
+  const loot = !!lootCavePortal(g);
+  const pc = portalHue(g);
+  ctx.save();
+  if (loot) {
+    const pulse = 0.62 + 0.38 * Math.sin(t * 4.2);
+    const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad * 1.55 * pulse);
+    glow.addColorStop(0, hexRgba("#fff6c0", 0.7));
+    glow.addColorStop(0.25, hexRgba("#ffd040", 0.45));
+    glow.addColorStop(0.55, hexRgba("#ff80e0", 0.22));
+    glow.addColorStop(1, hexRgba("#40ffa0", 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(cx, cy, rad * 1.55 * pulse, 0, 6.2832); ctx.fill();
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(t * 0.45);
+    for (let i = 0; i < 8; i++) {
+      ctx.rotate(0.7854);
+      const grd = ctx.createLinearGradient(0, 0, 0, -rad * 1.45);
+      grd.addColorStop(0, hexRgba("#ffe890", 0.5));
+      grd.addColorStop(0.45, hexRgba("#ff80c0", 0.18));
+      grd.addColorStop(1, hexRgba("#ffffff", 0));
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.moveTo(-1.2, 0); ctx.lineTo(1.2, 0); ctx.lineTo(5, -rad * 1.4); ctx.lineTo(-5, -rad * 1.4);
+      ctx.fill();
+    }
+    ctx.restore();
+    const core = ctx.createRadialGradient(cx, cy, 1, cx, cy, rad * 0.55);
+    core.addColorStop(0, hexRgba("#ffffff", 0.95));
+    core.addColorStop(0.4, hexRgba("#ffe070", 0.7));
+    core.addColorStop(1, hexRgba("#c060ff", 0.08));
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(cx, cy, rad * 0.55, 0, 6.2832); ctx.fill();
+    ctx.lineWidth = 2.4;
+    for (let i = 0; i < 6; i++) {
+      const hue = (t * 90 + i * 60) % 360;
+      ctx.strokeStyle = "hsl(" + hue + ",100%,65%)";
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad * (0.38 + i * 0.1), t * 2.3 + i * 0.9, t * 2.3 + i * 0.9 + 2.3);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (let i = 0; i < 10; i++) {
+      const an = t * 2.4 + i * 0.6283;
+      const rr = rad * (0.52 + 0.32 * Math.sin(t * 3.1 + i));
+      ctx.fillStyle = ["#ffffff", "#ffd040", "#ff80e0", "#80ffff", "#a0ff60"][i % 5];
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 5 + i);
+      ctx.fillRect(Math.round(cx + Math.cos(an) * rr - 1), Math.round(cy + Math.sin(an) * rr - 1), 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.globalAlpha = 0.2 + 0.1 * Math.sin(t * 4);
+    ctx.fillStyle = pc;
+    ctx.beginPath(); ctx.arc(cx, cy, rad + 4, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 1;
+    const core = ctx.createRadialGradient(cx, cy, 1, cx, cy, rad * 0.7);
+    core.addColorStop(0, hexRgba("#ffffff", 0.55));
+    core.addColorStop(0.5, hexRgba(pc, 0.35));
+    core.addColorStop(1, hexRgba(pc, 0));
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(cx, cy, rad * 0.7, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = pc;
+    ctx.lineWidth = Math.max(2, rad / 10);
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad * (0.38 + i * 0.18), t * 2 + i, t * 2 + i + 2.2);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = loot ? "#fff8d0" : "#ffffff";
+  ctx.font = (rad >= 16 ? "7px" : "5px") + " monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "#000000";
+  ctx.shadowBlur = loot ? 4 : 0;
+  ctx.fillText(portalLabel(g), cx, cy - rad + (rad >= 16 ? 6 : 4));
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+function drawGoblinAura(ctx: CanvasRenderingContext2D, e: En, sx: number, sy: number, t: number): void {
+  if (!e.gob) return;
+  const pal = gobPal(e.gob);
+  const pulse = 0.55 + 0.45 * Math.sin(t * 5.2 + e.id);
+  const cx = sx + 12, cy = sy + 14;
+  ctx.save();
+  const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 16 + pulse * 4);
+  glow.addColorStop(0, hexRgba(pal[2] || pal[0], 0.18 + 0.16 * pulse));
+  glow.addColorStop(0.5, hexRgba(pal[0], 0.2 * pulse));
+  glow.addColorStop(1, hexRgba(pal[0], 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(cx, cy, 16 + pulse * 4, 0, 6.2832); ctx.fill();
+  ctx.strokeStyle = pal[0];
+  ctx.lineWidth = 1.6;
+  ctx.globalAlpha = 0.45 + 0.4 * pulse;
+  ctx.beginPath(); ctx.arc(cx, cy, 10 + pulse * 2, t * 3, t * 3 + 2.1); ctx.stroke();
+  ctx.strokeStyle = pal[1] || pal[0];
+  ctx.beginPath(); ctx.arc(cx, cy, 13 + pulse * 2, -t * 2.4, -t * 2.4 + 1.8); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+
 
 function rarF(f: number, d: number = 1): number {
   const lift = 1 + RAR_F_LIFT * rampT(d);
@@ -2623,25 +3122,21 @@ function makeTiles(th: number, shift: number = 0): HTMLCanvasElement[] {
     x.fillStyle = "rgba(255,255,255,0.12)"; x.fillRect(0, 5, TS, 1);
     x.fillStyle = "rgba(0,0,0,0.35)"; x.fillRect(0, TS - 2, TS, 2);
   });
-  mk((x: CanvasRenderingContext2D) => {
-    x.fillStyle = F[0]; x.fillRect(0, 0, TS, TS);
-    for (let i = 0; i < 4; i++) {
-      x.fillStyle = ["#6a6a78", "#4a4a58", "#2c2c38", "#141420"][i];
-      x.fillRect(3 + i * 2, 3 + i * 4, 18 - i * 4, 4);
-    }
-    x.fillStyle = "#000000"; x.fillRect(9, 19, 6, 3);
-    x.fillStyle = GOLD; x.fillRect(2, 2, 2, 2); x.fillRect(20, 2, 2, 2);
+  mk((x: CanvasRenderingContext2D) => { // tile 5: 1-tile down fallback (old saves)
+    paintStair(x, "down", 1, F[0]);
   });
   mk((x: CanvasRenderingContext2D) => drawDecor(x, dk, T.dc)); // tile 6: decor overlay
-  mk((x: CanvasRenderingContext2D) => { // tile 7: stairs up
-    x.fillStyle = F[0]; x.fillRect(0, 0, TS, TS);
-    for (let i = 0; i < 4; i++) {
-      x.fillStyle = ["#6a6a78", "#4a4a58", "#2c2c38", "#141420"][i];
-      x.fillRect(3 + i * 2, 17 - i * 4, 18 - i * 4, 4);
-    }
-    x.fillStyle = "#80ffd0"; x.fillRect(11, 3, 2, 8); x.fillRect(8, 5, 8, 2); x.fillRect(9, 3, 6, 2); x.fillRect(10, 1, 4, 2);
-    x.fillStyle = GOLD; x.fillRect(2, 20, 2, 2); x.fillRect(20, 20, 2, 2);
+  mk((x: CanvasRenderingContext2D) => { // tile 7: 1-tile up fallback
+    paintStair(x, "up", 1, F[0]);
   });
+  const mkTall = (fn: (x: CanvasRenderingContext2D) => void): void => {
+    const c = document.createElement("canvas"); c.width = TS; c.height = TS * 2;
+    const x = c.getContext("2d");
+    if (x) { x.imageSmoothingEnabled = false; fn(x); }
+    out.push(c);
+  };
+  mkTall((x: CanvasRenderingContext2D) => paintStair(x, "down", 2, F[0])); // tile 8
+  mkTall((x: CanvasRenderingContext2D) => paintStair(x, "up", 2, F[0])); // tile 9
   return out;
 }
 
@@ -2894,6 +3389,7 @@ function genFloor(g: Game): void {
     map[sy * MW + sx] = 2;
     if (st2) map[st2[1] * MW + st2[0]] = 2;
   }
+  // 1-tile stamps are expanded to vertical pairs after g.map is assigned.
   g.campSpot = actFl ? { x: sx, y: sy } : undefined;
   g.map = map;
   g.seen = new Uint8Array(MW * MH);
@@ -2923,12 +3419,20 @@ function genFloor(g: Game): void {
   g.trader = null; g.shopOpen = false; g.stashOpen = false; g.floorTurn = 0;
   g.portal = null; g.vault = null; g.gobT = 0; g.warnGobs = []; g.warnPort = ""; g.warn = undefined;
   g.area = "dungeon"; g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined;
+  // Expand the single-tile stamps into 1x2 vertical pairs when there is room.
+  if (needDown) {
+    placeStairPair(g, 2, sx, sy, false);
+    if (st2) placeStairPair(g, 2, st2[0], st2[1], false);
+  }
+  if (g.depth >= 2) {
+    for (let k = 0; k < MW * MH; k++) if (map[k] === TILE_UP) { placeStairPair(g, TILE_UP, k % MW, (k / MW) | 0, false); break; }
+  }
+  nudgeHeroOffFeatures(g);
   GENINFO.rooms = rooms.slice();
   GENINFO.nEn = 0; GENINFO.nCorr = 0; GENINFO.nRoom = 0; GENINFO.nRare = 0; GENINFO.nPack = 0;
   const used = new Set<number>();
-  used.add(g.hero.y * MW + g.hero.x); used.add(sy * MW + sx);
-  if (st2) used.add(st2[1] * MW + st2[0]);
-  for (let k = 0; k < MW * MH; k++) if (map[k] === TILE_UP) used.add(k);
+  used.add(g.hero.y * MW + g.hero.x);
+  for (let k = 0; k < MW * MH; k++) if (map[k] === 2 || map[k] === TILE_UP) used.add(k);
   const cell = (ri0: number): number[] | null => {
     const ok = (x: number, y: number) => {
       if (Math.abs(x - g.hero.x) + Math.abs(y - g.hero.y) < 8) return false;
@@ -2987,7 +3491,7 @@ function genFloor(g: Game): void {
   // traders live at camp only (raw30); no dungeon shops
   // rare treasure portal (~4% of floors from depth 2) — skipped on act floors
   // loot goblins from depth 3: classic 6% (was 3%), Gem Goblin 2.5%, Gold Goblin 2.5%; at most one per floor
-  if (!actFl && d >= 2 && rooms.length > 2 && R() < 0.04 * gemPortalMul(g)) { const c = cell(1 + ri(rooms.length - 1)); if (c) g.portal = { x: c[0], y: c[1], kind: "vault" }; }
+  if (!actFl && d >= 2 && rooms.length > 2 && R() < 0.04 * gemPortalMul(g)) { const c = cell(1 + ri(rooms.length - 1)); if (c) { placePortalNear(g, "vault", c[0], c[1]); markPortalUsed(g, used); } }
   if (d >= 3 && rooms.length > 2) {
     const mul = gemGobMul(g);
     const gr = R();
@@ -4410,8 +4914,8 @@ function enterVault(g: Game): void {
   g.en = []; g.pend = []; g.chests = []; g.drops = []; g.ground = []; g.shots = []; g.fx = []; g.echo = [];
   g.trader = null; g.shopOpen = false; g.stashOpen = false; g.floorTurn = 0;
   const my = VR.y + (VR.h >> 1);
-  g.portal = { x: VR.x + 1, y: my };
-  g.hero.x = VR.x + 2; g.hero.y = my; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
+  g.portal = { x: VR.x + 1, y: my - 1, w: PORTAL_W, h: PORTAL_H };
+  g.hero.x = VR.x + 3; g.hero.y = my; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
   const slots: number[][] = [];
   for (let y = VR.y + 1; y < VR.y + VR.h - 1; y += 2) for (let x = VR.x + 4; x < VR.x + VR.w - 1; x += 2) slots.push([x, y]);
   for (let i = slots.length - 1; i > 0; i--) { const j = ri(i + 1); const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp; }
@@ -4499,6 +5003,7 @@ function portalLabel(g: Game): string {
   if (k === "camp") return "CAMP";
   if (k === "proceed") return "NEXT";
   if (g.vault) return "EXIT";
+  if (k === "vault") return "LOOT";
   return "?";
 }
 function campBlocked(g: Game, x: number, y: number): boolean {
@@ -4518,7 +5023,7 @@ function canBreakWall(g: Game, x: number, y: number): boolean {
   if (isOuterBarrier(x, y) || !inb(x, y)) return false;
   if (g.map[y * MW + x] !== 0) return false;
   if (campBlocked(g, x, y)) return false;
-  if (g.portal && g.portal.x === x && g.portal.y === y) return false;
+  if (portalAt(g, x, y)) return false;
   return true;
 }
 function cracksOf(g: Game): number[] {
@@ -5314,10 +5819,11 @@ function openCampPortal(g: Game): void {
     for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2) g.map[k] = 1;
   }
   if (g.map[spot.y * MW + spot.x] === 0) return;
-  if (g.portal && g.portal.kind === "camp" && g.portal.x === spot.x && g.portal.y === spot.y) {
+  if (g.portal && portalKind(g) === "camp") {
+    expandPortalOnLoad(g);
     return;
   }
-  g.portal = { x: spot.x, y: spot.y, kind: "camp" };
+  placePortalNear(g, "camp", spot.x, spot.y);
   if (!already) {
     setBanner(g, "THE WAY TO CAMP IS OPEN", "Step through the portal to rest at your camp", "#ffb040", 8, 3.2);
     msg(g, "A camp portal opens. The act boss is fallen \u2014 you may return to camp.", "#ffd080");
@@ -5648,8 +6154,9 @@ function genCamp(g: Game): void {
   g.restAt = { x: cx - 5, y: cy };
   g.stashAt = { x: cx + 5, y: cy };
   placeMerchant(g);
-  g.portal = { x: cx, y: cy - 6, kind: "proceed" };
+  placePortalNear(g, "proceed", cx, cy - 6);
   g.hero.x = cx; g.hero.y = cy + 2; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
+  nudgeHeroOffFeatures(g);
   g.campSpot = undefined;
   placeTorches(g);
   computeVis(g);
@@ -5709,7 +6216,7 @@ function leaveCamp(g: Game): void {
 }
 function useStairsOrPortal(g: Game): void {
   if (g.mode !== "play" || uiBlocked(g) || g.paused) return;
-  if (g.portal && g.portal.x === g.hero.x && g.portal.y === g.hero.y) {
+  if (portalAt(g, g.hero.x, g.hero.y)) {
     const k = portalKind(g);
     if (k === "proceed") { leaveCamp(g); return; }
     if (k === "camp") { enterCamp(g); return; }
@@ -6098,6 +6605,7 @@ function setActiveProf(id: ProfId): void {
 }
 // The running game survives a component remount (host re-render, error recovery) even when page storage is wiped.
 let LIVE: Game | null = null;
+let installTestGame: ((g: Game | null) => void) | null = null;
 function lsGet(k: string): string | null {
   try { probeStores(); return lsHandle ? lsHandle.getItem(k) : null; } catch (err) { lastLsErr = storeDeniedReason("localStorage", err); return null; }
 }
@@ -6725,6 +7233,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     if (typeof s.vt === "string" && s.vt.length > 0 && s.vt.length < 600000) g.vault = s.vt;
     g.mode = "play";
     repairCampBossHybrid(g);
+    expandFeaturesOnLoad(g);
     const packed = Array.isArray(s.stsh) ? s.stsh : [];
     const codeItems = packed.map((a: unknown) => unpackItem(a)).filter((it: Item | null): it is Item => !!it);
     const codeGold = typeof s.bg === "number" && isFinite(s.bg) ? Math.max(0, Math.floor(s.bg)) : (typeof s.stg === "number" && isFinite(s.stg) ? Math.max(0, Math.floor(s.stg)) : 0);
@@ -6917,8 +7426,8 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     syncLegacyUlt(g);
     g.floorTurn = typeof s.floorTurn === "number" && isFinite(s.floorTurn) ? Math.floor(s.floorTurn) : 0;
     g.deaths = typeof s.deaths === "number" && isFinite(s.deaths) ? Math.max(0, Math.floor(s.deaths)) : 0;
-    const poIn = s.portal as { x: number; y: number; kind?: string } | null | undefined;
-    g.portal = poIn && typeof poIn === "object" && typeof poIn.x === "number" && typeof poIn.y === "number" && inb(poIn.x, poIn.y) && map[poIn.y * MW + poIn.x] !== 0 ? { x: Math.floor(poIn.x), y: Math.floor(poIn.y), kind: poIn.kind === "camp" || poIn.kind === "proceed" || poIn.kind === "vault" ? poIn.kind : undefined } : null;
+    const poIn = unpackPortal(s.portal);
+    g.portal = poIn && map[poIn.y * MW + poIn.x] !== 0 ? poIn : null;
     g.vault = typeof s.vault === "string" && s.vault.length < 600000 ? s.vault : null;
     if (g.vault && !g.portal) { for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { const x = hx + ox, y = hy + oy; if (inb(x, y) && map[y * MW + x] !== 0) { g.portal = { x, y }; break; } } if (!g.portal) g.vault = null; }
     g.gobT = typeof s.gobT === "number" && isFinite(s.gobT) ? Math.max(0, s.gobT) : 0;
@@ -6957,6 +7466,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     if (g.area === "camp") { g.seen.fill(1); g.vis.fill(1); }
     migrateActFloor(g);
     repairCampBossHybrid(g);
+    expandFeaturesOnLoad(g);
     if (fromBak && raw) { memSave = raw; lsSet(activeSaveKey(), raw); ssSet(activeSaveKey(), raw); idbPut(activeSaveKey(), raw); saveFlag = true; }
     optimizeEquipped(g);
     return g;
@@ -6997,7 +7507,7 @@ function placeStarterChest(g: Game): void {
     const x = hx + dx, y = hy + dy;
     if (!inb(x, y) || g.map[y * MW + x] === 0) continue;
     if (g.map[y * MW + x] === 2 || g.map[y * MW + x] === TILE_UP) continue;
-    if (chestAt(g, x, y) || merchAt(g, x, y) || (g.portal && g.portal.x === x && g.portal.y === y)) continue;
+    if (chestAt(g, x, y) || merchAt(g, x, y) || portalAt(g, x, y)) continue;
     spot = [x, y]; break;
   }
   if (!spot) return;
@@ -8721,7 +9231,7 @@ function occUsed(g: Game, used: Set<number>): void {
   used.add(g.hero.y * MW + g.hero.x);
   for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) used.add(k);
   if (g.merchant) used.add(g.merchant.y * MW + g.merchant.x);
-  if (g.portal) used.add(g.portal.y * MW + g.portal.x);
+  if (g.portal) markPortalUsed(g, used);
   for (const c of g.chests) used.add(c.y * MW + c.x);
   for (const e of g.en) if (e.hp > 0) used.add(e.y * MW + e.x);
   for (const d of g.drops) used.add(d.y * MW + d.x);
@@ -9940,6 +10450,7 @@ function visTick(g: Game, dt: number): void {
     IP.em.set(e.id, r.p); e.ax = r.ax; e.ay = r.ay;
   }
   for (const id of [...IP.em.keys()]) if (!seen.has(id)) IP.em.delete(id);
+  gobTrailTick(g, dt);
   camTick(g, dt);
 }
 // Remap a tile (or offset) coordinate onto the sprite's interpolated position so floats/numbers stay on the body.
@@ -10258,7 +10769,7 @@ function act(g: Game, dx: number, dy: number): void {
   if (g.fireAt && g.fireAt.x === nx && g.fireAt.y === ny) { h.bump = 0.4; h.bdx = dx; h.bdy = dy; msg(g, "The campfire warms you.", "#ffb040"); g.notify(); return; }
   const px = h.x, py = h.y;
   h.x = nx; h.y = ny;
-  if (g.portal && g.portal.x === nx && g.portal.y === ny) {
+  if (portalAt(g, nx, ny)) {
     const k = portalKind(g);
     if (k === "proceed") { leaveCamp(g); return; }
     if (k === "camp") { enterCamp(g); return; }
@@ -10270,7 +10781,7 @@ function act(g: Game, dx: number, dy: number): void {
   pickup(g);
   if (g.map[ny * MW + nx] === 2) msg(g, "Stairs down! Tap \u2B07 Stairs (or tap yourself).", "#80ffff");
   if (g.map[ny * MW + nx] === TILE_UP) msg(g, "Stairs up! Tap \u25B2 Back (or the Back button) to farm the floor above.", "#80ffd0");
-  if (g.portal && g.portal.x === nx && g.portal.y === ny) { /* handled above */ }
+  if (portalAt(g, nx, ny)) { /* handled above */ }
   es.still = false; es.moved = 1; es.rush = Math.min(3, es.rush + 1);
   if (g.rt) { g.pcd = RT_MV / MVMUL; computeVis(g); g.notify(); return; } // real-time: Movement Speed shortens the step cooldown
   // Movement Speed (turn mode): a share of your steps are free (enemies don't get a turn), so +100% = 2 steps per enemy turn, +200% = 3
@@ -10891,9 +11402,9 @@ function inspectRun(g: Game | null): Record<string, unknown> {
     campLayout: looksLikeCampMap(g.map), hybrid: isHybridCampState(g),
     boss: !!boss, bossName: boss ? boss.name : null,
     enemies: g.en.filter((e: En) => e.hp > 0).length,
-    portal: g.portal ? { x: g.portal.x, y: g.portal.y, kind: portalKind(g) } : null,
+    portal: g.portal ? { x: g.portal.x, y: g.portal.y, kind: portalKind(g), w: g.portal.w ?? 1, h: g.portal.h ?? 1 } : null,
     fireAt: !!g.fireAt, restAt: !!g.restAt, stashAt: !!g.stashAt, merchant: !!g.merchant,
-    stairs: { up, down },
+    stairs: { up, down, pairs: stairPairs(g) },
     canEnterCamp: canEnterCamp(g),
     canGoBack: canGoBack(g, true),
     canLeaveCamp: g.area === "camp" && portalKind(g) === "proceed",
@@ -11339,6 +11850,254 @@ try {
     end: (): void => { PETS_TEST_G = null; GIB_SKIP_SAVE = false; STAT_G = null; },
   };
 } catch { /* ignore */ }
+
+let PORTALS_TEST_G: Game | null = null;
+function withPortalsTest<T>(fn: () => T): T {
+  const prev = GIB_SKIP_SAVE;
+  GIB_SKIP_SAVE = true;
+  try { return fn(); } finally { GIB_SKIP_SAVE = prev; }
+}
+function portalsGame(): Game | null { return PORTALS_TEST_G; }
+function portalsState(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false, error: "not begun" };
+  const stairs = stairPairs(g);
+  const p = g.portal;
+  const trail = countTaggedParts(g, "trail");
+  const pfx = countTaggedParts(g, "pfx");
+  const gobs = g.en.filter((e: En) => e.gob && e.hp > 0).map((e: En) => ({ id: e.id, x: e.x, y: e.y, ax: e.ax, ay: e.ay, gob: e.gob }));
+  const triggers: Record<string, unknown>[] = [];
+  if (p) for (const t of portalCells(p)) triggers.push({ x: t.x, y: t.y, portal: portalAt(g, t.x, t.y), down: g.map[t.y * MW + t.x] === 2, up: g.map[t.y * MW + t.x] === TILE_UP });
+  for (const s of stairs) {
+    for (let dy = 0; dy < s.h; dy++) {
+      const x = s.x, y = s.y + dy;
+      triggers.push({ x, y, portal: portalAt(g, x, y), down: g.map[y * MW + x] === 2, up: g.map[y * MW + x] === TILE_UP });
+    }
+  }
+  const overlap: string[] = [];
+  if (p) {
+    for (const t of portalCells(p)) {
+      const k = t.y * MW + t.x;
+      if (!inb(t.x, t.y) || g.map[k] === 0) overlap.push("wall:" + t.x + "," + t.y);
+      if (g.map[k] === 2 || g.map[k] === TILE_UP) overlap.push("stair:" + t.x + "," + t.y);
+      if (chestAt(g, t.x, t.y)) overlap.push("chest:" + t.x + "," + t.y);
+      if (merchAt(g, t.x, t.y) || campBlocked(g, t.x, t.y)) overlap.push("camp:" + t.x + "," + t.y);
+    }
+  }
+  const corridorHits: string[] = [];
+  for (const s of stairs) {
+    for (let dy = 0; dy < s.h; dy++) {
+      if (isCorridorCell(g.map, s.x, s.y + dy)) corridorHits.push(s.x + "," + (s.y + dy));
+    }
+  }
+  return {
+    ok: true, hx: g.hero.x, hy: g.hero.y, area: g.area, depth: g.depth,
+    portal: p ? { x: p.x, y: p.y, kind: portalKind(g), w: p.w ?? 1, h: p.h ?? 1, tiles: portalCells(p) } : null,
+    stairs, triggers, overlap, corridorHits,
+    trail, pfx, parts: g.parts.length, trailCap: GOB_TRAIL_CAP, pfxCap: PORTAL_FX_CAP,
+    gobs, visOn: p ? portalVis(g, g.vis) : false,
+  };
+}
+function portalsBegin(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = newGame(null);
+    g.mode = "play"; g.paused = false; g.lvl = 10; g.depth = 5; g.area = "dungeon";
+    g.tiles = makeTiles(g.theme, g.thShift || 0);
+    moveCarveRoom(g, 22, 22, 10);
+    g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 22;
+    g.vis.fill(1); g.seen.fill(1);
+    PORTALS_TEST_G = g;
+    if (installTestGame) installTestGame(g);
+    return portalsState(g);
+  });
+}
+function portalsEnd(): void {
+  withPortalsTest(() => {
+    PORTALS_TEST_G = null;
+    if (installTestGame) installTestGame(null);
+    GIB_SKIP_SAVE = false;
+  });
+}
+function portalsCarve(cx: number, cy: number, rad: number): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  moveCarveRoom(g, cx, cy, rad);
+  g.vis.fill(1); g.seen.fill(1);
+  return portalsState(g);
+}
+function portalsPlacePortal(kind: string, x: number, y: number, old = false): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const k = kind === "camp" || kind === "proceed" || kind === "vault" ? kind : undefined;
+  if (old) g.portal = { x, y, kind: k };
+  else placePortalNear(g, k, x, y);
+  g.vis.fill(1); g.seen.fill(1);
+  IP.camOk = false;
+  return portalsState(g);
+}
+function portalsPlaceStairs(tile: number, x: number, y: number, old = false): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const t = tile === TILE_UP ? TILE_UP : 2;
+  if (old) {
+    if (inb(x, y) && g.map[y * MW + x] !== 0) g.map[y * MW + x] = t;
+  } else placeStairPair(g, t, x, y);
+  g.vis.fill(1); g.seen.fill(1);
+  IP.camOk = false;
+  return portalsState(g);
+}
+function portalsExpand(): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  expandFeaturesOnLoad(g);
+  return portalsState(g);
+}
+function portalsPutHero(x: number, y: number): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  if (!inb(x, y)) return { ok: false, error: "oob" };
+  g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y;
+  IP.camOk = false;
+  computeVis(g);
+  g.vis.fill(1); g.seen.fill(1);
+  return { ok: true, hx: x, hy: y, trigger: { portal: portalAt(g, x, y), down: g.map[y * MW + x] === 2, up: g.map[y * MW + x] === TILE_UP } };
+}
+function portalsSpawnGob(kind: number, x: number, y: number): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const e = mkGoblin(g, x, y, kind || 1);
+  e.awake = true;
+  g.en = g.en.filter((o: En) => !o.gob).concat([e]);
+  g.vis.fill(1);
+  return { ok: true, id: e.id, x: e.x, y: e.y };
+}
+function portalsTick(dt: number, n = 1): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const steps = Math.max(1, Math.floor(n));
+  const d = Math.max(0.01, dt);
+  for (let i = 0; i < steps; i++) {
+    g.time += d;
+    visTick(g, d);
+    portalFxTick(g, d);
+    for (const p of g.parts) { p.x += p.vx * d; p.y += p.vy * d; p.vy += p.g * d; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * d; p.life -= d; }
+    if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
+  }
+  return portalsState(g);
+}
+function portalsWalkGob(dx: number, dy: number, steps: number): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const e = g.en.find((o: En) => o.gob && o.hp > 0);
+  if (!e) return { ok: false, error: "no goblin" };
+  const n = Math.max(1, Math.floor(steps));
+  for (let i = 0; i < n; i++) {
+    const nx = e.x + dx, ny = e.y + dy;
+    if (inb(nx, ny) && g.map[ny * MW + nx] !== 0) { e.x = nx; e.y = ny; }
+    visTick(g, 0.08);
+    portalFxTick(g, 0.08);
+    for (const p of g.parts) { p.x += p.vx * 0.08; p.y += p.vy * 0.08; p.vy += p.g * 0.08; p.vx *= 0.98; p.life -= 0.08; }
+    if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
+  }
+  return portalsState(g);
+}
+function portalsCapTest(): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const e = g.en.find((o: En) => o.gob && o.hp > 0) || mkGoblin(g, g.hero.x + 2, g.hero.y, 1);
+  if (!g.en.includes(e)) g.en.push(e);
+  e.ax = e.x; e.ay = e.y;
+  for (let i = 0; i < 80; i++) {
+    e.ax += 1.6;
+    gobTrailTick(g, 0.05);
+  }
+  const trail = countTaggedParts(g, "trail");
+  const p = g.portal;
+  if (p) {
+    g.vis.fill(1);
+    for (let i = 0; i < 200; i++) portalFxTick(g, 0.2);
+  }
+  const pfx = countTaggedParts(g, "pfx");
+  return { ok: true, trail, trailCap: GOB_TRAIL_CAP, trailOk: trail <= GOB_TRAIL_CAP, pfx, pfxCap: PORTAL_FX_CAP, pfxOk: pfx <= PORTAL_FX_CAP };
+}
+function portalsCorridorCheck(): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  // 1-wide N-S corridor at x=8, plus a room
+  for (let i = 0; i < MW * MH; i++) g.map[i] = 0;
+  for (let y = 4; y <= 30; y++) g.map[y * MW + 8] = 1;
+  for (let y = 14; y <= 24; y++) for (let x = 16; x <= 30; x++) g.map[y * MW + x] = 1;
+  g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 18;
+  g.portal = null; g.chests = []; g.en = [];
+  const corridorIs = isCorridorCell(g.map, 8, 10);
+  const placed = placeStairPair(g, 2, 8, 10);
+  const onCorr = placed ? (isCorridorCell(g.map, placed.x, placed.y) || isCorridorCell(g.map, placed.x, placed.y + 1)) : true;
+  const tiles = [];
+  for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2) tiles.push({ x: k % MW, y: (k / MW) | 0 });
+  return { ok: true, corridorDetected: corridorIs, placed, onCorridor: onCorr, avoided: !onCorr, tiles };
+}
+function portalsShotSetup(kind: string): Record<string, unknown> {
+  const g = portalsGame();
+  if (!g) return { ok: false, error: "not begun" };
+  return withPortalsTest(() => {
+    moveCarveRoom(g, 22, 22, 10);
+    g.mode = "play"; g.paused = false; g.area = "dungeon"; g.vault = null;
+    g.tiles = makeTiles(g.theme, g.thShift || 0);
+    g.en = []; g.parts = []; g.portal = null; g.warn = undefined; g.banner = null;
+    for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) g.map[k] = 1;
+    g.vis.fill(1); g.seen.fill(1);
+    if (kind === "stairs") {
+      placeStairPair(g, 2, 20, 20);
+      placeStairPair(g, TILE_UP, 24, 20);
+      g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 23;
+    } else if (kind === "portal") {
+      placePortalNear(g, "proceed", 21, 20);
+      g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 23;
+    } else if (kind === "loot") {
+      placePortalNear(g, "vault", 19, 21);
+      g.hero.x = g.hero.ax = 23; g.hero.y = g.hero.ay = 23;
+      for (let i = 0; i < 40; i++) { visTick(g, 0.05); portalFxTick(g, 0.1); }
+    } else if (kind === "goblin") {
+      const e = mkGoblin(g, 17, 21, 1);
+      e.awake = true;
+      g.en = [e];
+      g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 23;
+      for (let i = 0; i < 10; i++) {
+        e.x += 1;
+        visTick(g, 0.12);
+        for (const p of g.parts) { p.x += p.vx * 0.08; p.y += p.vy * 0.08; p.vy += p.g * 0.08; p.vx *= 0.98; p.life -= 0.08; }
+        if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
+      }
+    }
+    IP.camOk = false;
+    visTick(g, 0.016);
+    g.warn = undefined; g.banner = null;
+    const lp = lootCavePortal(g);
+    g.warnPort = lp ? (g.depth + ":" + lp.x + "," + lp.y) : "";
+    g.warnGobs = g.en.filter((e: En) => e.gob && e.hp > 0).map((e: En) => e.id);
+    if (installTestGame) installTestGame(g);
+    return portalsState(g);
+  });
+}
+try {
+  (window as unknown as { __ED16_PORTALS?: object }).__ED16_PORTALS = {
+    begin: portalsBegin,
+    carve: portalsCarve,
+    placePortal: portalsPlacePortal,
+    placeStairs: portalsPlaceStairs,
+    expand: portalsExpand,
+    putHero: portalsPutHero,
+    spawnGob: portalsSpawnGob,
+    tick: portalsTick,
+    walkGob: portalsWalkGob,
+    capTest: portalsCapTest,
+    corridor: portalsCorridorCheck,
+    shotSetup: portalsShotSetup,
+    state: (): Record<string, unknown> => portalsState(portalsGame()),
+    end: portalsEnd,
+  };
+} catch { /* ignore */ }
+
+
 
 export default function App() {
   const theme = useGrokTheme();
@@ -12005,6 +12764,25 @@ export default function App() {
     g0.notify = bump;
     g0.sfx = sfx;
     gRef.current = g0;
+    installTestGame = (g: Game | null): void => {
+      const prev = GIB_SKIP_SAVE;
+      GIB_SKIP_SAVE = true;
+      try {
+        if (g) {
+          g.notify = bump; g.sfx = sfx; g.mode = "play"; g.paused = false;
+          g.shopOpen = false; g.stashOpen = false; g.gambOpen = false;
+          gRef.current = g; LIVE = g;
+          setProfOpen(false); setIoOpen(false);
+          setConfirmNew(false); setConfirmMS(false); setConfirmSL(false); setConfirmQuit(false);
+        } else {
+          const t = newGame(null);
+          t.notify = bump; t.sfx = sfx;
+          gRef.current = t; LIVE = null;
+        }
+        bump();
+      } finally { GIB_SKIP_SAVE = prev; }
+    };
+
 
     let mmRect: number[] = [0, 0, 0, 0];
     let mmCv: HTMLCanvasElement | null = null;
@@ -12080,8 +12858,11 @@ export default function App() {
       if (g.lootToast) g.lootToast = Math.max(0, g.lootToast - dt);
       const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
       if (g.mode === "play" && !paused) { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
-      if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); }
-      if (g.portal && g.vis[g.portal.y * MW + g.portal.x] && Math.random() < 0.3) burst(g, g.portal.x * TS + 12 + (Math.random() - 0.5) * 16, g.portal.y * TS + 16, 1, [portalHue(g), "#ffffff"], 18, -50);
+      if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); portalFxTick(g, dt); }
+      if (g.portal && portalVis(g, g.vis) && Math.random() < 0.3) {
+        const pc = portalCenterPx(g.portal);
+        burst(g, pc.x + (Math.random() - 0.5) * pc.rw, pc.y + (Math.random() - 0.5) * 8, 1, [portalHue(g), "#ffffff"], 18, -50);
+      }
       const h = g.hero;
       h.bump = Math.max(0, h.bump - dt * 7);
       for (const e of g.en) { e.bump = Math.max(0, e.bump - dt * 7); e.hit = Math.max(0, e.hit - dt); }
@@ -12157,8 +12938,11 @@ export default function App() {
         const i = ty * MW + tx;
         const v = g.map[i];
         const sx = tx * TS - camX, sy = ty * TS - camY;
+        const sk = stairDrawKind(g.map, tx, ty);
+        if (sk === "pair-bot") continue;
         let img: HTMLCanvasElement;
         if (v === 0) img = ty + 1 < MH && g.map[i + MW] !== 0 ? g.tiles[4] : g.tiles[3];
+        else if (sk === "pair-top") img = (v === 2 ? g.tiles[8] : g.tiles[9]) || g.tiles[v === 2 ? 5 : 7] || g.tiles[5];
         else if (v === 2) img = g.tiles[5];
         else if (v === 3) img = g.tiles[7] || g.tiles[5];
         else img = g.tiles[(tx * 7 + ty * 13) % 3];
@@ -12211,15 +12995,7 @@ export default function App() {
           p(3, 7, 4, 3, "#c89020"); p(5, 6, 4, 4, GOLD); p(6, 6, 1, 1, "#fff8c0"); p(4, 8, 1, 1, "#fff8c0");
         }
       }
-      if (g.portal && g.vis[g.portal.y * MW + g.portal.x]) {
-        const px = g.portal.x * TS - camX + 12, py = g.portal.y * TS - camY + 12;
-        const pc = portalHue(g);
-        ctx.globalAlpha = 0.3 + 0.15 * Math.sin(t * 3); ctx.fillStyle = pc; ctx.beginPath(); ctx.arc(px, py, 13, 0, 6.2832); ctx.fill();
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 3; i++) { ctx.globalAlpha = 0.85 - i * 0.2; ctx.strokeStyle = i === 1 ? "#ffffff" : pc; ctx.beginPath(); ctx.arc(px, py, 10 - i * 3, t * (3 + i) + i, t * (3 + i) + i + 4.4); ctx.stroke(); }
-        ctx.globalAlpha = 1; ctx.lineWidth = 1;
-        text(portalLabel(g), px, py - 17, pc, "center", 6);
-      }
+      drawPortalGfx(ctx, g, camX, camY, t);
       if (g.merchant && g.vis[g.merchant.y * MW + g.merchant.x]) {
         const tx = g.merchant.x * TS - camX, ty = g.merchant.y * TS - camY;
         ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(tx + 5, ty + 21, 14, 2);
@@ -12267,6 +13043,11 @@ export default function App() {
         else if (e.se) {
           const pulse = 0.5 + 0.5 * Math.sin(t * 7);
           sprOutline(ctx, e, sx, sy, flip, t, SE_COL, 0.6 + 0.4 * pulse, 2);
+        }
+        else if (e.gob) {
+          drawGoblinAura(ctx, e, sx, sy, t);
+          const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+          sprOutline(ctx, e, sx, sy, flip, t, gobPal(e.gob)[0], 0.55 + 0.45 * pulse, 2);
         }
         else if (e.rare || e.cls === 1) {
           const pulse = 0.5 + 0.5 * Math.sin(t * (e.cls === 1 ? 6 : 5));
@@ -12412,7 +13193,10 @@ export default function App() {
         const ds = big ? 4 : 2;
         for (const c of g.chests) if (!c.open && g.seen[c.y * MW + c.x]) dot(c.x, c.y, RC[Math.max(0, Math.min(4, c.rar ?? 0))], ds);
         if (g.merchant && g.seen[g.merchant.y * MW + g.merchant.x]) dot(g.merchant.x, g.merchant.y, GOLD, ds + 1);
-        if (g.portal && g.seen[g.portal.y * MW + g.portal.x]) dot(g.portal.x, g.portal.y, Math.floor(t * 3) % 2 ? portalHue(g) : "#ffffff", ds + 1);
+        if (g.portal && portalSeen(g, g.seen)) {
+          const pc = Math.floor(t * 3) % 2 ? portalHue(g) : "#ffffff";
+          for (const pt of portalCells(g.portal)) if (g.seen[pt.y * MW + pt.x]) dot(pt.x, pt.y, pc, ds + 1);
+        }
         if (g.stashAt && g.seen[g.stashAt.y * MW + g.stashAt.x]) dot(g.stashAt.x, g.stashAt.y, GOLD, ds);
         if (g.restAt && g.seen[g.restAt.y * MW + g.restAt.x]) dot(g.restAt.x, g.restAt.y, "#80ff80", ds);
         if (g.fireAt && g.seen[g.fireAt.y * MW + g.fireAt.x]) dot(g.fireAt.x, g.fireAt.y, "#ff8020", ds);
@@ -12566,7 +13350,7 @@ export default function App() {
       }
       const [dx, dy] = dirFrom(ev);
       if (dx === 0 && dy === 0) {
-        try { if (g.map[g.hero.y * MW + g.hero.x] === 2 || g.map[g.hero.y * MW + g.hero.x] === TILE_UP || (g.portal && g.portal.x === g.hero.x && g.portal.y === g.hero.y)) useStairsOrPortal(g); else safeAct(g, 0, 0); } catch (err) { console.error("Endless Depths: input error (recovered, run kept)", err); }
+        try { if (g.map[g.hero.y * MW + g.hero.x] === 2 || g.map[g.hero.y * MW + g.hero.x] === TILE_UP || portalAt(g, g.hero.x, g.hero.y)) useStairsOrPortal(g); else safeAct(g, 0, 0); } catch (err) { console.error("Endless Depths: input error (recovered, run kept)", err); }
         return;
       }
       {
@@ -12695,6 +13479,7 @@ export default function App() {
     };
     raf = requestAnimationFrame(frame);
     return () => {
+      installTestGame = null;
       cancelAnimationFrame(raf);
       cv.removeEventListener("pointerdown", onDown);
       cv.removeEventListener("pointermove", onMove);
@@ -12719,7 +13504,7 @@ export default function App() {
   const playing = !!g && g.mode === "play";
   const locked = g ? g.locked : true;
   const storLine = stor === "checking" ? "Loading saves\u2026" : (stor === "blocked" || viewerBlocksSaving() ? "This viewer blocks saving. Use Save Code and keep a copy — load it the next time you open the game." : (storageEphemeral() || stor === "off" ? "This viewer may forget saves when you close it. Use Save Game, and keep a Save Code as backup." : "Auto-save: ON \u00b7 Save Game writes this profile \u00b7 Save Code is the backup"));
-  const onPortal = !!g && playing && !!g.portal && g.portal.x === g.hero.x && g.portal.y === g.hero.y && (portalKind(g) === "camp" || portalKind(g) === "proceed");
+  const onPortal = !!g && playing && portalAt(g, g.hero.x, g.hero.y) && (portalKind(g) === "camp" || portalKind(g) === "proceed");
   const onUp = !!g && playing && g.map[g.hero.y * MW + g.hero.x] === TILE_UP;
   const onStairs = !!g && playing && (g.map[g.hero.y * MW + g.hero.x] === 2 || onUp || onPortal);
   const canBackUnlocked = !!g && playing && canGoBack(g, true);
