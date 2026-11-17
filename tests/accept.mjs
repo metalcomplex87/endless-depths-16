@@ -365,11 +365,15 @@ async function runImportCycles(label, userDir, profileName, slotKey, code, expec
     record(prefix + " cycle 1 Save Game wrote a " + profileName + " slot", !!slot1, slot1 ? fp(slot1) : "missing");
     let report1 = (saved1.report || "");
     if (!/localStorage on|IndexedDB on|Auto-save: ON/i.test(report1)) {
-      await openProfiles(page);
-      await sleep(200);
+      // The storage line lives on the title, the Save Code/LOAD dialog, and inventory — not always on the play HUD.
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((el) => /Save Code/i.test(el.textContent || "") && !el.disabled);
+        if (b) b.click();
+      });
+      await sleep(250);
       report1 = (await slotSnap(page)).report || (await bodyText(page));
       await page.evaluate(() => {
-        const x = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "✕" || /Close/i.test(el.textContent || ""));
+        const x = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "✕ Close");
         if (x) x.click();
       });
       await sleep(150);

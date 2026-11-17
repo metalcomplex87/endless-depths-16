@@ -5987,21 +5987,27 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
   lastPersistOk = false;
   lastPersistErr = "";
   try {
+    // Always persist a zeroed autosave timer so a reload cannot immediately
+    // rewrite the slot (and pick up mid-tick HP changes) before the player moves.
+    const prevSaveT = g.saveT;
+    g.saveT = 0;
     const raw = buildPersistRaw(g);
+    g.saveT = 0;
     const neu = parseSaveRaw(raw);
-    if (!neu) { lastPersistErr = "save payload was not valid"; return false; }
+    if (!neu) { g.saveT = prevSaveT; lastPersistErr = "save payload was not valid"; return false; }
     const existing = mainSaveBlob();
     const old = parseSaveRaw(existing);
-    if (!force && old && isFreshSave(neu) && saveProgress(old) > saveProgress(neu)) return false;
+    if (!force && old && isFreshSave(neu) && saveProgress(old) > saveProgress(neu)) { g.saveT = prevSaveT; return false; }
     if (existing && existing !== raw) preserveSaveBackup(existing);
     memSave = raw;
     persistStash(g);
     const ok = writeDurable(activeSaveKey(), raw);
     saveFlag = ok;
     lastPersistOk = ok;
-    // Only show "Saved" and reset the 60s timer after a verified durable write.
+    if (!ok) g.saveT = prevSaveT;
+    // Only show "Saved" after a verified durable write.
     // A failed write used to toast anyway, so a stale slot (e.g. the level-1 beginNew) looked saved.
-    if (ok && !quiet) { g.toast = 1.4; g.saveT = 0; }
+    if (ok && !quiet) g.toast = 1.4;
     return ok;
   } catch (err) {
     lastPersistErr = viewerBlocksSaving() ? "this viewer blocks saving" : ("save threw: " + storeDeniedReason("save", err));
@@ -10336,7 +10342,7 @@ export default function App() {
     const g = gRef.current;
     if (!g || g.locked || g.mode !== "play") return;
     g.paused = !g.paused;
-    pauseRef.current = !!(g.paused || ioOpen || confirmNew || confirmMS || confirmSL || confirmQuit || g.stashOpen);
+    pauseRef.current = !!(g.paused || profOpen || ioOpen || confirmNew || confirmMS || confirmSL || confirmQuit || g.stashOpen);
     if (g.paused) { try { flushPlaySave(g, true); } catch { /* pause must still work if storage fails */ } }
     bump();
   };
@@ -10815,8 +10821,8 @@ export default function App() {
       RC[7] = "hsl(" + Math.floor((g.time * 140) % 360) + ",100%,62%)";
       g.toast = Math.max(0, g.toast - dt);
       if (g.lootToast) g.lootToast = Math.max(0, g.lootToast - dt);
-      if (g.mode === "play") { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
       const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
+      if (g.mode === "play" && !paused) { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
       if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); }
       if (g.portal && g.vis[g.portal.y * MW + g.portal.x] && Math.random() < 0.3) burst(g, g.portal.x * TS + 12 + (Math.random() - 0.5) * 16, g.portal.y * TS + 16, 1, [portalHue(g), "#ffffff"], 18, -50);
       const h = g.hero;
