@@ -112,12 +112,17 @@ JSON
 wait_for_pages() {
   local url="$1" want="$2"
   log "Waiting for Pages to come up at ${url} (build ${want})…"
-  local i code status
-  for i in $(seq 1 60); do
-    code="$(fetch_url /tmp/ed16-pages.html "$url" || true)"
+  local i code status js_code html_url
+  for i in $(seq 1 90); do
+    # Prefer a cache-busted index.html so a 10-minute CDN hit cannot hide a finished build.
+    html_url="${url}index.html?v=${want:-$i}"
+    code="$(curl -sS -o /tmp/ed16-pages.html -w "%{http_code}" --max-redirs 0 -H "Cache-Control: no-cache" "$html_url" || true)"
+    if [ "$code" != "200" ]; then
+      code="$(fetch_url /tmp/ed16-pages.html "$url" || true)"
+    fi
     if [ "$code" = "200" ] && grep -q "Endless Depths 16" /tmp/ed16-pages.html 2>/dev/null; then
       if [ -n "$want" ] && grep -q "name=\"ed16-build\" content=\"${want}\"" /tmp/ed16-pages.html; then
-        js_code="$(curl -sS -o /tmp/ed16-pages.js -w "%{http_code}" --max-redirs 0 "${url}game.js?v=${want}" || true)"
+        js_code="$(curl -sS -o /tmp/ed16-pages.js -w "%{http_code}" --max-redirs 0 -H "Cache-Control: no-cache" "${url}game.js?v=${want}" || true)"
         if [ "$js_code" = "200" ] && grep -q "$want" /tmp/ed16-pages.js; then
           log "Pages is live with build ${want} (HTML and game.js)."
           return 0
@@ -183,7 +188,8 @@ try_public_deploy() {
   fi
 
   enable_pages "$user" "$repo" || true
-  gh api -X POST "repos/${user}/${repo}/pages/builds" >/dev/null 2>&1 || true
+  # Do not POST /pages/builds here: the push already queued a build, and a second
+  # request cancels the first ("higher priority waiting request") and delays publish.
   wait_for_pages "$PUBLIC_URL" "$ED16_BUILD_ID"
 }
 
