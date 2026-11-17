@@ -36,6 +36,7 @@ async function open(browser) {
   await page.setViewport(VIEWPORT);
   await page.setUserAgent(UA);
   page.setDefaultTimeout(25000);
+  await page.setCacheEnabled(false);
   const resp = await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
   const chain = resp ? resp.request().redirectChain() : [];
   return { page, status: resp ? resp.status() : 0, url: page.url(), redirects: chain.map((r) => r.url()) };
@@ -194,6 +195,19 @@ async function closeB(browser) {
   await sleep(400);
 }
 
+async function waitForBuild(page, want, ms = 90000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const got = await page.evaluate(() => document.documentElement.dataset.ed16Build || window.__ED16_BUILD || "");
+    if (got === want) return true;
+    await page.setCacheEnabled(false);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await waitReady(page);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return false;
+}
+
 function isRemoteHost(url) {
   return !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])\b/i.test(url);
 }
@@ -263,8 +277,9 @@ async function main() {
     const secondNav = noRedirectNav(second, BASE);
     record("reopen after redeploy, no redirect", secondNav.ok, secondNav.detail);
     await waitReady(second.page);
+    const loaded = await waitForBuild(second.page, newId, 90000);
     const snap2 = await snapshot(second.page);
-    record("new build is what loaded", snap2.build === newId, "want=" + newId + " got=" + snap2.build);
+    record("new build is what loaded", loaded && snap2.build === newId, "want=" + newId + " got=" + snap2.build);
     record("existing storage keys survived the redeploy", keysBefore.every((k) => snap2.keys.includes(k)),
       "before=" + keysBefore.join(",") + " after=" + snap2.keys.join(","));
     record("no storage key was renamed", snap2.keys.every((k) => k.startsWith("ed16_")), snap2.keys.join(","));

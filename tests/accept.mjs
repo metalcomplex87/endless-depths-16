@@ -49,6 +49,7 @@ async function openFreshPage(browser) {
   await page.setViewport(VIEWPORT);
   await page.setUserAgent(UA);
   page.setDefaultTimeout(20000);
+  await page.setCacheEnabled(false);
   const resp = await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
   const chain = resp ? resp.request().redirectChain() : [];
   const info = {
@@ -685,6 +686,20 @@ async function dropServiceWorker(page) {
   }).catch(() => {});
 }
 
+
+async function waitForBuild(page, want, ms = 90000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const got = await page.evaluate(() => document.documentElement.dataset.ed16Build || window.__ED16_BUILD || "");
+    if (got === want) return true;
+    await page.setCacheEnabled(false);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await waitReady(page);
+    await sleep(1500);
+  }
+  return false;
+}
+
 async function runRedeploySurvival() {
   const prefix = "redeploy";
   const dir = "/tmp/ed16-profiles/redeploy";
@@ -733,8 +748,9 @@ async function runRedeploySurvival() {
     browser = re.browser;
     page = re.page;
     record(prefix + " reopen after redeploy, no redirect", noRedirect(re.info), JSON.stringify(re.info));
+    const loaded = await waitForBuild(page, newId, 90000);
     const build2 = await page.evaluate(() => document.documentElement.dataset.ed16Build || window.__ED16_BUILD || "");
-    record(prefix + " new build is what loaded", build2 === newId, "want=" + newId + " got=" + build2);
+    record(prefix + " new build is what loaded", loaded && build2 === newId, "want=" + newId + " got=" + build2);
     const snap2 = await slotSnap(page);
     const keys2 = await page.evaluate(() => {
       const keys = [];
