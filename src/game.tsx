@@ -9816,6 +9816,37 @@ function polishItem(g: Game, bi: number): string {
   saveGame(g);
   return "Polished " + it.name + " with a " + (pool[id]?.n ?? "star") + " (" + cost + " gems).";
 }
+function tileNotWall(g: Game, x: number, y: number): boolean {
+  return inb(x, y) && g.map[y * MW + x] !== 0;
+}
+// Last analog stick offset (pixels). Used only to break ties when a blocked
+// diagonal can slide on either axis. Keyboard diagonals have equal |dx|,|dy|.
+let MOVE_BIAS_X = 0, MOVE_BIAS_Y = 0;
+function setMoveBias(x: number, y: number): void { MOVE_BIAS_X = x; MOVE_BIAS_Y = y; }
+// When a diagonal step is blocked by a wall, a corner, or a map edge, slide
+// along the free component (down-left + wall to the left -> down, etc.).
+// Straight steps into a wall still stop. Enemies/chests are not walls: act()
+// still attacks or opens them on the chosen tile.
+function resolveSlide(g: Game, dx: number, dy: number, biasX = MOVE_BIAS_X, biasY = MOVE_BIAS_Y): { dx: number; dy: number; blocked: boolean } {
+  if (dx === 0 && dy === 0) return { dx, dy, blocked: false };
+  const h = g.hero;
+  if (dx === 0 || dy === 0) {
+    return { dx, dy, blocked: !tileNotWall(g, h.x + dx, h.y + dy) };
+  }
+  const destOk = tileNotWall(g, h.x + dx, h.y + dy);
+  const horizOk = tileNotWall(g, h.x + dx, h.y);
+  const vertOk = tileNotWall(g, h.x, h.y + dy);
+  if (destOk && horizOk && vertOk) return { dx, dy, blocked: false };
+  if (horizOk && !vertOk) return { dx, dy: 0, blocked: false };
+  if (vertOk && !horizOk) return { dx: 0, dy, blocked: false };
+  if (horizOk && vertOk) {
+    const bx = Math.abs(biasX), by = Math.abs(biasY);
+    if (bx > by + 1e-6) return { dx, dy: 0, blocked: false };
+    if (by > bx + 1e-6) return { dx: 0, dy, blocked: false };
+    return { dx, dy: 0, blocked: false };
+  }
+  return { dx, dy, blocked: true };
+}
 function safeAct(g: Game, dx: number, dy: number): void {
   try { act(g, dx, dy); } catch (err) { console.error("Endless Depths: act error (recovered, run kept)", err); try { msg(g, "A glitch was caught - your run is safe.", "#ff8080"); } catch { /* ignore */ } }
 }
@@ -9828,7 +9859,10 @@ function act(g: Game, dx: number, dy: number): void {
   const es = esOf(g);
   es.still = true; es.moved = 0;
   if (dx === 0 && dy === 0) { if (!autoTurnSt(g, st)) endTurn(g); return; }
-  if (dx !== 0 || dy !== 0) setHeroDir(h, dx, dy);
+  const wantDx = dx, wantDy = dy;
+  if (dx !== 0 || dy !== 0) setHeroDir(h, wantDx, wantDy);
+  const slid = resolveSlide(g, dx, dy);
+  dx = slid.dx; dy = slid.dy;
   const ranged = st.range > 0;
   const projReady = !g.rt || (g.acd ?? 0) <= 1e-6;
   const rng = Math.max(st.reach, st.range);
@@ -9862,8 +9896,7 @@ function act(g: Game, dx: number, dy: number): void {
     }
   }
   if (fired && g.rt) g.acd = Math.max(g.acd ?? 0, RT_ATK);
-  if (dx !== 0 && dy !== 0 && inb(nx, ny) && (g.map[h.y * MW + nx] === 0 || g.map[ny * MW + h.x] === 0)) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; if (g.wallBreak) tryWallDig(g, dx, dy); return; }
-  if (!inb(nx, ny) || g.map[ny * MW + nx] === 0) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; if (g.wallBreak) tryWallDig(g, dx, dy); return; }
+  if (slid.blocked || !inb(nx, ny) || g.map[ny * MW + nx] === 0) { h.bump = 0.5; h.bdx = wantDx; h.bdy = wantDy; if (g.wallBreak) tryWallDig(g, wantDx, wantDy); return; }
   const ch = chestAt(g, nx, ny);
   if (ch) { h.bump = 1; h.bdx = dx; h.bdy = dy; openChest(g, ch); endTurn(g); return; }
   if (g.merchant && g.merchant.x === nx && g.merchant.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; g.shopOpen = true; g.sfx("chest"); msg(g, "Chest Merchant: \"A chest for every kind of gear. Each holds one item.\"", "#ffd080"); g.notify(); return; }
@@ -10594,6 +10627,123 @@ try {
   };
 } catch { /* ignore */ }
 
+
+
+let MOVE_TEST_G: Game | null = null;
+const MOVE_CX = 20, MOVE_CY = 20;
+function moveGame(): Game | null { return MOVE_TEST_G; }
+function withMoveTest<T>(fn: () => T): T {
+  const prev = GIB_SKIP_SAVE;
+  GIB_SKIP_SAVE = true;
+  try { return fn(); } finally { GIB_SKIP_SAVE = prev; }
+}
+function moveCarveRoom(g: Game, cx = MOVE_CX, cy = MOVE_CY, rad = 3): { x: number; y: number } {
+  // Full-map walls with an inner floor room. The perimeter ring stays solid so
+  // outer-barrier slides can be tested against x=1 / y=1.
+  for (let i = 0; i < MW * MH; i++) g.map[i] = 0;
+  const x0 = Math.max(2, cx - rad), x1 = Math.min(MW - 3, cx + rad);
+  const y0 = Math.max(2, cy - rad), y1 = Math.min(MH - 3, cy + rad);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) g.map[y * MW + x] = 1;
+  g.hero.x = g.hero.ax = cx;
+  g.hero.y = g.hero.ay = cy;
+  g.hero.bump = 0;
+  g.en = []; g.pend = []; g.drops = []; g.parts = []; g.floats = []; g.shots = []; g.fx = [];
+  g.chests = []; g.merchant = null; g.trader = null; g.stashAt = undefined; g.restAt = undefined; g.fireAt = undefined; g.portal = null;
+  g.shopOpen = false; g.stashOpen = false; g.paused = false; g.wallBreak = false;
+  g.pcd = 0; g.acd = 0; g.qd = undefined; g.rt = true; g.area = "dungeon"; g.vault = null;
+  setMoveBias(0, 0);
+  computeVis(g);
+  return { x: cx, y: cy };
+}
+function moveBegin(): Record<string, unknown> {
+  return withMoveTest(() => {
+    const g = newGame(null);
+    g.mode = "play";
+    g.paused = false;
+    const pos = moveCarveRoom(g);
+    MOVE_TEST_G = g;
+    return { ok: true, x: pos.x, y: pos.y };
+  });
+}
+function moveReset(): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const pos = moveCarveRoom(g);
+  return { ok: true, x: pos.x, y: pos.y };
+}
+function moveWall(dx: number, dy: number, wall = true): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const x = g.hero.x + dx, y = g.hero.y + dy;
+  if (!inb(x, y)) return { ok: false, error: "oob" };
+  g.map[y * MW + x] = wall ? 0 : 1;
+  computeVis(g);
+  return { ok: true, x, y, wall };
+}
+function moveEnemy(dx: number, dy: number): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  const x = g.hero.x + dx, y = g.hero.y + dy;
+  if (!inb(x, y)) return { ok: false, error: "oob" };
+  const e = mkEnemy(g, x, y, 0);
+  e.hp = e.mhp = 50; e.xp = 0; e.cls = 0; e.child = true;
+  e.gob = undefined; e.hunt = undefined; e.rare = 0; e.act = undefined; e.se = undefined;
+  e.tr = []; e.ax = x; e.ay = y;
+  g.en = [e];
+  computeVis(g);
+  return { ok: true, x, y, hp: e.hp };
+}
+function moveAct(dx: number, dy: number, biasX?: number, biasY?: number): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  return withMoveTest(() => {
+    const from = { x: g.hero.x, y: g.hero.y };
+    if (biasX !== undefined || biasY !== undefined) setMoveBias(biasX ?? 0, biasY ?? 0);
+    const want = resolveSlide(g, dx, dy);
+    g.pcd = 0; g.acd = 0; g.qd = undefined; g.rt = true; g.paused = false; g.mode = "play";
+    act(g, dx, dy);
+    const e = g.en[0];
+    return {
+      ok: true, from, to: { x: g.hero.x, y: g.hero.y },
+      dx: g.hero.x - from.x, dy: g.hero.y - from.y,
+      want: { dx, dy }, resolved: { dx: want.dx, dy: want.dy, blocked: want.blocked },
+      bump: g.hero.bump, enemyHp: e ? e.hp : null, kills: g.kills,
+    };
+  });
+}
+function moveStick(px: number, py: number, radius = 100): Record<string, unknown> {
+  const s = stickFromCenter(px, py, radius);
+  setMoveBias(s.kx, s.ky);
+  if (s.dx === 0 && s.dy === 0) return { ok: true, dx: 0, dy: 0, quantized: { dx: 0, dy: 0 }, kx: s.kx, ky: s.ky, idle: true };
+  const r = moveAct(s.dx, s.dy, s.kx, s.ky);
+  return { ...r, quantized: { dx: s.dx, dy: s.dy }, kx: s.kx, ky: s.ky };
+}
+function moveMap(): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false };
+  const cells: number[][] = [];
+  const x0 = g.hero.x - 3, y0 = g.hero.y - 3;
+  for (let y = y0; y <= g.hero.y + 3; y++) {
+    const row: number[] = [];
+    for (let x = x0; x <= g.hero.x + 3; x++) row.push(inb(x, y) ? g.map[y * MW + x] : 0);
+    cells.push(row);
+  }
+  return { ok: true, x: g.hero.x, y: g.hero.y, x0, y0, cells };
+}
+try {
+  (window as unknown as { __ED16_MOVE?: object }).__ED16_MOVE = {
+    begin: moveBegin,
+    reset: moveReset,
+    wall: moveWall,
+    enemy: moveEnemy,
+    act: moveAct,
+    stick: moveStick,
+    map: moveMap,
+    pos: (): object | null => { const g = moveGame(); return g ? { x: g.hero.x, y: g.hero.y } : null; },
+    end: (): void => { MOVE_TEST_G = null; GIB_SKIP_SAVE = false; setMoveBias(0, 0); },
+  };
+} catch { /* ignore */ }
+
 export default function App() {
   const theme = useGrokTheme();
   const cvRef = useRef<HTMLCanvasElement | null>(null);
@@ -10805,6 +10955,7 @@ export default function App() {
     const r = el.getBoundingClientRect();
     const radius = Math.min(r.width, r.height) / 2;
     const s = stickFromCenter(ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2), radius);
+    setMoveBias(s.kx, s.ky);
     setStickKnob({ x: s.kx, y: s.ky });
     if (s.dx === 0 && s.dy === 0) {
       holdRef.current = null;
@@ -11821,6 +11972,11 @@ export default function App() {
         try { if (g.map[g.hero.y * MW + g.hero.x] === 2 || g.map[g.hero.y * MW + g.hero.x] === TILE_UP || (g.portal && g.portal.x === g.hero.x && g.portal.y === g.hero.y)) useStairsOrPortal(g); else safeAct(g, 0, 0); } catch (err) { console.error("Endless Depths: input error (recovered, run kept)", err); }
         return;
       }
+      {
+        const r = cv.getBoundingClientRect();
+        const lx = ((ev.clientX - r.left) / r.width) * VW, ly = ((ev.clientY - r.top) / r.height) * VH;
+        setMoveBias(lx - VW / 2, ly - (HUD + VIEWH / 2));
+      }
       cvHold = true;
       holdRef.current = { dx, dy, last: performance.now() };
       safeAct(g, dx, dy);
@@ -11830,6 +11986,11 @@ export default function App() {
       ev.preventDefault();
       const [dx, dy] = dirFrom(ev);
       if (dx === 0 && dy === 0) return;
+      {
+        const r = cv.getBoundingClientRect();
+        const lx = ((ev.clientX - r.left) / r.width) * VW, ly = ((ev.clientY - r.top) / r.height) * VH;
+        setMoveBias(lx - VW / 2, ly - (HUD + VIEWH / 2));
+      }
       holdRef.current.dx = dx; holdRef.current.dy = dy;
     };
     const onUp = (): void => { if (cvHold) { cvHold = false; holdRef.current = null; } };
@@ -11880,7 +12041,7 @@ export default function App() {
         keyHeld.add(tok);
         const cd = chordDir();
         const dx = cd[0], dy = cd[1];
-        if (dx !== 0 || dy !== 0) { holdRef.current = { dx, dy, last: now }; publishPad(true, dx, dy, true); safeAct(g, dx, dy); }
+        if (dx !== 0 || dy !== 0) { setMoveBias(dx, dy); holdRef.current = { dx, dy, last: now }; publishPad(true, dx, dy, true); safeAct(g, dx, dy); }
       }
       else if (kl === " " || kl === ".") safeAct(g, 0, 0);
       else if (kl === "i" || kl === "b" || kl === "tab") api?.openInv();
