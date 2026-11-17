@@ -109,7 +109,7 @@ interface ChestDeal { price: number; buys: number }
 interface Merchant { x: number; y: number }
 interface Ult { n: string; el: El; pat: number; c2: string; i: number }
 
-interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number } }[]; gt?: number; golden?: boolean; pab?: number }
+interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number } }[]; gt?: number; golden?: boolean; pab?: number; prt?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
 interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; bN?: number; packId?: number }
@@ -152,7 +152,7 @@ interface Game {
   actCampAt?: number; paused?: boolean;
   front?: number; snapPrev?: FloorSnap | null; snapCur?: FloorSnap | null;
   lootToast?: number; lootToastTxt?: string;
-  petAbiT?: number; petAegisUntil?: number; petAegisCd?: number; petStormCd?: number; petTwinUntil?: number; petTwinCd?: number; petTwinAcc?: number; petHarvest?: number; petPhoenixD?: number; petAbiPet?: number; petAbiFx?: { n: string; t: number; c: string };
+  petAbiT?: number; petAegisUntil?: number; petAegisCd?: number; petStormCd?: number; petTwinUntil?: number; petTwinCd?: number; petTwinAcc?: number; petHarvest?: number; petPhoenixD?: number; petAbiPet?: number; petAbiFx?: { n: string; t: number; c: string };  petSplitUntil?: number; petSplitCd?: number; petSplitN?: number; petNeedleCd?: number; petThunderCd?: number; petWellCd?: number; petChronoUntil?: number; petChronoCd?: number; petApexCd?: number; petSoulD?: number; petEmberStill?: number; petEmberWard?: number; petEmberHp?: number; petLegionAcc?: number;
   muted: boolean; notify: () => void; sfx: (n: string, v?: number) => void;
   wallBreak?: boolean; cracks?: number[]; digAt?: { x: number; y: number }; digClock?: number; wallVer?: number;
   warn?: { txt: string; sub: string; c: string; t: number; max: number }; warnGobs?: number[]; warnPort?: string;
@@ -167,6 +167,7 @@ const RW = [61, 23, 10, 5, 2.0, 0.85, 0.18, 0.06];
 const RAR_F_EXP = 0.5;
 const RAR_F_CAP = 1.65;
 let bagSalvNoted = false;
+let STAT_G: Game | null = null;
 let onItemDropped: ((it: Item) => void) | null = null;
 const RM = [1, 1.6, 2.5, 4, 6, 9, 14, 60];
 const HPCH = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1, 1];
@@ -1406,30 +1407,50 @@ function calc(lvl: number, eq: Eq): Stats {
   applySetsToStats(s, eq);
   applyStarStats(s, eq);
   applyGemStats(s, eq);
+  const pet = eq.pet;
+  if (pet && pet.kind === "pet" && pet.rar >= 7) {
+    ensurePetAbi(pet);
+    const mul = petAbiMul(pet);
+    if (pet.pab === 9) { s.mv += 20 * mul; s.spd += 8 * mul; }
+    if (pet.pab === 12) { s.maxHp = Math.round(s.maxHp * (1 + 0.20 * mul)); s.def = Math.round(s.def * (1 + 0.12 * mul)); }
+    const g = STAT_G;
+    if (g && g.eq && g.eq.pet === pet && pet.pab === 15 && (g.petChronoUntil ?? 0) > (g.petAbiT ?? 0)) {
+      s.spd += 35 * mul; s.mv += 12 * mul;
+    }
+  }
   s.crit = Math.min(75, s.crit); s.spd = Math.min(90, s.spd); s.block = Math.min(60, s.block); s.regen = Math.round(s.regen * 10) / 10; s.mv = Math.min(MV_CAP, Math.round(s.mv));
   return s;
 }
 
-function eqTarget(it: Item, hand?: "rh" | "lh"): EqKey {
+function eqTarget(it: Item, hand?: "rh" | "lh", eq?: Eq): EqKey {
   if (it.kind === "gem") return "rh";
   if (isArmor(it.kind)) return it.kind;
   if (it.kind === "shield") return "lh";
   if (it.kind === "pet") return "pet";
-  if (WI[it.kind as WT] && WI[it.kind as WT].two) return "rh";
+  if (WI[it.kind as WT] && WI[it.kind as WT].two) {
+    if (hand === "lh" && eq && canDualTwo(eq)) return "lh";
+    return "rh";
+  }
   return hand ?? "rh";
+}
+
+function evictInvalidOffhand(n: Eq, back: Item[]): void {
+  if (n.lh && isTwo(n.lh) && !canDualTwo(n)) { back.push(n.lh); n.lh = null; }
 }
 
 function simEq(eq: Eq, it: Item, hand?: "rh" | "lh"): { eq: Eq; back: Item[] } {
   const n: Eq = { ...eq };
   const back: Item[] = [];
-  const tgt = eqTarget(it, hand);
+  const tgt = eqTarget(it, hand, eq);
   const cur = n[tgt];
   if (cur) back.push(cur);
   if (!isArmor(it.kind)) {
-    if (isTwo(it) && n.lh) { back.push(n.lh); n.lh = null; }
-    if (tgt === "lh" && isTwo(n.rh) && n.rh) { back.push(n.rh); n.rh = null; }
+    const dual = canDualTwo(n) || (it.kind === "pet" && it.rar >= 7 && (it.prt ?? 0) === PRT_DUAL && tgt === "pet");
+    if (isTwo(it) && n.lh && !dual) { back.push(n.lh); n.lh = null; }
+    if (tgt === "lh" && isTwo(n.rh) && n.rh && !dual) { back.push(n.rh); n.rh = null; }
   }
   n[tgt] = it;
+  evictInvalidOffhand(n, back);
   return { eq: n, back };
 }
 
@@ -3377,7 +3398,12 @@ function efOnKill(g: Game, e: En): void {
   if ((p = efP(g, 78)) > 0) { const st = calc(g.lvl, g.eq); g.ward = Math.min(Math.max(st.ward, st.maxHp * 0.15), g.ward + st.maxHp * 0.03 * p); }
   if ((p = efP(g, 85)) > 0) { const dm = Math.max(1, Math.round(calc(g.lvl, g.eq).atk * 0.2 * p)); addGround(g, e.x, e.y, "fire", 3, dm); for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) addGround(g, e.x + ox, e.y + oy, "fire", 2, dm); efSfx(g, 85); }
 }
-const efGoldMul = (g: Game, e: En | null): number => 1 + 0.2 * efP(g, 53) + (e && e.cls >= 1 ? 0.5 * efP(g, 89) : 0) + (setCounts(g.eq)[7] >= 2 ? 0.25 : 0);
+const efGoldMul = (g: Game, e: En | null): number => {
+  let m = 1 + 0.2 * efP(g, 53) + (e && e.cls >= 1 ? 0.5 * efP(g, 89) : 0) + (setCounts(g.eq)[7] >= 2 ? 0.25 : 0);
+  const pulse = petAbiOf(g, 13); if (pulse) m += 0.40 * petAbiMul(pulse);
+  const veil = petRareOf(g, PRT_VEIL); if (veil) m += 0.80 * petAbiMul(veil);
+  return m;
+};
 // enemy status ticks from effects (bleed, poison, doom, marks); returns true if it died
 function efEnemyTick(g: Game, e: En): boolean {
   if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); e.hp -= d; e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
@@ -3445,28 +3471,50 @@ function makePet(ilvl: number, rar: number, depth?: number): Item {
   const it: Item = { id: NID++, seed: Math.floor(R() * 2147483646) + 1, kind: "pet", rar, ilvl, name: PRE[rar][ri(6)] + " " + PETN[pt], atk: 0, def: 0, block: 0, bonus: {}, d: [0, 0, 0, 0], pt };
   const st = rollStars("pet", rar, false, depth ?? ilvl);
   if (st) it.st = st;
-  if (rar >= 7) it.pab = petAbiRoll(it);
+  if (rar >= 7) { it.pab = petAbiRoll(it); it.prt = petRareRoll(it); }
   return it;
 }
 const petPower = (lvl: number, it: Item): number => {
   const stars = it.st ? it.st.length : 0;
   return PSH[Math.max(0, Math.min(7, it.rar))] * Math.min(1, (it.ilvl + 4) / (lvl + 4)) * (1 + 0.12 * stars) * prisStarMul(it);
 };
-const PET_ABI_N = ["Guardian Aegis", "Prismatic Storm", "Soul Harvest", "Phoenix Bond", "Mirror Twin", "Fortune's Eye"];
+const PET_ABI_N = [
+  "Guardian Aegis", "Prismatic Storm", "Soul Harvest", "Phoenix Bond", "Mirror Twin", "Fortune's Eye",
+  "Split Swarm", "Aegis Lattice", "Rift Needles", "Gale Stride", "Blood Pact", "Thunder Nest",
+  "Crystal Bastion", "Midas Pulse", "Gravity Well", "Chrono Spark",
+];
+const PET_ABI_N_MAX = 16;
 const PET_ABI_STAR = 0.08;
+const PET_RARE_CH = 0.08; // 8% on newly rolled Prismatic pets only
+const PET_RARE_N = ["", "Dual Titan", "Second Soul", "Apex Chronos", "Midas Veil", "Worldbreaker", "Eternal Ember", "Astral Legion"];
+const PET_RARE_MAX = 7;
+const PRT_DUAL = 1, PRT_SOUL = 2, PRT_CHRONOS = 3, PRT_VEIL = 4, PRT_WORLD = 5, PRT_EMBER = 6, PRT_LEGION = 7;
 function petAbiMul(it: Item): number { return 1 + PET_ABI_STAR * (it.st ? it.st.length : 0); }
-function petAbiRoll(it: Item): number {
-  const s = (((it.seed >>> 0) * 1103515245) + (((it.pt ?? 0) + 1) * 12345)) >>> 0;
-  return s % 6;
+function petHash(it: Item, salt: number): number {
+  let s = (it.seed >>> 0) ^ (salt >>> 0) ^ Math.imul((it.pt ?? 0) + 1, 0x9E3779B9);
+  s = Math.imul(s ^ (s >>> 16), 0x7feb352d);
+  s = Math.imul(s ^ (s >>> 15), 0x846ca68b);
+  return (s ^ (s >>> 16)) >>> 0;
+}
+function petAbiRoll(it: Item): number { return petHash(it, 0xA5A5) % PET_ABI_N_MAX; }
+function petRareRoll(it: Item): number {
+  const s = petHash(it, 0xC3D1E007);
+  if ((s % 1000) >= Math.round(PET_RARE_CH * 1000)) return 0;
+  return 1 + (petHash(it, 0x51ED) % PET_RARE_MAX);
 }
 function ensurePetAbi(it: Item): void {
   if (it.kind !== "pet" || it.rar < 7) { it.pab = undefined; return; }
-  if (it.pab === undefined || it.pab < 0 || it.pab > 5) it.pab = petAbiRoll(it);
+  if (it.pab === undefined || it.pab < 0 || it.pab >= PET_ABI_N_MAX) it.pab = petAbiRoll(it);
+  // Old saves have no prt field (undefined): leave them without a rare. Never retro-roll.
+  if (it.prt !== undefined) {
+    const prt = Math.floor(Number(it.prt));
+    it.prt = prt >= 0 && prt <= PET_RARE_MAX ? prt : 0;
+  }
 }
+function petStars(it: Item): number { return it.st ? it.st.length : 0; }
 function petAbiFromInputs(a: Item, b: Item, c: Item, out: Item): number {
-  const stars = (it: Item): number => it.st ? it.st.length : 0;
-  const top = Math.max(stars(a), stars(b), stars(c));
-  const tied = [a, b, c].filter((x: Item) => stars(x) === top && x.pab !== undefined && x.pab >= 0 && x.pab <= 5);
+  const top = Math.max(petStars(a), petStars(b), petStars(c));
+  const tied = [a, b, c].filter((x: Item) => petStars(x) === top && x.pab !== undefined && x.pab >= 0 && x.pab < PET_ABI_N_MAX);
   if (tied.length === 1) return tied[0].pab as number;
   if (tied.length > 1) {
     let s = 0;
@@ -3475,12 +3523,38 @@ function petAbiFromInputs(a: Item, b: Item, c: Item, out: Item): number {
   }
   return petAbiRoll(out);
 }
+function petRareFromInputs(a: Item, b: Item, c: Item, out: Item): number {
+  const top = Math.max(petStars(a), petStars(b), petStars(c));
+  const tied = [a, b, c].filter((x: Item) => petStars(x) === top && (x.prt ?? 0) >= 1 && (x.prt ?? 0) <= PET_RARE_MAX);
+  if (tied.length === 1) return tied[0].prt as number;
+  if (tied.length > 1) {
+    let s = 0;
+    for (const x of tied) s ^= (x.seed >>> 0);
+    return tied[(s >>> 0) % tied.length].prt as number;
+  }
+  return petRareRoll(out);
+}
 function petAbiOf(g: Game, id?: number): Item | null {
   const it = g.eq.pet;
   if (!it || it.kind !== "pet" || it.rar < 7) return null;
   ensurePetAbi(it);
   if (id !== undefined && it.pab !== id) return null;
   return it;
+}
+function petRareOf(g: Game, id?: number): Item | null {
+  const it = g.eq.pet;
+  if (!it || it.kind !== "pet" || it.rar < 7) return null;
+  ensurePetAbi(it);
+  const prt = it.prt ?? 0;
+  if (prt <= 0) return null;
+  if (id !== undefined && prt !== id) return null;
+  return it;
+}
+function canDualTwo(eq: Eq): boolean {
+  const it = eq.pet;
+  if (!it || it.kind !== "pet" || it.rar < 7) return false;
+  ensurePetAbi(it);
+  return (it.prt ?? 0) === PRT_DUAL;
 }
 function showPetAbiFx(g: Game, n: string, c: string): void {
   g.petAbiFx = { n, t: (g.petAbiT ?? 0) + 1.2, c };
@@ -3496,9 +3570,9 @@ function tryPetAegis(g: Game, st: Stats): void {
   if ((g.petAegisCd ?? 0) > now) return;
   if (g.hero.hp / Math.max(1, st.maxHp) >= 0.3) return;
   const mul = petAbiMul(it);
-  g.petAegisUntil = now + 3 * mul;
-  g.petAegisCd = now + 90 / mul;
-  const heal = Math.round(st.maxHp * 0.25 * mul);
+  g.petAegisUntil = now + 4 * mul;
+  g.petAegisCd = now + 75 / mul;
+  const heal = Math.round(st.maxHp * 0.30 * mul);
   g.hero.hp = Math.min(st.maxHp, g.hero.hp + heal);
   showPetAbiFx(g, "AEGIS", "#ffe080");
   floatTxt(g, g.hero.x, g.hero.y - 0.35, "+" + heal, "#80ff80");
@@ -3509,7 +3583,7 @@ function tryPetPhoenix(g: Game, st: Stats): boolean {
   if ((g.petPhoenixD ?? -1) === g.depth) return false;
   g.petPhoenixD = g.depth;
   const mul = petAbiMul(it);
-  const frac = Math.min(1, 0.5 * mul);
+  const frac = Math.min(1, 0.6 * mul);
   g.hero.hp = Math.max(1, Math.round(st.maxHp * frac));
   showPetAbiFx(g, "PHOENIX", "#ff8040");
   burst(g, g.hero.ax * TS + 12, g.hero.ay * TS + 12, 70, ["#ff8040", "#ffe040", "#ffffff"], 140, 50);
@@ -3522,6 +3596,19 @@ function tryPetPhoenix(g: Game, st: Stats): boolean {
   g.sfx("sparkle");
   return true;
 }
+function tryPetSecondSoul(g: Game, st: Stats): boolean {
+  const it = petRareOf(g, PRT_SOUL);
+  if (!it) return false;
+  if ((g.petSoulD ?? -1) === g.depth) return false;
+  g.petSoulD = g.depth;
+  const mul = petAbiMul(it);
+  g.hero.hp = Math.max(1, Math.round(st.maxHp * Math.min(1, 0.8 * mul)));
+  g.petAegisUntil = (g.petAbiT ?? 0) + 2 * mul;
+  showPetAbiFx(g, "SECOND SOUL", "#e0c0ff");
+  burst(g, g.hero.ax * TS + 12, g.hero.ay * TS + 12, 80, ["#e0c0ff", "#ffe0ff", "#ffffff"], 150, 40);
+  g.sfx("sparkle");
+  return true;
+}
 function applyHeroDmg(g: Game, dmg: number, shake: number): void {
   const now = g.petAbiT ?? 0;
   if ((g.petAegisUntil ?? 0) > now) {
@@ -3530,7 +3617,18 @@ function applyHeroDmg(g: Game, dmg: number, shake: number): void {
   }
   if (dmg <= 0) return;
   const st = calc(g.lvl, g.eq);
+  const lattice = petAbiOf(g, 7);
+  if (lattice) dmg = Math.max(1, safeRound(dmg * (1 - Math.min(0.35, 0.18 * petAbiMul(lattice)))));
+  const emberHp = g.petEmberHp ?? 0;
+  if (emberHp > 0 && petRareOf(g, PRT_EMBER)) {
+    const soak = Math.min(emberHp, dmg);
+    g.petEmberHp = emberHp - soak;
+    dmg -= soak;
+    if (soak > 0) floatTxt(g, g.hero.x + 0.3, g.hero.y - 0.2, "WARD " + soak, "#ffb040");
+    if (dmg <= 0) return;
+  }
   if (dmg >= g.hero.hp && tryPetPhoenix(g, st)) return;
+  if (dmg >= g.hero.hp && tryPetSecondSoul(g, st)) return;
   g.hero.hp -= dmg;
   floatTxt(g, g.hero.x, g.hero.y, "-" + dmg, "#ff5050");
   g.shake = Math.max(g.shake, shake);
@@ -3542,9 +3640,9 @@ function petStorm(g: Game, mul: number): void {
   const st = calc(g.lvl, g.eq);
   const raw = st.atk * 10 * mul;
   showPetAbiFx(g, "STORM", "#c040ff");
-  fxAdd(g, "ring", g.hero.ax * TS + 12, g.hero.ay * TS + 12, 0, 0, 0.45, "#ff80ff", "#40ffff", 3.2 * TS);
-  const stunT = petAbiSec(1 * mul / RT_TICK);
-  for (const e of nearEnemies(g, g.hero.x, g.hero.y, 3)) {
+  fxAdd(g, "ring", g.hero.ax * TS + 12, g.hero.ay * TS + 12, 0, 0, 0.45, "#ff80ff", "#40ffff", 4 * TS);
+  const stunT = petAbiSec(1.2 * mul / RT_TICK);
+  for (const e of nearEnemies(g, g.hero.x, g.hero.y, 4)) {
     const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
     withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg); if (e.cls === 0) e.stun = Math.max(e.stun, stunT); if (e.hp <= 0) kill(g, e); });
   }
@@ -3554,27 +3652,99 @@ function petHarvestOnKill(g: Game): void {
   const it = petAbiOf(g, 2);
   if (!it) return;
   const mul = petAbiMul(it);
-  const need = Math.max(8, Math.round(25 / mul));
+  const need = Math.max(8, Math.round(20 / mul));
   g.petHarvest = (g.petHarvest ?? 0) + 1;
   if ((g.petHarvest ?? 0) < need) return;
   g.petHarvest = 0;
   const st = calc(g.lvl, g.eq);
-  const heal = Math.round(st.maxHp * Math.min(1, 0.3 * mul));
+  const heal = Math.round(st.maxHp * Math.min(1, 0.35 * mul));
   g.hero.hp = Math.min(st.maxHp, g.hero.hp + heal);
   g.potions++;
   showPetAbiFx(g, "HARVEST", "#80ff80");
   floatTxt(g, g.hero.x, g.hero.y - 0.35, "+" + heal, "#80ff80");
 }
 function petFortuneDrop(g: Game, e: En, drop: (it: Item) => void): void {
-  const it = petAbiOf(g, 5);
-  if (!it || e.child || e.gob || e.hunt) return;
+  if (e.child || e.gob || e.hunt) return;
   if (!(e.cls >= 1 || e.act)) return;
-  const mul = petAbiMul(it);
-  STAR_LUCK = mul;
-  drop(makeItem(g.depth + (e.cls === 2 || e.act ? 1 : 0), rollRar(e.act ? 1.4 : 1.22, 0, g.depth)));
-  STAR_LUCK = 1;
+  const luckDrop = (luck: number): void => {
+    STAR_LUCK = luck;
+    drop(makeItem(g.depth + (e.cls === 2 || e.act ? 1 : 0), rollRar(e.act ? 1.4 : 1.22, 0, g.depth)));
+    STAR_LUCK = 1;
+  };
+  const fortune = petAbiOf(g, 5);
+  if (fortune) luckDrop(petAbiMul(fortune));
+  const veil = petRareOf(g, PRT_VEIL);
+  if (veil) luckDrop(petAbiMul(veil));
+}
+function petShotCopies(g: Game): number {
+  const now = g.petAbiT ?? 0;
+  if (petAbiOf(g, 6) && (g.petSplitUntil ?? 0) > now) return Math.max(2, Math.min(5, g.petSplitN ?? 2));
+  return 1;
+}
+function petDeal(g: Game, e: En, raw: number, c: string, tag?: string): void {
+  if (!e || e.hp <= 0 || raw <= 0) return;
+  const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
+  withHit({ ox: g.hero.x, oy: g.hero.y }, () => {
+    const dealt = hurtEn(g, e, dmg);
+    floatTxt(g, e.x, e.y - 0.15, String(dmg), c);
+    const pact = petAbiOf(g, 10);
+    if (pact && dealt > 0) {
+      const st = calc(g.lvl, g.eq);
+      const heal = Math.max(1, Math.round(dealt * Math.min(0.6, 0.35 * petAbiMul(pact))));
+      g.hero.hp = Math.min(st.maxHp, g.hero.hp + heal);
+    }
+    if (e.hp <= 0) kill(g, e);
+  });
+}
+function petNeedles(g: Game, mul: number): void {
+  const st = calc(g.lvl, g.eq);
+  const foes = nearEnemies(g, g.hero.x, g.hero.y, PET_RANGE).slice(0, 3);
+  if (!foes.length) return;
+  const raw = st.atk * 0.35 * mul;
+  for (const e of foes) petDeal(g, e, raw, "#c0a0ff");
+}
+function petThunder(g: Game, mul: number): void {
+  const st = calc(g.lvl, g.eq);
+  const foes = nearEnemies(g, g.hero.x, g.hero.y, 4).slice(0, 4);
+  if (!foes.length) return;
+  showPetAbiFx(g, "THUNDER", "#ffe060");
+  const raw = st.atk * 1.8 * mul;
+  for (const e of foes) {
+    fxAdd(g, "bolt", g.hero.ax * TS + 12, g.hero.ay * TS + 8, e.ax * TS + 12, e.ay * TS + 12, 0.2, "#ffe060", "#ffffff", 3);
+    petDeal(g, e, raw, "#ffe060");
+  }
+  g.sfx("sparkle");
+}
+function petGravityWell(g: Game, mul: number): void {
+  showPetAbiFx(g, "GRAVITY", "#a080ff");
+  const slowT = petAbiSec(2.5 * mul / RT_TICK);
+  for (const e of nearEnemies(g, g.hero.x, g.hero.y, 3)) {
+    e.slow = Math.max(e.slow, slowT);
+    const sx = Math.sign(g.hero.x - e.x), sy = Math.sign(g.hero.y - e.y);
+    const nx = e.x + sx, ny = e.y + sy;
+    if ((sx || sy) && inb(nx, ny) && walkable(g, nx, ny) && !enemyAt(g, nx, ny)) { e.x = nx; e.y = ny; e.ax = nx; e.ay = ny; }
+  }
+}
+function petApexFreeze(g: Game, mul: number): void {
+  showPetAbiFx(g, "CHRONOS", "#80e0ff");
+  const stunT = petAbiSec(3 * mul / RT_TICK);
+  for (const e of nearEnemies(g, g.hero.x, g.hero.y, 5)) e.stun = Math.max(e.stun, stunT);
+  fxAdd(g, "ring", g.hero.ax * TS + 12, g.hero.ay * TS + 12, 0, 0, 0.4, "#80e0ff", "#ffffff", 5 * TS);
+  g.sfx("sparkle");
+}
+function petLegionTick(g: Game, dt: number, mul: number): void {
+  g.petLegionAcc = (g.petLegionAcc ?? 0) + dt;
+  const gap = 1.2;
+  if ((g.petLegionAcc ?? 0) < gap) return;
+  g.petLegionAcc = (g.petLegionAcc as number) % gap;
+  const st = calc(g.lvl, g.eq);
+  const e = nearestEnemy(g, PET_RANGE);
+  if (!e) return;
+  const raw = st.atk * 0.28 * mul;
+  for (let i = 0; i < 3; i++) petDeal(g, e, raw, "#d0f0ff");
 }
 function petAbiTick(g: Game, dt: number): void {
+  STAT_G = g;
   const now = (g.petAbiT ?? 0) + dt;
   g.petAbiT = now;
   const it = petAbiOf(g);
@@ -3583,20 +3753,21 @@ function petAbiTick(g: Game, dt: number): void {
   const id = it.pab ?? -1;
   if (id === 1 && (g.petStormCd ?? 0) <= now) {
     petStorm(g, mul);
-    g.petStormCd = now + 20 / mul;
+    g.petStormCd = now + 16 / mul;
   }
   if (id === 4) {
     if ((g.petTwinUntil ?? 0) <= now && (g.petTwinCd ?? 0) <= now) {
-      g.petTwinUntil = now + 8 * mul;
-      g.petTwinCd = now + 45 / mul;
+      g.petTwinUntil = now + 10 * mul;
+      g.petTwinCd = now + 40 / mul;
       g.petTwinAcc = 0;
       showPetAbiFx(g, "MIRROR TWIN", "#c0e0ff");
     }
     if ((g.petTwinUntil ?? 0) > now) {
       g.petTwinAcc = (g.petTwinAcc ?? 0) + dt;
       const st = calc(g.lvl, g.eq);
-      while ((g.petTwinAcc ?? 0) >= RT_ATK) {
-        g.petTwinAcc = (g.petTwinAcc as number) - RT_ATK;
+      const pace = RT_ATK / 0.85;
+      while ((g.petTwinAcc ?? 0) >= pace) {
+        g.petTwinAcc = (g.petTwinAcc as number) - pace;
         const tg = findTarget(g, st);
         if (!tg) break;
         const dx = Math.sign(tg.x - g.hero.x), dy = Math.sign(tg.y - g.hero.y);
@@ -3604,6 +3775,58 @@ function petAbiTick(g: Game, dt: number): void {
       }
     }
   }
+  if (id === 6) {
+    if ((g.petSplitUntil ?? 0) <= now && (g.petSplitCd ?? 0) <= now) {
+      const n = 2 + (((it.seed >>> 0) + Math.floor(now * 10)) >>> 0) % 4;
+      g.petSplitN = Math.max(2, Math.min(5, n));
+      g.petSplitUntil = now + 10;
+      g.petSplitCd = now + 60;
+      showPetAbiFx(g, "SPLIT x" + g.petSplitN, "#ff80e0");
+    }
+  }
+  if (id === 8 && (g.petNeedleCd ?? 0) <= now) {
+    petNeedles(g, mul);
+    g.petNeedleCd = now + 2.5 / mul;
+  }
+  if (id === 11 && (g.petThunderCd ?? 0) <= now) {
+    petThunder(g, mul);
+    g.petThunderCd = now + 8 / mul;
+  }
+  if (id === 14 && (g.petWellCd ?? 0) <= now) {
+    petGravityWell(g, mul);
+    g.petWellCd = now + 12 / mul;
+  }
+  if (id === 15) {
+    if ((g.petChronoUntil ?? 0) <= now && (g.petChronoCd ?? 0) <= now) {
+      g.petChronoUntil = now + 8 * mul;
+      g.petChronoCd = now + 25 / mul;
+      showPetAbiFx(g, "CHRONO", "#80ffe0");
+    }
+  }
+  const chronos = petRareOf(g, PRT_CHRONOS);
+  if (chronos && (g.petApexCd ?? 0) <= now) {
+    petApexFreeze(g, petAbiMul(chronos));
+    g.petApexCd = now + 90 / petAbiMul(chronos);
+  }
+  const ember = petRareOf(g, PRT_EMBER);
+  if (ember) {
+    const st = calc(g.lvl, g.eq);
+    const regen = st.maxHp * 0.02 * petAbiMul(ember) * dt;
+    if (regen > 0 && g.hero.hp < st.maxHp) g.hero.hp = Math.min(st.maxHp, g.hero.hp + regen);
+    const still = !!(g.es && g.es.still);
+    g.petEmberStill = still ? (g.petEmberStill ?? 0) + dt : 0;
+    if ((g.petEmberStill ?? 0) >= 2 && (g.petEmberWard ?? 0) <= now) {
+      g.petEmberHp = Math.round(st.maxHp * 0.25 * petAbiMul(ember));
+      g.petEmberWard = now + 40 / petAbiMul(ember);
+      showPetAbiFx(g, "EMBER WARD", "#ffb040");
+    }
+  }
+  const legion = petRareOf(g, PRT_LEGION);
+  if (legion) petLegionTick(g, dt, petAbiMul(legion));
+}
+function ultCdLen(g: Game): number {
+  const it = petRareOf(g, PRT_CHRONOS);
+  return it ? Math.round(ULT_CD * (1 - Math.min(0.5, 0.4 * petAbiMul(it)))) : ULT_CD;
 }
 function petAbiTitle(it: Item): string {
   ensurePetAbi(it);
@@ -3616,12 +3839,42 @@ function petAbiDesc(it: Item): string {
   const mul = petAbiMul(it);
   const id = it.pab ?? 0;
   const s = (n: number): string => { const v = Math.round(n * 10) / 10; return String(v); };
-  if (id === 0) return "When you drop below 30% HP after a nonlethal hit, gain " + s(3 * mul) + "s full immunity and heal " + s(25 * mul) + "% HP. " + s(90 / mul) + "s cooldown. A lethal blow is Phoenix Bond's job.";
-  if (id === 1) return "Every " + s(20 / mul) + "s: a rainbow nova deals " + s(10 * mul) + "x weapon damage in a 3-tile radius and stuns normal foes for " + s(1 * mul) + "s. Elites and bosses take the damage only.";
-  if (id === 2) return "Every " + Math.max(8, Math.round(25 / mul)) + " kills: heal " + s(Math.min(100, 30 * mul)) + "% HP and refill one potion charge.";
-  if (id === 3) return "Once per floor, a lethal hit revives you at " + s(Math.min(100, 50 * mul)) + "% HP with a fiery explosion. Direct resign still kills.";
-  if (id === 4) return "Every " + s(45 / mul) + "s: an " + s(8 * mul) + "s mirror clone of you auto-attacks at full power with your gear.";
-  return "Elites and bosses take +" + s(20 * mul) + "% damage and drop +1 extra item with better star odds.";
+  if (id === 0) return "When you drop below 30% HP after a nonlethal hit, gain " + s(4 * mul) + "s full immunity and heal " + s(30 * mul) + "% HP. " + s(75 / mul) + "s cooldown. A lethal blow is Phoenix Bond's job.";
+  if (id === 1) return "Every " + s(16 / mul) + "s: a rainbow nova deals " + s(10 * mul) + "x weapon damage in a 4-tile radius and stuns normal foes for " + s(1.2 * mul) + "s. Elites and bosses take the damage only.";
+  if (id === 2) return "Every " + Math.max(8, Math.round(20 / mul)) + " kills: heal " + s(Math.min(100, 35 * mul)) + "% HP and refill one potion charge.";
+  if (id === 3) return "Once per floor, a lethal hit revives you at " + s(Math.min(100, 60 * mul)) + "% HP with a fiery explosion. Direct resign still kills.";
+  if (id === 4) return "Every " + s(40 / mul) + "s: a " + s(10 * mul) + "s mirror clone of you auto-attacks at 85% power with your gear.";
+  if (id === 5) return "Elites and bosses take +" + s(25 * mul) + "% damage and drop +1 extra item with better star odds.";
+  if (id === 6) return "Every 60s, your pet splits into 2-5 copies for 10s. Each copy fires its own shot, and their damage stacks.";
+  if (id === 7) return "Permanently reduce incoming damage by " + s(Math.min(35, 18 * mul)) + "%.";
+  if (id === 8) return "Every " + s(2.5 / mul) + "s, fire 3 rift needles at nearby foes for " + s(35 * mul) + "% weapon damage each.";
+  if (id === 9) return "+" + s(20 * mul) + " Movement Speed and +" + s(8 * mul) + " Attack Speed while this pet is equipped.";
+  if (id === 10) return "Pet shots heal you for " + s(Math.min(60, 35 * mul)) + "% of the damage they deal.";
+  if (id === 11) return "Every " + s(8 / mul) + "s, lightning chains to up to 4 nearby foes for " + s(1.8 * mul) + "x weapon damage each.";
+  if (id === 12) return "+" + s(20 * mul) + "% max HP and +" + s(12 * mul) + "% Defense while this pet is equipped.";
+  if (id === 13) return "+" + s(40 * mul) + "% gold from kills.";
+  if (id === 14) return "Every " + s(12 / mul) + "s, pull and slow enemies in 3 tiles for " + s(2.5 * mul) + "s.";
+  return "Every " + s(25 / mul) + "s: gain " + s(8 * mul) + "s of +" + s(35 * mul) + " Attack Speed and +" + s(12 * mul) + " Movement Speed.";
+}
+function petRareTitle(it: Item): string {
+  ensurePetAbi(it);
+  const prt = it.prt ?? 0;
+  const n = PET_RARE_N[prt] || "Rare Gift";
+  const stars = it.st ? it.st.length : 0;
+  return "\u2726 RARE  " + n + "  x" + (Math.round(petAbiMul(it) * 100) / 100) + (stars ? "  (" + stars + "\u2605)" : "");
+}
+function petRareDesc(it: Item): string {
+  ensurePetAbi(it);
+  const mul = petAbiMul(it);
+  const prt = it.prt ?? 0;
+  const s = (n: number): string => { const v = Math.round(n * 10) / 10; return String(v); };
+  if (prt === PRT_DUAL) return "Dual-wield two-handed weapons: equip a 2H in your main hand and a 2H (or a 1H / shield) in your off-hand. The off-hand 2H grants 70% of its attack. If this pet is unequipped, the off-hand 2H is moved to your inventory.";
+  if (prt === PRT_SOUL) return "Once per floor, a lethal blow you cannot otherwise survive revives you at " + s(Math.min(100, 80 * mul)) + "% HP with " + s(2 * mul) + "s of immunity. Stacks as a second life after Phoenix Bond.";
+  if (prt === PRT_CHRONOS) return "Ultimate cooldown is " + s(40 * mul) + "% faster. Every " + s(90 / mul) + "s, freeze nearby foes for " + s(3 * mul) + "s.";
+  if (prt === PRT_VEIL) return "+" + s(80 * mul) + "% gold from kills. Elites and bosses drop +1 extra item with better star odds.";
+  if (prt === PRT_WORLD) return "Deal +" + s(15 * mul) + "% damage. 12% of your hits unleash a 2-tile shockwave for 1.0x weapon damage and a brief stun.";
+  if (prt === PRT_EMBER) return "Regenerate " + s(2 * mul) + "% of max HP per second. After standing still for 2s, a flame ward absorbs " + s(25 * mul) + "% of max HP (" + s(40 / mul) + "s cooldown).";
+  return "3 astral specters orbit you and each fire every 1.2s for " + s(28 * mul) + "% weapon damage (less than your own attacks).";
 }
 function petLines(it: Item, lvl: number): string[] {
   const pt = it.pt ?? 0;
@@ -3629,7 +3882,10 @@ function petLines(it: Item, lvl: number): string[] {
     "Fires a " + petProjName(pt) + " at the nearest foe in sight every turn (range " + PET_RANGE + ")",
     "Each shot: " + Math.round(petPower(lvl, it) * 100) + "% of your damage per turn" + (it.ilvl < lvl ? " (weaker below your level)" : "") + (it.st && it.st.length ? "  " + starBadge(it) + (it.rar >= 7 && it.st.length > 5 ? "  power x" + fmtBig(prisStarMul(it)) : "") : ""),
     "Pets never die and follow you everywhere. Same rarity colors and star rules as other gear (combine 3 of the same rarity and stars)."];
-  if (it.rar >= 7) { lines.push(petAbiTitle(it), petAbiDesc(it)); }
+  if (it.rar >= 7) {
+    lines.push(petAbiTitle(it), petAbiDesc(it));
+    if ((it.prt ?? 0) >= 1) { lines.push(petRareTitle(it), petRareDesc(it)); }
+  }
   return lines;
 }
 function drawPetSprite(p: Pt, pt: number): void {
@@ -3703,15 +3959,28 @@ function petTurn(g: Game, st: Stats): void {
   if (setCounts(g.eq)[3] >= 2) dmg = Math.round(dmg * 1.3);
   const pp = petPos(g);
   if (!g.pshots) g.pshots = [];
-  if (g.pshots.length < 10) g.pshots.push({ x0: pp[0], y0: pp[1], x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.16 + bd * 0.03, pt: it.pt, rar: it.rar, hit: false });
-  withHit({ dx: best.ax * TS + 12 - pp[0], dy: best.ay * TS + 12 - pp[1] }, () => {
-    hurtEn(g, best, dmg);
-    g.petDmg = (g.petDmg ?? 0) + dmg;
-    floatTxt(g, best.x + 0.3, best.y - 0.1, String(dmg), petCol(it.pt));
-    g.sfx("mx", petSnd(it.pt));
-    if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2); if (g.pshots && g.pshots.length < 10) g.pshots.push({ x0: pp[0], y0: pp[1], x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
-    if (best.hp <= 0) kill(g, best);
-  });
+  const copies = petShotCopies(g);
+  const fireOnce = (ox: number, oy: number): void => {
+    if (g.pshots && g.pshots.length < 24) g.pshots.push({ x0: pp[0] + ox, y0: pp[1] + oy, x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.16 + bd * 0.03, pt: it.pt, rar: it.rar, hit: false });
+    withHit({ dx: best.ax * TS + 12 - pp[0], dy: best.ay * TS + 12 - pp[1] }, () => {
+      const dealt = hurtEn(g, best, dmg);
+      g.petDmg = (g.petDmg ?? 0) + dmg;
+      floatTxt(g, best.x + 0.3, best.y - 0.1, String(dmg), petCol(it.pt));
+      g.sfx("mx", petSnd(it.pt));
+      const pact = petAbiOf(g, 10);
+      if (pact && dealt > 0) {
+        const heal = Math.max(1, Math.round(dealt * Math.min(0.6, 0.35 * petAbiMul(pact))));
+        g.hero.hp = Math.min(st.maxHp, g.hero.hp + heal);
+      }
+      if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2); if (g.pshots && g.pshots.length < 24) g.pshots.push({ x0: pp[0] + ox, y0: pp[1] + oy, x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
+      if (best.hp <= 0) kill(g, best);
+    });
+  };
+  for (let i = 0; i < copies; i++) {
+    const ang = (i / Math.max(1, copies)) * 6.283 + (g.time || 0);
+    fireOnce(copies > 1 ? Math.cos(ang) * 10 : 0, copies > 1 ? Math.sin(ang) * 8 : 0);
+    if (best.hp <= 0) break;
+  }
   petSnap(g);
 }
 function petShotTick(g: Game, dt: number): void {
@@ -3776,6 +4045,29 @@ function drawPet(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: num
   } else if (g.hero.face < 0) { ctx.translate(x + 16, y); ctx.scale(-1, 1); ctx.drawImage(petCanvas(it.pt), 0, 0); }
   else ctx.drawImage(petCanvas(it.pt), x, y);
   ctx.restore();
+  const now = g.petAbiT ?? 0;
+  const splitN = (petAbiOf(g, 6) && (g.petSplitUntil ?? 0) > now) ? Math.max(2, Math.min(5, g.petSplitN ?? 2)) : 1;
+  if (splitN > 1) {
+    for (let i = 1; i < splitN; i++) {
+      const a = t * 1.6 + i * 6.283 / splitN;
+      const cx = Math.round(x + Math.cos(a) * 14), cy = Math.round(y + Math.sin(a) * 10);
+      ctx.globalAlpha = 0.7;
+      if (r >= 7) drawPrisPiece(painter(ctx, cx, cy, 1, g.hero.face < 0, 16), it, (q: Pt) => drawPetSprite(q, it.pt as number));
+      else ctx.drawImage(petCanvas(it.pt), cx, cy);
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (petRareOf(g, PRT_LEGION)) {
+    for (let i = 0; i < 3; i++) {
+      const a = t * 2.2 + i * 2.094;
+      const cx = Math.round(g.hero.ax * TS + 12 - camX - 8 + Math.cos(a) * 18);
+      const cy = Math.round(g.hero.ay * TS + 4 - camY - 10 + Math.sin(a) * 10);
+      ctx.globalAlpha = 0.45 + 0.15 * Math.sin(t * 5 + i);
+      ctx.fillStyle = "#d0f0ff";
+      ctx.beginPath(); ctx.arc(cx + 8, cy + 8, 5, 0, 6.283); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
   const fx = g.petAbiFx;
   if (fx && (g.petAbiT ?? 0) < fx.t) {
     ctx.globalAlpha = Math.max(0.35, Math.min(1, fx.t - (g.petAbiT ?? 0)));
@@ -6338,7 +6630,7 @@ function packItem(it: Item | null): unknown {
     it.spells ? it.spells.map((s: Spell) => [ELS.indexOf(s.el), SHAPES.indexOf(s.sh), s.mod, r3(s.ch), r3(s.pw), r3(s.r), s.name]) : 0,
     it.pas ? it.pas.map((p: Passive) => [ELS.indexOf(p.el), PTYPES.indexOf(p.ty), p.mod, r3(p.pw), p.name]) : 0,
     it.ult === undefined ? -1 : it.ult, it.ef ? it.ef.map((e: number[]) => [e[0], r3(e[1])]) : 0, it.pt === undefined ? -1 : it.pt, it.set === undefined ? -1 : it.set, it.st ? it.st.map((e: number[]) => [e[0], r3(e[1] ?? 1)]) : 0, wepNeedsEl(it.kind) ? ELS.indexOf(ensureWepEl(it)) : -1,
-    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number } }) => [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1]) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab];
+    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number } }) => [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1]) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab, it.prt === undefined ? -1 : it.prt];
 }
 function unpackItem(a: unknown): Item | null {
   if (!Array.isArray(a) || a.length < 13) return null;
@@ -6351,7 +6643,7 @@ function unpackItem(a: unknown): Item | null {
     d: String(a[8] ?? "").split("").map((c: string) => Number(c)), spells: sp, pas: pa, ult: n(a[12]) >= 0 ? n(a[12]) : undefined,
     ef: Array.isArray(a[13]) ? (a[13] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, pt: n(a[14]) >= 0 ? n(a[14]) : undefined, set: n(a[15]) >= 0 ? n(a[15]) : undefined, st: Array.isArray(a[16]) ? (a[16] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, wel: (ELS as string[]).includes(ELS[n(a[17])]) ? ELS[n(a[17])] : undefined,
     sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); return { c: Math.max(0, Math.min(6, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)) } : undefined }; }) : undefined,
-    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 5 ? Math.floor(n(a[21])) : undefined };
+    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined };
   if ([o.rar, o.ilvl, o.atk, o.def, o.block].some((v: number) => !isFinite(v))) return null;
   return validItem(o);
 }
@@ -6398,6 +6690,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     if (typeof s.gc === "number" && isFinite(s.gc)) g.gemCap = Math.max(GEM_BAG, Math.floor(s.gc));
     migrateGemsToBag(g);
     fixEq(g.eq);
+    enforceHandRules(g);
     g.ultAts = readUltCds(s.ucs, g.ultAt, g.ultAtA, g.eq, true);
     syncLegacyUlt(g);
     g.thSeen = thSeenParse(s.ts);
@@ -6488,7 +6781,7 @@ function validItem(o: unknown): Item | null {
   it.spells = Array.isArray(it.spells) ? it.spells.filter((s: Spell) => !!s && ELS.includes(s.el) && SHAPES.includes(s.sh) && typeof s.ch === "number" && typeof s.pw === "number" && typeof s.r === "number" && typeof s.name === "string").map((s: Spell) => ({ ...s, mod: Math.max(0, Math.min(7, Math.floor(Number(s.mod) || 0))) })) : undefined;
   it.pas = Array.isArray(it.pas) ? it.pas.filter((p: Passive) => !!p && ELS.includes(p.el) && PTYPES.includes(p.ty) && typeof p.pw === "number" && typeof p.name === "string").map((p: Passive) => ({ ...p, mod: Math.max(0, Math.min(4, Math.floor(Number(p.mod) || 0))) })) : undefined;
   if (typeof it.ult === "number" && it.ult >= 0 && it.ult < ULTS.length && it.kind !== "shield" && it.kind !== "pet") it.ult = Math.floor(it.ult); else it.ult = undefined;
-  if (it.kind === "pet") { const pt = Math.floor(Number(it.pt)); it.pt = pt >= 0 && pt < 100 ? pt : 0; it.spells = undefined; it.pas = undefined; ensurePetAbi(it); } else { it.pt = undefined; it.pab = undefined; }
+  if (it.kind === "pet") { const pt = Math.floor(Number(it.pt)); it.pt = pt >= 0 && pt < 100 ? pt : 0; it.spells = undefined; it.pas = undefined; ensurePetAbi(it); if (it.prt !== undefined) { const prt = Math.floor(Number(it.prt)); it.prt = prt >= 0 && prt <= 7 ? prt : undefined; } } else { it.pt = undefined; it.pab = undefined; it.prt = undefined; }
   if (Array.isArray(it.ef) && it.kind !== "pet") {
     const wpn = !isArmor(it.kind) && it.kind !== "shield";
     const seenEf = new Set<number>();
@@ -6577,11 +6870,11 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     for (const k of EQK) { const it = eqIn[k] ? validItem(eqIn[k]) : null; if (it) eq[k] = it; }
     for (const k of ARMOR_K) { const v = eq[k]; if (v && v.kind !== k) eq[k] = null; }
     if (eq.rh && (isArmor(eq.rh.kind) || eq.rh.kind === "shield")) eq.rh = null;
-    if (eq.lh && (isArmor(eq.lh.kind) || isTwo(eq.lh))) eq.lh = null;
-    if (isTwo(eq.rh)) eq.lh = null;
+    if (eq.lh && isArmor(eq.lh.kind)) eq.lh = null;
     fixEq(eq);
     g.eq = eq;
     g.bag = Array.isArray(s.bag) ? (s.bag as unknown[]).map((o: unknown) => validItem(o)).filter((x: Item | null): x is Item => x !== null) : [];
+    enforceHandRules(g);
     g.map = map; g.seen = seen; g.vis = new Uint8Array(MW * MH);
     g.thSeen = thSeenParse(s.thSeen);
     g.theme = themeOf(g.depth);
@@ -8073,7 +8366,7 @@ function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | nul
   if (a.kind === "pet") {
     it.pt = a.pt;
     it.name = PRE[it.rar][0] + " " + PETN[it.pt ?? 0];
-    if (it.rar >= 7) it.pab = petAbiFromInputs(a, b, c, it);
+    if (it.rar >= 7) { it.pab = petAbiFromInputs(a, b, c, it); it.prt = petRareFromInputs(a, b, c, it); }
   }
   delete it.set;
   forceStars(it, nxt);
@@ -8203,21 +8496,23 @@ function runSocketedGemCombine(g: Game): number {
   return 0;
 }
 let COMBINE_DEPTH = 0;
-function itemFitsSlot(it: Item, slot: EqKey): boolean {
+function itemFitsSlot(it: Item, slot: EqKey, eq?: Eq): boolean {
   if (!it || isGem(it)) return false;
   if (isArmor(it.kind)) return it.kind === slot;
   if (it.kind === "pet") return slot === "pet";
   if (it.kind === "shield") return slot === "lh";
-  if (isTwo(it)) return slot === "rh";
+  if (isTwo(it)) return slot === "rh" || (slot === "lh" && !!eq && canDualTwo(eq));
   if (isOneHand(it)) return slot === "rh" || slot === "lh";
   return false;
 }
 function equipIntoSlot(g: Game, it: Item, slot: EqKey): boolean {
-  if (!itemFitsSlot(it, slot)) return false;
+  if (!itemFitsSlot(it, slot, g.eq)) return false;
   const off: Item[] = [];
-  if (isTwo(it) && slot === "rh" && g.eq.lh) { off.push(g.eq.lh); g.eq.lh = null; }
-  if (slot === "lh" && isTwo(g.eq.rh) && g.eq.rh) { off.push(g.eq.rh); g.eq.rh = null; }
+  const dual = canDualTwo(g.eq) || (it.kind === "pet" && it.rar >= 7 && (it.prt ?? 0) === PRT_DUAL && slot === "pet");
+  if (isTwo(it) && slot === "rh" && g.eq.lh && !dual) { off.push(g.eq.lh); g.eq.lh = null; }
+  if (slot === "lh" && isTwo(g.eq.rh) && g.eq.rh && !dual) { off.push(g.eq.rh); g.eq.rh = null; }
   g.eq[slot] = it;
+  if (g.eq.lh && isTwo(g.eq.lh) && !canDualTwo(g.eq)) { off.push(g.eq.lh); g.eq.lh = null; }
   for (const x of off) {
     relocatePoppedGems(g, popSocketGems(x), it);
     takeItemOrSalvage(g, x, g.hero.x, g.hero.y);
@@ -8539,7 +8834,7 @@ function hurtEn(g: Game, e: En, dmg: number): number {
   if (dmg <= 0 || e.hp <= 0) return 0;
   markHitDir(g, e);
   const fortune = petAbiOf(g, 5);
-  if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.20 * petAbiMul(fortune))));
+  if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.25 * petAbiMul(fortune))));
   if ((e.shd ?? 0) > 0) {
     const a = Math.min(e.shd as number, dmg);
     e.shd = (e.shd as number) - a; dmg -= a;
@@ -8765,17 +9060,23 @@ function ultsOf(eq: Eq): { slot: EqKey; it: Item }[] {
   }
   return o;
 }
-// Fused Prismatic ultimate (raw42): every equipped Prismatic ult (max 6 = 4 armor + 2 weapons) is one button / one attack.
+// Fused Prismatic ultimate: every equipped Prismatic ult, plus an equipped Prismatic
+// pet, is one button / one attack. Pets are never an ult source (no extra button).
 const PRIS_FUSE_MUL = 2.5;
-function prisFuseCount(eq: Eq): number { return Math.max(0, Math.min(6, ultsOf(eq).length)); }
+const PRIS_FUSE_CAP = 7; // 4 armor + 2 weapons + 1 Prismatic pet
+function prisPetFuse(eq: Eq): number {
+  const it = eq.pet;
+  return (it && it.kind === "pet" && it.rar >= 7) ? 1 : 0;
+}
+function prisFuseCount(eq: Eq): number { return Math.max(0, Math.min(PRIS_FUSE_CAP, ultsOf(eq).length + prisPetFuse(eq))); }
 function prisFuseMul(n: number): number {
-  const k = Math.max(1, Math.min(6, n | 0));
+  const k = Math.max(1, Math.min(PRIS_FUSE_CAP, n | 0));
   return k <= 1 ? 1 : safePow(PRIS_FUSE_MUL, k - 1);
 }
 function prisUltMul(g: Game, w?: Item | null): number {
   const it = w || fusedBaseItem(g.eq);
   if (!it) return 1;
-  const n = Math.max(1, Math.min(6, prisFuseCount(g.eq)));
+  const n = Math.max(1, Math.min(PRIS_FUSE_CAP, prisFuseCount(g.eq)));
   let m = 1;
   if (it.rar >= 7) m *= 2.5;
   m = safeMul(m, fusedStarMul(g.eq));
@@ -8824,9 +9125,10 @@ function ultBestEl(e: En): El {
 function fusedStarMul(eq: Eq): number {
   let m = 1;
   for (const u of ultsOf(eq)) m = Math.max(m, prisStarMul(u.it));
+  if (eq.pet && eq.pet.kind === "pet" && eq.pet.rar >= 7) m = Math.max(m, prisStarMul(eq.pet));
   return m;
 }
-function fusedGolden(eq: Eq): boolean { return ultsOf(eq).some((u: { it: Item }) => !!u.it.golden); }
+function fusedGolden(eq: Eq): boolean { return ultsOf(eq).some((u: { it: Item }) => !!u.it.golden) || !!(eq.pet && eq.pet.rar >= 7 && eq.pet.golden); }
 function fusedBaseItem(eq: Eq): Item | null {
   const all = ultsOf(eq);
   if (!all.length) return null;
@@ -9074,7 +9376,8 @@ function takeTopItems(items: Item[], cap: number, keep: Item[]): Item[] {
 }
 function simHandEq(eq: Eq, rh: Item | null, lh: Item | null): Eq {
   const n: Eq = { ...eq, rh, lh };
-  if (isTwo(n.rh)) n.lh = null;
+  if (isTwo(n.rh) && !canDualTwo(eq)) n.lh = null;
+  if (n.lh && isTwo(n.lh) && !canDualTwo(eq)) n.lh = null;
   return n;
 }
 interface HandPick { rh: Item | null; lh: Item | null; score: number; }
@@ -9097,11 +9400,12 @@ function bestHandLoadout(g: Game): HandPick {
   const curEq = g.eq;
   const cur = eqScore(g.lvl, curEq);
   let best: HandPick = { rh: curEq.rh, lh: curEq.lh, score: cur };
+  const dual = canDualTwo(curEq);
   const consider = (rh: Item | null, lh: Item | null): void => {
     if (rh && lh && rh === lh) return;
-    if (isTwo(rh)) lh = null;
-    if (lh && isTwo(lh)) return;
-    if (lh && !isOneHand(lh) && lh.kind !== "shield") return;
+    if (isTwo(rh) && !dual) lh = null;
+    if (lh && isTwo(lh) && !dual) return;
+    if (lh && !isOneHand(lh) && lh.kind !== "shield" && !(dual && isTwo(lh))) return;
     if (rh && !isOneHand(rh) && !isTwo(rh)) return;
     const sc = eqScore(g.lvl, simHandEq(curEq, rh, lh));
     if (sc > best.score) best = { rh, lh, score: sc };
@@ -9115,10 +9419,18 @@ function bestHandLoadout(g: Game): HandPick {
   if (wornLh && wornLh.kind === "shield") keepS.push(wornLh);
   const keep2: Item[] = [];
   if (wornRh && isTwo(wornRh)) keep2.push(wornRh);
+  if (dual && wornLh && isTwo(wornLh)) keep2.push(wornLh);
   const ones = takeTopItems(pool.one, HAND_1H_CAP, keep1);
   const shs = takeTopItems(pool.shields, HAND_SH_CAP, keepS);
   const twos = takeTopItems(pool.two, HAND_2H_CAP, keep2);
   for (const tw of twos) consider(tw, null);
+  if (dual) {
+    for (let i = 0; i < twos.length; i++) {
+      for (let j = 0; j < twos.length; j++) if (i !== j) consider(twos[i], twos[j]);
+      for (const one of ones) consider(twos[i], one);
+      for (const sh of shs) consider(twos[i], sh);
+    }
+  }
   for (let i = 0; i < ones.length; i++) {
     for (let j = 0; j < ones.length; j++) if (i !== j) consider(ones[i], ones[j]);
     for (const sh of shs) consider(ones[i], sh);
@@ -9159,7 +9471,8 @@ function compare2Hvs1HPair(g: Game): PairReco | null {
   return reco;
 }
 function applyHandLoadout(g: Game, rh: Item | null, lh: Item | null): boolean {
-  if (isTwo(rh)) lh = null;
+  if (isTwo(rh) && !canDualTwo(g.eq)) lh = null;
+  if (lh && isTwo(lh) && !canDualTwo(g.eq)) lh = null;
   if (g.eq.rh === rh && g.eq.lh === lh) return false;
   const incoming: Item[] = [];
   if (rh && rh !== g.eq.rh && rh !== g.eq.lh) incoming.push(rh);
@@ -9195,7 +9508,7 @@ function optimizeHands(g: Game): boolean {
 function wouldAutoEquip(g: Game, it: Item): { eq: Eq; back: Item[] } | null {
   if (!g.autoEq || it.kind === "gem") return null;
   const cur = eqScore(g.lvl, g.eq);
-  const hands: ("rh" | "lh" | undefined)[] = isOneHand(it) ? ["rh", "lh"] : [undefined];
+  const hands: ("rh" | "lh" | undefined)[] = (isOneHand(it) || (isTwo(it) && canDualTwo(g.eq))) ? ["rh", "lh"] : [undefined];
   let best = cur;
   let pick: { eq: Eq; back: Item[] } | null = null;
   for (const hd of hands) {
@@ -9311,10 +9624,22 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
       const dd = tg.def * (1 - st.pierce);
       dmg = Math.max(1, Math.round(dmgF(st.atk * mul * efDmgMul(g, tg, st), dd) * (0.85 + R() * 0.3) * cm));
     }
+    const world = petRareOf(g, PRT_WORLD);
+    if (world) dmg = Math.max(1, safeRound(dmg * (1 + 0.15 * petAbiMul(world))));
     const hitV = { dx: tg.x - h.x, dy: tg.y - h.y };
     withHit(hitV, () => {
       dmg = hurtEn(g, tg, dmg);
     });
+    if (world && !twin && R() < 0.12) {
+      const raw = st.atk * petAbiMul(world);
+      const stunT = petAbiSec(0.6 / RT_TICK);
+      fxAdd(g, "ring", tg.ax * TS + 12, tg.ay * TS + 12, 0, 0, 0.28, "#ffb040", "#ffffff", 2 * TS);
+      for (const o of nearEnemies(g, tg.x, tg.y, 2)) {
+        if (o === tg || o.hp <= 0) continue;
+        const wave = Math.max(1, safeRound(magicWepRaw(o, ultBestEl(o), raw)));
+        withHit({ ox: tg.x, oy: tg.y }, () => { hurtEn(g, o, wave); if (o.cls === 0) o.stun = Math.max(o.stun, stunT); if (o.hp <= 0) kill(g, o); });
+      }
+    }
     if (st.magic && wel) withHit(hitV, () => { applyWepEl(g, tg, wel, dmg, true); });
     else if (main && main.kind === "beamsword" && wel && tg.hp > 0) {
       const slice = Math.max(1, Math.round(st.atk * mul * 0.22 * elMul(tg, wel)));
@@ -9773,7 +10098,7 @@ function castUlt(g: Game, _slot?: EqKey): boolean {
       if (e.hp <= 0) { killed++; kill(g, e); }
     });
   }
-  setFusedUltCd(g, Date.now() + ULT_CD);
+  setFusedUltCd(g, Date.now() + ultCdLen(g));
   g.flash = n >= 6 ? 1.7 : (anyG ? 0.9 : 0.55) + 0.14 * n;
   g.flashC = n >= 6 ? "#ffffff" : (anyG ? GOLD : ELC[u.el]);
   g.shake = n >= 6 ? 32 : 10 + 4 * n;
@@ -10022,16 +10347,32 @@ function equip(g: Game, bi: number, hand?: "rh" | "lh"): string {
   g.bag.splice(bi, 1);
   g.eq = res.eq;
   g.bag.push(...res.back);
+  enforceHandRules(g);
   sortInventory(g);
   g.hero.hp = Math.min(g.hero.hp, calc(g.lvl, g.eq).maxHp);
   g.sfx("equip");
   return "Equipped " + it.name + ".";
 }
+function enforceHandRules(g: Game): void {
+  const lh = g.eq.lh;
+  if (lh && isTwo(lh) && !canDualTwo(g.eq)) {
+    g.eq.lh = null;
+    takeItemOrSalvage(g, lh, g.hero.x, g.hero.y);
+  }
+}
 function unequip(g: Game, k: EqKey): string {
   const it = g.eq[k];
   if (!it) return "";
-  ensureBagCapacity(g, false, g.bag.length + 1);
-  g.eq[k] = null; g.bag.push(it);
+  const extra: Item[] = [];
+  g.eq[k] = null;
+  // Unequipping Dual Titan (or any pet that granted it) must move an off-hand 2H
+  // to the bag without running auto-equip, so the pet stays unequipped and no item is lost.
+  if (k === "pet" && g.eq.lh && isTwo(g.eq.lh) && !canDualTwo(g.eq)) {
+    extra.push(g.eq.lh);
+    g.eq.lh = null;
+  }
+  ensureBagCapacity(g, false, g.bag.length + 1 + extra.length);
+  g.bag.push(it, ...extra);
   sortInventory(g);
   g.hero.hp = Math.min(g.hero.hp, calc(g.lvl, g.eq).maxHp);
   return "Unequipped " + it.name + ".";
@@ -10062,6 +10403,8 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-stick-knob { position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; margin-left: -21%; margin-top: -21%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d8ccf8, #6a5a90 55%, #3a3050); border: 2px solid #e8e0ff; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; will-change: transform; }
 .dc-stick.held .dc-stick-base { border-color: #9a88cc; }
 .dc-stick-lock { position: absolute; right: 8px; top: 8px; font-size: 16px; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.dc-rarepet { position: absolute; left: 2px; top: 2px; font-size: 8px; font-weight: 800; color: #ffd060; text-shadow: 0 0 6px #ff60e0, 0 1px 2px #000; letter-spacing: 0.4px; pointer-events: none; z-index: 2; }
+.dc-tipline-rare { color: #ffd060; font-weight: 800; text-shadow: 0 0 6px #ff60e0; }
 .dc-k { border: none; border-radius: 12px; background: #2a2438; color: #e8e0ff; font-size: 22px; touch-action: none; -webkit-tap-highlight-color: transparent; padding: 0; cursor: pointer; }
 .dc-k:active, .dc-k.held { background: #4a3e66; transform: scale(0.95); }
 .dc-k.diag { font-size: 20px; }
@@ -10811,6 +11154,189 @@ try {
     map: moveMap,
     pos: (): object | null => { const g = moveGame(); return g ? { x: g.hero.x, y: g.hero.y } : null; },
     end: (): void => { MOVE_TEST_G = null; GIB_SKIP_SAVE = false; setMoveBias(0, 0); },
+  };
+} catch { /* ignore */ }
+
+let PETS_TEST_G: Game | null = null;
+function withPetsTest<T>(fn: () => T): T {
+  const prev = GIB_SKIP_SAVE;
+  GIB_SKIP_SAVE = true;
+  try { return fn(); } finally { GIB_SKIP_SAVE = prev; }
+}
+function petsInspect(it: Item | null): Record<string, unknown> {
+  if (!it) return { ok: false };
+  ensurePetAbi(it);
+  return {
+    ok: true, id: it.id, kind: it.kind, rar: it.rar, name: it.name, pab: it.pab ?? null, prt: it.prt === undefined ? null : it.prt,
+    title: it.rar >= 7 ? petAbiTitle(it) : null, desc: it.rar >= 7 ? petAbiDesc(it) : null,
+    rareTitle: (it.prt ?? 0) >= 1 ? petRareTitle(it) : null, rareDesc: (it.prt ?? 0) >= 1 ? petRareDesc(it) : null,
+    lines: petLines(it, (PETS_TEST_G ? PETS_TEST_G.lvl : 20)),
+  };
+}
+function petsBegin(): Record<string, unknown> {
+  return withPetsTest(() => {
+    const g = newGame(null);
+    g.mode = "play"; g.paused = false; g.lvl = 20; g.depth = 20;
+    moveCarveRoom(g, MOVE_CX, MOVE_CY, 6);
+    g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+    g.bag = [];
+    PETS_TEST_G = g; STAT_G = g;
+    return { ok: true, x: g.hero.x, y: g.hero.y };
+  });
+}
+function petsMake(pab?: number, prt?: number, stars?: number): Record<string, unknown> {
+  const it = makePet(20, 7, 20);
+  if (pab !== undefined) it.pab = pab;
+  if (prt !== undefined) it.prt = prt;
+  if (stars && stars > 0) forceStars(it, Math.max(0, Math.min(10, stars)));
+  ensurePetAbi(it);
+  return petsInspect(it);
+}
+function petsGive(kind: "pet" | "2h" | "ult" | "1h", opts?: { pab?: number; prt?: number; slot?: EqKey; wep?: Kind; stars?: number }): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPetsTest(() => {
+    let it: Item;
+    if (kind === "pet") {
+      it = makePet(20, 7, 20);
+      if (opts && opts.pab !== undefined) it.pab = opts.pab;
+      if (opts && opts.prt !== undefined) it.prt = opts.prt;
+      if (opts && opts.stars) forceStars(it, opts.stars);
+      ensurePetAbi(it);
+    } else if (kind === "2h") {
+      it = makeItem(20, 5, (opts && opts.wep) || "greatsword", 20);
+    } else if (kind === "ult") {
+      it = makeItem(20, 7, (opts && opts.wep) || "sword", 20);
+    } else {
+      it = makeItem(20, 5, (opts && opts.wep) || "sword", 20);
+    }
+    const slot = opts && opts.slot;
+    if (slot && itemFitsSlot(it, slot, g.eq)) {
+      if (kind === "pet") g.eq.pet = it;
+      else equipIntoSlot(g, it, slot);
+    } else {
+      g.bag.push(it);
+    }
+    enforceHandRules(g);
+    return { ...petsInspect(it), slot: slot || "bag", atk: it.atk, two: isTwo(it), fitted: !!(slot && (slot === "pet" ? g.eq.pet === it : g.eq[slot] === it)) };
+  });
+}
+function petsEquipBag(i: number, hand?: "rh" | "lh"): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPetsTest(() => {
+    const msg = equip(g, i, hand);
+    return { ok: true, msg, rh: g.eq.rh ? { name: g.eq.rh.name, kind: g.eq.rh.kind, two: isTwo(g.eq.rh), atk: g.eq.rh.atk } : null, lh: g.eq.lh ? { name: g.eq.lh.name, kind: g.eq.lh.kind, two: isTwo(g.eq.lh), atk: g.eq.lh.atk } : null, pet: g.eq.pet ? petsInspect(g.eq.pet) : null, bag: g.bag.length, bagKinds: g.bag.map((x: Item) => x.kind), hands: { dual: canDualTwo(g.eq), atk: calc(g.lvl, g.eq).atk } };
+  });
+}
+function petsUnequip(slot: EqKey): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPetsTest(() => {
+    const msg = unequip(g, slot);
+    return { ok: true, msg, rh: g.eq.rh ? { kind: g.eq.rh.kind, two: isTwo(g.eq.rh) } : null, lh: g.eq.lh ? { kind: g.eq.lh.kind, two: isTwo(g.eq.lh) } : null, pet: g.eq.pet ? petsInspect(g.eq.pet) : null, bag: g.bag.length, bagTwo: g.bag.filter((x: Item) => isTwo(x)).length, dual: canDualTwo(g.eq) };
+  });
+}
+function petsHands(): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const st = calc(g.lvl, g.eq);
+  return { ok: true, dual: canDualTwo(g.eq), atk: st.atk, maxHp: st.maxHp, def: st.def, spd: st.spd, mv: st.mv, rh: g.eq.rh ? { kind: g.eq.rh.kind, two: isTwo(g.eq.rh), atk: g.eq.rh.atk } : null, lh: g.eq.lh ? { kind: g.eq.lh.kind, two: isTwo(g.eq.lh), atk: g.eq.lh.atk } : null, pet: g.eq.pet ? petsInspect(g.eq.pet) : null, bag: g.bag.map((x: Item) => ({ kind: x.kind, two: isTwo(x), name: x.name })) };
+}
+function petsFuse(): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return { ok: true, count: prisFuseCount(g.eq), ults: ultsOf(g.eq).length, pet: prisPetFuse(g.eq), mul: prisUltMul(g), hasUlt: !!fusedBaseItem(g.eq), btn: ultBtnName(g), label: ultBtnLabel(g) };
+}
+function petsRoll(n = 2000): Record<string, unknown> {
+  const pab = new Array(PET_ABI_N_MAX).fill(0);
+  const rareIds = new Array(PET_RARE_MAX + 1).fill(0);
+  let rare = 0;
+  for (let i = 0; i < n; i++) {
+    const it: Item = { id: i, seed: i + 1, kind: "pet", rar: 7, ilvl: 20, name: "t", atk: 0, def: 0, block: 0, bonus: {}, d: [0, 0, 0, 0], pt: i % 100 };
+    const a = petAbiRoll(it); const r = petRareRoll(it);
+    pab[a]++; if (r > 0) { rare++; rareIds[r]++; }
+  }
+  return { ok: true, n, pab, rare, rareRate: rare / n, rareIds, expectRare: PET_RARE_CH, commons: PET_ABI_N.length, rares: PET_RARE_MAX };
+}
+function petsOldLoad(pab: number): Record<string, unknown> {
+  const it = makePet(20, 7, 20);
+  it.pab = pab; it.prt = undefined;
+  const packed = packItem(it);
+  // Simulate a pre-rare packed array (no index 22)
+  if (Array.isArray(packed)) packed.length = 22;
+  const out = unpackItem(packed);
+  return { ok: !!out, packedLen: Array.isArray(packed) ? packed.length : 0, pab: out ? out.pab : null, prt: out ? (out.prt === undefined ? null : out.prt) : null, lines: out ? petLines(out, 20) : [] };
+}
+function petsRoundtrip(): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPetsTest(() => {
+    g.mode = "play";
+    const code = makeCode(g);
+    const n = decodeCode(code, null);
+    if (!n) return { ok: false, error: "decode failed", codeLen: code.length };
+    const before = { rh: g.eq.rh ? g.eq.rh.kind : null, lh: g.eq.lh ? g.eq.lh.kind : null, lhTwo: isTwo(g.eq.lh), petPrt: g.eq.pet ? (g.eq.pet.prt ?? null) : null, petPab: g.eq.pet ? (g.eq.pet.pab ?? null) : null };
+    const after = { rh: n.eq.rh ? n.eq.rh.kind : null, lh: n.eq.lh ? n.eq.lh.kind : null, lhTwo: isTwo(n.eq.lh), petPrt: n.eq.pet ? (n.eq.pet.prt ?? null) : null, petPab: n.eq.pet ? (n.eq.pet.pab ?? null) : null, dual: canDualTwo(n.eq) };
+    return { ok: true, before, after, same: before.rh === after.rh && before.lh === after.lh && before.lhTwo === after.lhTwo && before.petPrt === after.petPrt };
+  });
+}
+function petsSplitStart(): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  return withPetsTest(() => {
+    const it = g.eq.pet || makePet(20, 7, 20);
+    it.pab = 6; it.prt = 0; ensurePetAbi(it); g.eq.pet = it;
+    const now = g.petAbiT ?? 0;
+    g.petSplitN = 4;
+    g.petSplitUntil = now + 10;
+    g.petSplitCd = now + 60;
+    g.pshots = [];
+    // Place a visible foe in range
+    const e = mkEnemy(g, g.hero.x + 2, g.hero.y, 0);
+    e.hp = e.mhp = 500; e.cls = 0; e.child = true; e.ax = e.x; e.ay = e.y;
+    g.en = [e]; computeVis(g);
+    const st = calc(g.lvl, g.eq);
+    petTurn(g, st);
+    const shots = (g.pshots || []).length;
+    const copies = petShotCopies(g);
+    return { ok: true, copies, shots, enemyHp: e.hp, mhp: e.mhp };
+  });
+}
+function petsShot(kind: "traits" | "dual"): Record<string, unknown> {
+  const g = PETS_TEST_G;
+  if (!g) return { ok: false, error: "not begun" };
+  const pet = g.eq.pet;
+  const lines = pet ? petLines(pet, g.lvl) : [];
+  const portrait = bagPortraitDataUrl(g.eq);
+  const st = calc(g.lvl, g.eq);
+  return {
+    ok: true, kind, lines, portrait,
+    petName: pet ? pet.name : null,
+    rare: !!(pet && (pet.prt ?? 0) >= 1),
+    rh: g.eq.rh ? g.eq.rh.name : null,
+    lh: g.eq.lh ? g.eq.lh.name : null,
+    rhTwo: isTwo(g.eq.rh), lhTwo: isTwo(g.eq.lh),
+    atk: st.atk, dual: canDualTwo(g.eq),
+    fuse: { count: prisFuseCount(g.eq), mul: prisUltMul(g) },
+  };
+}
+try {
+  (window as unknown as { __ED16_PETS?: object }).__ED16_PETS = {
+    begin: petsBegin,
+    make: petsMake,
+    give: petsGive,
+    equipBag: petsEquipBag,
+    unequip: petsUnequip,
+    hands: petsHands,
+    fuse: petsFuse,
+    roll: petsRoll,
+    oldLoad: petsOldLoad,
+    roundtrip: petsRoundtrip,
+    splitStart: petsSplitStart,
+    shot: petsShot,
+    traits: (): object => ({ commons: PET_ABI_N, rares: PET_RARE_N.slice(1), rareChance: PET_RARE_CH }),
+    end: (): void => { PETS_TEST_G = null; GIB_SKIP_SAVE = false; STAT_G = null; },
   };
 } catch { /* ignore */ }
 
@@ -12211,6 +12737,7 @@ export default function App() {
   const fmt = (v: number): string => (Math.round(v * 10) / 10).toString();
   const doAct = (fn: () => string): void => { const r = fn(); setNote(r); setSel(""); bump(); };
 
+  const tipLine = (s: string, i: number) => <div key={i} className={s.indexOf("\u2726 RARE") === 0 ? "dc-tipline-rare" : undefined}>{s}</div>;
   const statLines = (it: Item): string[] => {
     const out: string[] = [];
     if (it.atk) out.push("Attack +" + it.atk);
@@ -12244,6 +12771,7 @@ export default function App() {
     <button key={key} className={"dc-cell" + (it ? " r" + it.rar : "") + (it && it.ult !== undefined ? " ult" : "") + (it && it.set !== undefined ? " setp" : "") + (isSel ? " sel" : "")} style={{ borderColor: it && it.golden ? GOLD : it && it.set !== undefined ? SET_COL : it && isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : it ? RC[it.rar] : "#2e2840" }} onClick={onClick} aria-label={it ? it.name : label}>
       {it ? <img src={iconURL(it)} alt="" draggable={false} /> : <span className="lb">{label}</span>}
       {it && it.rar >= 7 ? prisArcOverlay() : null}
+      {it && it.kind === "pet" && (it.prt ?? 0) >= 1 && <span className="dc-rarepet">RARE</span>}
       {it && it.st && it.st.length > 0 && <span className="dc-stars">{"\u2605" + it.st.length}</span>}
       {it && it.sk && it.sk.length > 0 && <span className="dc-pips">{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <i key={"p" + i} style={{ background: z.g ? GEMT[z.g.typ].c : "transparent", borderColor: GEMT[z.c].c }} />)}</span>}
       {it && g && <span className="dc-pl">{itemPower(it, g.lvl)}{!equipped && dlt !== 0 ? <span className={dlt > 0 ? "up" : "dn"}>{" " + (dlt > 0 ? "+" : "") + dlt}</span> : null}</span>}
@@ -12278,7 +12806,7 @@ export default function App() {
   const info = (it: Item) => (
     <div>
       {infoHead(it)}
-      <div style={{ marginTop: 4 }}>{statLines(it).map((s: string, i: number) => <div key={i}>{s}</div>)}</div>
+      <div style={{ marginTop: 4 }}>{statLines(it).map(tipLine)}</div>
       {(it.st ?? []).map((e: number[], i: number) => <div key={"st" + i} style={{ color: GOLD, marginTop: 2 }}>{"\u2605 " + starName(it, e) + " — " + starDesc(it, e)}</div>)}
       {it.set !== undefined && SETS[it.set] && setBonusUI(g ? g.eq : emptyEq, it.set)}
       {(it.spells ?? []).map((sp: Spell, i: number) => <div key={"sp" + i} style={{ color: ELC[sp.el], marginTop: 2 }}>{"\u2726 " + spellDesc(sp)}</div>)}
@@ -12475,7 +13003,7 @@ export default function App() {
                               )}
                               <div className="dc-reveal-name" style={{ color: col }}>{it.name + (it.st && it.st.length ? " " + starBadge(it) : "")}</div>
                               <div className="dc-sm">{RT[it.rar] + " \u00b7 " + kindLabel(it.kind) + " \u00b7 item level " + it.ilvl}</div>
-                              <div style={{ marginTop: 6 }}>{statLines(it).map((s: string, i: number) => <div key={i}>{s}</div>)}</div>
+                              <div style={{ marginTop: 6 }}>{statLines(it).map(tipLine)}</div>
                               {(it.st ?? []).map((e: number[], i: number) => <div key={"st" + i} style={{ color: GOLD, marginTop: 2 }}>{"\u2605 " + starName(it, e) + " \u2014 " + starDesc(it, e)}</div>)}
                               {it.set !== undefined && SETS[it.set] && setBonusUI(g.eq, it.set)}
                               {g && <div style={{ color: GOLD, fontWeight: 700, marginTop: 6 }}>{"Power Level " + itemPower(it, g.lvl)}</div>}
@@ -12632,7 +13160,7 @@ export default function App() {
               {selItem && (
                 <div className="dc-det">
                   {infoHead(selItem)}
-                  <div style={{ marginTop: 4 }}>{statLines(selItem).map((s: string, i: number) => <div key={i}>{s}</div>)}</div>
+                  <div style={{ marginTop: 4 }}>{statLines(selItem).map(tipLine)}</div>
                   {(selItem.st ?? []).map((e: number[], i: number) => <div key={"st" + i} style={{ color: GOLD, marginTop: 2 }}>{"\u2605 " + starName(selItem, e) + " — " + starDesc(selItem, e)}</div>)}
                   {selItem.sk && selItem.sk.length > 0 && <div style={{ marginTop: 6 }}>
                     <div className="dc-sm">Sockets (color must match; Prismatic gems fit any):</div>
@@ -12673,7 +13201,7 @@ export default function App() {
                   })()}
                   <div className="dc-act">
                     {selBag >= 0 && <button className="go" style={btn} onClick={() => doAct(() => equip(g, selBag))}>Equip</button>}
-                    {selBag >= 0 && isOneHand(selItem) && <button style={btn} onClick={() => doAct(() => equip(g, selBag, "lh"))}>Equip Offhand</button>}
+                    {selBag >= 0 && selItem && (isOneHand(selItem) || (isTwo(selItem) && canDualTwo(g.eq))) && <button style={btn} onClick={() => doAct(() => equip(g, selBag, "lh"))}>Equip Offhand</button>}
                     {selBag >= 0 && <button className="bad" style={btn} onClick={() => doAct(() => { const it = g.bag[selBag]; if (!it) return ""; const gems = popSocketGems(it); const v = salvageVal(it); g.bag.splice(selBag, 1); g.gold += v; for (const gem of gems) placeGem(g, gem, g.hero.x, g.hero.y); g.sfx("coin"); runAutoCombine(g); return "Salvaged for " + v + "g."; })}>Salvage +{salvageVal(selItem)}g</button>}
                     {sel.startsWith("gb#") && selItem && isGem(selItem) && <button className="bad" style={btn} onClick={() => doAct(() => { const gb = ensureGemBag(g); const gi = bagIndexById(gb, Number(sel.slice(3))); const it = gi >= 0 ? gb[gi] : undefined; if (!it) return ""; const v = salvageVal(it); gb.splice(gi, 1); g.gold += v; g.sfx("coin"); return "Salvaged for " + v + "g."; })}>Salvage +{salvageVal(selItem)}g</button>}
                     {selBag >= 0 && selItem && polishCost(selItem) > 0 && <button style={btn} disabled={(g.gems ?? 0) < polishCost(selItem)} onClick={() => doAct(() => polishItem(g, selBag))}>Polish {(selItem.st ? selItem.st.length : 0) + 1}{"\u2605"} ({polishCost(selItem)} gems)</button>}
@@ -12780,7 +13308,7 @@ export default function App() {
               {(() => {
                 const left = Math.max(0, fusedUltReadyAt(g) - Date.now());
                 const ready = left <= 0;
-                const frac = 1 - left / ULT_CD;
+                const frac = 1 - left / ultCdLen(g);
                 const lab = ultBtnLabel(g);
                 const sz = ultBtnSize(typeof window !== "undefined" ? window.innerWidth : 390, typeof window !== "undefined" ? window.innerHeight : 844);
                 return (
