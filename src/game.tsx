@@ -628,24 +628,30 @@ function actExtraLoot(act: number): { gems: number; goldMul: number } {
   const k = act - POST_ACT0;
   return { gems: Math.min(6, Math.floor(k / 20)), goldMul: safePow(1.015, k) };
 }
-function layoutMetrics(vpW: number, vpH: number, safeBottom = 0, chrome = 0): { vpH: number; padCell: number; utilH: number; padH: number; saveH: number; dockH: number; canvasMax: number; saveBottom: number; dockBottom: number; fits: boolean } {
-  const h = Math.max(1, vpH - chrome);
+function layoutMetrics(vpW: number, vpH: number, safeBottom = 0, chrome = 0, safeTop = 0): { vpH: number; padCell: number; utilH: number; padH: number; saveH: number; dockH: number; canvasMax: number; saveBottom: number; dockBottom: number; fits: boolean } {
+  // vpH is the visible visual-viewport height. Safe-area insets and any simulated
+  // browser chrome are subtracted so the HUD, canvas, and dock all fit with no scroll.
+  const h = Math.max(1, vpH - chrome - safeTop - safeBottom);
   const w = Math.max(1, vpW);
-  const tight = h < 620 || w <= 360;
-  const padCell = h < 560 ? 40 : (tight ? 44 : (w >= 400 ? 52 : 48));
-  const gap = tight ? 3 : 4;
+  const tight = h < 700 || w <= 360;
+  const compact = h < 620 || w <= 360;
+  const padCell = h < 560 ? 40 : (compact ? 44 : (w >= 400 ? 52 : 48));
+  const gap = compact ? 3 : 4;
   const padH = padCell * 3 + gap * 2;
   const saveH = tight ? 36 : 42;
   const utilH = tight ? 36 : 40;
-  const dockPad = tight ? 6 : 8;
-  // Save Game is a full-width row above Save Code / LOAD, so the dock is two save-row heights plus the D-pad.
-  const saveBlockH = saveH * 2 + 6;
-  const dockH = padH + 6 + saveBlockH + dockPad;
-  const canvasMax = Math.max(72, h - utilH - dockH - safeBottom - 4);
-  const dockBottom = h - safeBottom;
+  const utilBlock = utilH + 4; // .dc-util top padding
+  const ctrlPad = tight ? 6 : 8;
+  // Save Game (full width), Save Code / LOAD, and Profiles — three dock rows under the D-pad.
+  const saveRows = 3;
+  const saveGap = 6;
+  const saveBlockH = saveH * saveRows + saveGap * (saveRows - 1);
+  const dockH = ctrlPad + padH + 6 + saveBlockH + ctrlPad;
+  const canvasMax = Math.max(72, h - utilBlock - dockH - 4);
+  const dockBottom = h;
   const saveBottom = dockBottom;
-  const chromeMin = utilH + dockH + safeBottom + 72;
-  const fits = dockBottom <= h + 0.5 && saveBottom <= h + 0.5 && canvasMax >= 72 && chromeMin <= h + 0.5;
+  const chromeMin = utilBlock + dockH + 72;
+  const fits = canvasMax >= 72 && chromeMin <= h + 0.5;
   return { vpH: h, padCell, utilH, padH, saveH, dockH, canvasMax, saveBottom, dockBottom, fits };
 }
 function layoutFitsPhone(w: number, h: number, chrome = 0, safeBottom = 0): boolean { return layoutMetrics(w, h, safeBottom, chrome).fits; }
@@ -9760,10 +9766,10 @@ function unequip(g: Game, k: EqKey): string {
 
 const CSS = `
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; max-height: 100dvh; overflow: hidden; overscroll-behavior: none; touch-action: none; position: fixed; inset: 0; }
-.dc-root { position: fixed; inset: 0; width: 100%; height: 100dvh; max-height: 100dvh; overflow: hidden; overscroll-behavior: none; touch-action: none; box-sizing: border-box; }
-.dc-wrap { position: fixed; inset: 0; width: 100%; max-width: 440px; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; height: 100dvh; max-height: 100dvh; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; box-sizing: border-box; padding-bottom: var(--ed-safe-b, env(safe-area-inset-bottom, 0px)); }
+.dc-root { position: fixed; top: var(--ed-vv-top, 0px); left: var(--ed-vv-left, 0px); width: var(--ed-vv-w, 100%); height: var(--ed-vv-h, 100dvh); max-height: var(--ed-vv-h, 100dvh); overflow: hidden; overscroll-behavior: none; touch-action: none; box-sizing: border-box; }
+.dc-wrap { position: relative; width: 100%; max-width: 440px; height: 100%; max-height: 100%; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; box-sizing: border-box; padding-top: var(--ed-safe-t, env(safe-area-inset-top, 0px)); padding-right: var(--ed-safe-r, env(safe-area-inset-right, 0px)); padding-bottom: var(--ed-safe-b, env(safe-area-inset-bottom, 0px)); padding-left: var(--ed-safe-l, env(safe-area-inset-left, 0px)); }
 .dc-stage { position: relative; width: 100%; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.dc-cv { width: auto; max-width: 100%; height: auto; aspect-ratio: 240 / 300; max-height: var(--ed-canvas-max, calc(100svh - 300px - env(safe-area-inset-bottom, 0px))); display: block; margin: 0 auto; image-rendering: pixelated; touch-action: none; outline: none; border-radius: 6px; background: #000; }
+.dc-cv { width: auto; max-width: 100%; height: auto; aspect-ratio: 240 / 300; max-height: var(--ed-canvas-max, calc(100dvh - 320px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); display: block; margin: 0 auto; image-rendering: pixelated; touch-action: none; outline: none; border-radius: 6px; background: #000; flex: 0 1 auto; }
 .dc-util { display: flex; gap: 4px; flex-shrink: 0; padding: 4px 4px 0; align-items: stretch; position: relative; z-index: 2; }
 .dc-util .dc-b { min-height: var(--ed-util-h, 36px); flex: 1; font-size: 11px; }
 .dc-ctrl { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 6px 4px 0; flex-shrink: 0; position: relative; z-index: 2; }
@@ -9784,20 +9790,14 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-k.w { font-size: 12px; background: #1e1a2a; }
 .dc-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 1; max-width: 200px; min-width: 0; touch-action: manipulation; }
 @media (max-width: 360px) {
-  .dc-pad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 3px; }
   .dc-k { font-size: 20px; }
   .dc-k.diag { font-size: 18px; }
   .dc-ctrl { gap: 6px; padding: 6px 2px 2px; }
 }
-@media (min-width: 400px) {
-  .dc-pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); }
-}
 @media (orientation: landscape) and (max-height: 500px) {
-  .dc-pad { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 3px; }
   .dc-k { font-size: 18px; border-radius: 10px; }
   .dc-k.diag { font-size: 16px; }
   .dc-ctrl { padding: 4px 4px 2px; gap: 8px; }
-  .dc-b { min-height: 40px; }
 }
 .dc-b { min-height: 50px; border: none; border-radius: 12px; background: #2a2438; color: #f0e8ff; font-size: 14px; font-weight: 600; touch-action: manipulation; -webkit-tap-highlight-color: transparent; cursor: pointer; padding: 0 6px; }
 .dc-b:active { transform: scale(0.95); }
@@ -10434,14 +10434,15 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
   useEffect(() => {
-    const safeInset = (): number => {
+    const safeInset = (side: "top" | "right" | "bottom" | "left"): number => {
       try {
         const probe = document.createElement("div");
-        probe.style.cssText = "position:fixed;bottom:0;height:env(safe-area-inset-bottom, 0px);visibility:hidden;pointer-events:none";
+        probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;" + side + ":0;width:env(safe-area-inset-" + side + ", 0px);height:env(safe-area-inset-" + side + ", 0px)";
         document.body.appendChild(probe);
-        const n = probe.getBoundingClientRect().height || 0;
+        const box = probe.getBoundingClientRect();
+        const n = (side === "left" || side === "right") ? box.width : box.height;
         probe.remove();
-        return n;
+        return n || 0;
       } catch { return 0; }
     };
     const pinScroll = (): void => {
@@ -10449,42 +10450,43 @@ export default function App() {
       try { if (document.documentElement) document.documentElement.scrollTop = 0; } catch { /* ignore */ }
       try { if (document.body) document.body.scrollTop = 0; } catch { /* ignore */ }
     };
-    const pinEl = (el: HTMLElement | null, w: number, h: number, top: number, left: number, fullW: boolean): void => {
-      if (!el) return;
-      el.style.position = "fixed";
-      el.style.top = top + "px";
-      el.style.left = fullW ? left + "px" : "";
-      el.style.right = fullW ? "auto" : "0px";
-      el.style.bottom = "auto";
-      el.style.width = fullW ? w + "px" : "";
-      el.style.height = h + "px";
-      el.style.maxHeight = h + "px";
-      el.style.overflow = "hidden";
-      el.style.touchAction = "none";
-    };
     const apply = (): void => {
       pinScroll();
-      const vv = typeof window !== "undefined" ? window.visualViewport : null;
+      const forced = (window as unknown as { __ED16_FORCE_VV?: { width: number; height: number; offsetTop: number; offsetLeft: number } }).__ED16_FORCE_VV;
+      const vv = forced || (typeof window !== "undefined" ? window.visualViewport : null);
       const w = vv ? vv.width : (typeof window !== "undefined" ? window.innerWidth : 390);
       const h = vv ? vv.height : (typeof window !== "undefined" ? window.innerHeight : 844);
       const top = vv ? vv.offsetTop : 0;
       const left = vv ? vv.offsetLeft : 0;
-      const safe = safeInset();
-      const m = layoutMetrics(w, h, safe, 0);
-      const root = document.querySelector(".dc-wrap") as HTMLElement | null;
-      const shell = document.querySelector(".dc-root") as HTMLElement | null;
-      for (const el of [root, shell]) {
-        if (!el) continue;
-        el.style.setProperty("--ed-pad", m.padCell + "px");
-        el.style.setProperty("--ed-canvas-max", m.canvasMax + "px");
-        el.style.setProperty("--ed-save-h", m.saveH + "px");
-        el.style.setProperty("--ed-util-h", m.utilH + "px");
-        el.style.setProperty("--ed-safe-b", safe + "px");
-      }
-      // Pin to the visible visual viewport so 100dvh cannot sit below the browser chrome and drag the document.
-      pinEl(shell, w, h, top, left, true);
-      pinEl(root, w, h, top, left, false);
-      if (root) { root.style.left = "0px"; root.style.right = "0px"; root.style.margin = "0 auto"; root.style.width = "100%"; }
+      const forcedSafe = (window as unknown as { __ED16_FORCE_SAFE?: { top?: number; right?: number; bottom?: number; left?: number } }).__ED16_FORCE_SAFE;
+      const st = forcedSafe && forcedSafe.top != null ? forcedSafe.top : safeInset("top");
+      const sr = forcedSafe && forcedSafe.right != null ? forcedSafe.right : safeInset("right");
+      const sb = forcedSafe && forcedSafe.bottom != null ? forcedSafe.bottom : safeInset("bottom");
+      const sl = forcedSafe && forcedSafe.left != null ? forcedSafe.left : safeInset("left");
+      const m = layoutMetrics(w, h, sb, 0, st);
+      const de = document.documentElement;
+      de.style.setProperty("--ed-vv-top", top + "px");
+      de.style.setProperty("--ed-vv-left", left + "px");
+      de.style.setProperty("--ed-vv-w", w + "px");
+      de.style.setProperty("--ed-vv-h", h + "px");
+      de.style.setProperty("--ed-safe-t", st + "px");
+      de.style.setProperty("--ed-safe-r", sr + "px");
+      de.style.setProperty("--ed-safe-b", sb + "px");
+      de.style.setProperty("--ed-safe-l", sl + "px");
+      de.style.setProperty("--ed-pad", m.padCell + "px");
+      de.style.setProperty("--ed-canvas-max", m.canvasMax + "px");
+      de.style.setProperty("--ed-save-h", m.saveH + "px");
+      de.style.setProperty("--ed-util-h", m.utilH + "px");
+      // If padding or button minima still overflow, shrink the canvas — never clip the HUD or dock.
+      requestAnimationFrame(() => {
+        const wrap = document.querySelector(".dc-wrap") as HTMLElement | null;
+        if (!wrap) return;
+        const overflow = wrap.scrollHeight - wrap.clientHeight;
+        if (overflow > 1) {
+          const cur = parseFloat(getComputedStyle(de).getPropertyValue("--ed-canvas-max")) || m.canvasMax;
+          de.style.setProperty("--ed-canvas-max", Math.max(72, cur - overflow - 2) + "px");
+        }
+      });
     };
     const allowPan = (t: EventTarget | null): boolean => {
       const el = t as HTMLElement | null;
@@ -11564,7 +11566,7 @@ export default function App() {
 
   try {
   return (
-    <div className="dc-root" style={{ background: theme.bg.base, color: theme.text.primary, fontFamily: theme.font.family, position: "fixed", inset: 0, width: "100%", height: "100dvh", overflow: "hidden", touchAction: "none", padding: 0, userSelect: "none", WebkitUserSelect: "none", WebkitTapHighlightColor: "transparent" }}>
+    <div className="dc-root" style={{ background: theme.bg.base, color: theme.text.primary, fontFamily: theme.font.family, overflow: "hidden", touchAction: "none", padding: 0, userSelect: "none", WebkitUserSelect: "none", WebkitTapHighlightColor: "transparent" }}>
       <style>{CSS}</style>
       <div className="dc-wrap">
         <div className="dc-stage">
@@ -12057,7 +12059,7 @@ export default function App() {
     // A UI bug must never remount the game: keep the canvas mounted at the same tree position and offer a way out.
     console.error("Endless Depths: UI error (recovered, run kept)", err);
     return (
-      <div className="dc-root" style={{ background: theme.bg.base, color: theme.text.primary, fontFamily: theme.font.family, position: "fixed", inset: 0, width: "100%", height: "100dvh", overflow: "hidden", touchAction: "none", padding: 0 }}>
+      <div className="dc-root" style={{ background: theme.bg.base, color: theme.text.primary, fontFamily: theme.font.family, overflow: "hidden", touchAction: "none", padding: 0 }}>
         <style>{CSS}</style>
         <div className="dc-wrap">
           <div className="dc-stage">
