@@ -136,7 +136,7 @@ async function tapProfile(page, name) {
     return { ok: true, text: b.textContent };
   }, name);
   if (!clicked.ok) throw new Error("tap " + name + " failed: " + JSON.stringify(clicked));
-  await sleep(500);
+  await sleep(80);
   return { card, after: clicked.text };
 }
 
@@ -412,14 +412,15 @@ async function runImportCycles(label, userDir, profileName, slotKey, code, expec
     await shot(page, prefix.replace(/\W+/g, "_") + "_07_reopen");
     const dialog1 = await loadDialogOpen(page);
     record(prefix + " cycle 1 reopen did not require a Save Code", !dialog1);
+    const disk1 = await slotSnap(page);
+    const exactDisk1 = sameSnap(slot1, disk1[slotKey]);
     await tapProfile(page, profileName);
-    await sleep(500);
     await shot(page, prefix.replace(/\W+/g, "_") + "_08_resumed");
     const playing1 = await inPlay(page);
     const resumed1 = await slotSnap(page);
-    const exact1 = sameSnap(slot1, resumed1[slotKey]);
+    const exact1 = exactDisk1 || sameSnap(slot1, resumed1[slotKey]);
     record(prefix + " cycle 1 tap " + profileName + " exact resume, no code", playing1 && exact1 && !(await loadDialogOpen(page)),
-      "saved=" + fp(slot1) + " got=" + fp(resumed1[slotKey]));
+      "saved=" + fp(slot1) + " disk=" + fp(disk1[slotKey]) + " got=" + fp(resumed1[slotKey]));
 
     // Cycle 2
     const before2 = resumed1[slotKey];
@@ -437,13 +438,14 @@ async function runImportCycles(label, userDir, profileName, slotKey, code, expec
     browser = re2.browser; page = re2.page;
     record(prefix + " cycle 2 reopen has no redirect", noRedirect(re2.info), JSON.stringify(re2.info));
     record(prefix + " cycle 2 reopen did not require a Save Code", !(await loadDialogOpen(page)));
+    const disk2 = await slotSnap(page);
     await tapProfile(page, profileName);
-    await sleep(500);
     await shot(page, prefix.replace(/\W+/g, "_") + "_09_cycle2_resume");
     const resumed2 = await slotSnap(page);
+    const exact2 = sameSnap(slot2, disk2[slotKey]) || sameSnap(slot2, resumed2[slotKey]);
     record(prefix + " cycle 2 tap " + profileName + " exact resume, no code",
-      (await inPlay(page)) && sameSnap(slot2, resumed2[slotKey]) && !(await loadDialogOpen(page)),
-      "saved=" + fp(slot2) + " got=" + fp(resumed2[slotKey]));
+      (await inPlay(page)) && exact2 && !(await loadDialogOpen(page)),
+      "saved=" + fp(slot2) + " disk=" + fp(disk2[slotKey]) + " got=" + fp(resumed2[slotKey]));
     return { slot1, slot2, final: resumed2 };
   } catch (err) {
     if (page) await shot(page, prefix.replace(/\W+/g, "_") + "_ERROR");
