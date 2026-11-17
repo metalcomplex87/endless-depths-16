@@ -249,6 +249,96 @@ async function main() {
       record("joystick outer corner prefers stronger X axis (left)", !!(s && s.ok && quantOk && s.dx === -1 && s.dy === 0), `moved ${s && s.dx},${s && s.dy}`);
     }
 
+    // Continuous hold: only stall on a straight wall or a true both-blocked
+    // corner. A held diagonal along a long wall must keep sliding every step.
+    async function paint(walls) {
+      for (const w of walls) {
+        const wr = await api(page, "wall", w[0], w[1], true);
+        if (!wr || !wr.ok) return wr;
+      }
+      return { ok: true };
+    }
+    function line(axis, sign, span = 8) {
+      const walls = [];
+      for (let i = -span; i <= span; i++) walls.push(axis === "y" ? [i, sign] : [sign, i]);
+      return walls;
+    }
+    function holdOk(h, ex, ey, steps = 5) {
+      if (!h || !h.ok || h.dx !== ex || h.dy !== ey) return false;
+      const path = h.path || [];
+      if (path.length !== steps) return false;
+      const sx = steps ? ex / steps : 0, sy = steps ? ey / steps : 0;
+      return path.every((st) => st.dx === sx && st.dy === sy);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "hold", -1, -1, 5);
+      record("hold up-left + wall above slides left 5 steps", holdOk(h, -5, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "hold", 1, -1, 5);
+      record("hold up-right + wall above slides right 5 steps", holdOk(h, 5, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("x", -1));
+      const h = await api(page, "hold", -1, -1, 5);
+      record("hold up-left + wall left slides up 5 steps", holdOk(h, 0, -5), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint([[0, -1], [1, 0], [1, -1]]);
+      const h = await api(page, "hold", 1, -1, 5);
+      record("hold up-right into true corner (above+right) stays put 5 steps", holdOk(h, 0, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "hold", 0, -1, 5);
+      record("hold straight up into wall stays put 5 steps", holdOk(h, 0, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "stickHold", -70, -70, 5);
+      record("joystick hold up-left + wall above slides left 5 steps", holdOk(h, -5, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "stickHold", 70, -70, 5);
+      record("joystick hold up-right + wall above slides right 5 steps", holdOk(h, 5, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("x", -1));
+      const h = await api(page, "stickHold", -70, -70, 5);
+      record("joystick hold up-left + wall left slides up 5 steps", holdOk(h, 0, -5), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint([[0, -1], [1, 0], [1, -1]]);
+      const h = await api(page, "stickHold", 70, -70, 5);
+      record("joystick hold up-right into true corner stays put 5 steps", holdOk(h, 0, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const h = await api(page, "stickHold", 0, -80, 5);
+      record("joystick hold straight up into wall stays put 5 steps", holdOk(h, 0, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+    {
+      // Start diagonal, then drift into the "up" octant. Sticky hold must keep sliding left.
+      await api(page, "reset", 8);
+      await paint(line("y", -1));
+      const drift = [[-60, -60], [-50, -62], [-40, -65], [-30, -68], [-20, -70]];
+      const h = await api(page, "stickHold", -60, -60, 5, 100, drift);
+      record("joystick hold up-left keeps sliding left under drift toward up", holdOk(h, -5, 0), `moved ${h && h.dx},${h && h.dy} path=${JSON.stringify(h && h.path)}`);
+    }
+
     const shot = await screenshotSlide(page);
     const shotOk = !!(shot && shot.moved && shot.moved.dx === 0 && shot.moved.dy === 1 && fs.existsSync(shot.path) && fs.statSync(shot.path).size > 1000);
     record("slide screenshot", shotOk, shot.path + ` moved ${shot.moved && shot.moved.dx},${shot.moved && shot.moved.dy}`);

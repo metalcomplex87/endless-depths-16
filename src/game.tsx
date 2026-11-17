@@ -488,6 +488,24 @@ function stickFromCenter(px: number, py: number, radius: number, deadFrac = STIC
   const d = DIR_DXY[dirFromDelta(px, py)];
   return { dx: d[0], dy: d[1], kx, ky };
 }
+// Once the stick is in a diagonal octant, keep that diagonal until the analog
+// reading is nearly cardinal (~12°). Stops a held slide from stalling when
+// pointer jitter briefly quantizes as "straight into the wall".
+const STICK_DIAG_KEEP = 0.21;
+function stickyStickDir(prev: { dx: number; dy: number } | null, next: { dx: number; dy: number }, biasX: number, biasY: number): { dx: number; dy: number } {
+  if (next.dx === 0 && next.dy === 0) return next;
+  if (!prev) return next;
+  if (prev.dx === next.dx && prev.dy === next.dy) return next;
+  if (prev.dx !== 0 && prev.dy !== 0) {
+    const isComp = (next.dx === prev.dx && next.dy === 0) || (next.dy === prev.dy && next.dx === 0);
+    if (isComp) {
+      const dropped = next.dx === 0 ? Math.abs(biasX) : Math.abs(biasY);
+      const kept = next.dx === 0 ? Math.abs(biasY) : Math.abs(biasX);
+      if (dropped > Math.max(8, kept * STICK_DIAG_KEEP)) return { dx: prev.dx, dy: prev.dy };
+    }
+  }
+  return next;
+}
 function publishPad(held: boolean, dx: number, dy: number, step = false): void {
   try {
     const w = window as unknown as { __ED16_PAD?: { held: boolean; dx: number; dy: number; steps: number[][] } };
@@ -9831,7 +9849,17 @@ function resolveSlide(g: Game, dx: number, dy: number, biasX = MOVE_BIAS_X, bias
   if (dx === 0 && dy === 0) return { dx, dy, blocked: false };
   const h = g.hero;
   if (dx === 0 || dy === 0) {
-    return { dx, dy, blocked: !tileNotWall(g, h.x + dx, h.y + dy) };
+    if (tileNotWall(g, h.x + dx, h.y + dy)) return { dx, dy, blocked: false };
+    // Only a truly straight input (or a both-blocked corner) should stall.
+    // If the analog stick still has a side component, keep sliding on it.
+    const secondary = dx !== 0 ? Math.abs(biasY) : Math.abs(biasX);
+    const primary = dx !== 0 ? Math.abs(biasX) : Math.abs(biasY);
+    if (secondary > Math.max(8, primary * STICK_DIAG_KEEP)) {
+      const ox = dx !== 0 ? 0 : Math.sign(biasX);
+      const oy = dy !== 0 ? 0 : Math.sign(biasY);
+      if ((ox !== 0 || oy !== 0) && tileNotWall(g, h.x + ox, h.y + oy)) return { dx: ox, dy: oy, blocked: false };
+    }
+    return { dx, dy, blocked: true };
   }
   const destOk = tileNotWall(g, h.x + dx, h.y + dy);
   const horizOk = tileNotWall(g, h.x + dx, h.y);
@@ -10655,20 +10683,20 @@ function moveCarveRoom(g: Game, cx = MOVE_CX, cy = MOVE_CY, rad = 3): { x: numbe
   computeVis(g);
   return { x: cx, y: cy };
 }
-function moveBegin(): Record<string, unknown> {
+function moveBegin(rad = 3): Record<string, unknown> {
   return withMoveTest(() => {
     const g = newGame(null);
     g.mode = "play";
     g.paused = false;
-    const pos = moveCarveRoom(g);
+    const pos = moveCarveRoom(g, MOVE_CX, MOVE_CY, rad);
     MOVE_TEST_G = g;
     return { ok: true, x: pos.x, y: pos.y };
   });
 }
-function moveReset(): Record<string, unknown> {
+function moveReset(rad = 3): Record<string, unknown> {
   const g = moveGame();
   if (!g) return { ok: false, error: "not begun" };
-  const pos = moveCarveRoom(g);
+  const pos = moveCarveRoom(g, MOVE_CX, MOVE_CY, rad);
   return { ok: true, x: pos.x, y: pos.y };
 }
 function moveWall(dx: number, dy: number, wall = true): Record<string, unknown> {
@@ -10718,6 +10746,46 @@ function moveStick(px: number, py: number, radius = 100): Record<string, unknown
   const r = moveAct(s.dx, s.dy, s.kx, s.ky);
   return { ...r, quantized: { dx: s.dx, dy: s.dy }, kx: s.kx, ky: s.ky };
 }
+function moveHold(dx: number, dy: number, steps = 5, biasX?: number, biasY?: number): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  return withMoveTest(() => {
+    const from = { x: g.hero.x, y: g.hero.y };
+    const path: { x: number; y: number; dx: number; dy: number; blocked: boolean }[] = [];
+    if (biasX !== undefined || biasY !== undefined) setMoveBias(biasX ?? 0, biasY ?? 0);
+    const n = Math.max(1, Math.floor(steps));
+    for (let i = 0; i < n; i++) {
+      const want = resolveSlide(g, dx, dy);
+      g.pcd = 0; g.acd = 0; g.qd = undefined; g.rt = true; g.paused = false; g.mode = "play";
+      const px = g.hero.x, py = g.hero.y;
+      act(g, dx, dy);
+      path.push({ x: g.hero.x, y: g.hero.y, dx: g.hero.x - px, dy: g.hero.y - py, blocked: want.blocked });
+    }
+    return { ok: true, from, to: { x: g.hero.x, y: g.hero.y }, dx: g.hero.x - from.x, dy: g.hero.y - from.y, steps: n, path };
+  });
+}
+function moveStickHold(px: number, py: number, steps = 5, radius = 100, pathPts?: number[][]): Record<string, unknown> {
+  const g = moveGame();
+  if (!g) return { ok: false, error: "not begun" };
+  return withMoveTest(() => {
+    const from = { x: g.hero.x, y: g.hero.y };
+    const path: { quantized: { dx: number; dy: number }; held: { dx: number; dy: number }; dx: number; dy: number; x: number; y: number }[] = [];
+    let prev: { dx: number; dy: number } | null = null;
+    const n = Math.max(1, Math.floor(steps));
+    for (let i = 0; i < n; i++) {
+      const pt = pathPts && pathPts[i] ? pathPts[i] : [px, py];
+      const s = stickFromCenter(pt[0], pt[1], radius);
+      const held = stickyStickDir(prev, { dx: s.dx, dy: s.dy }, s.kx, s.ky);
+      setMoveBias(s.kx, s.ky);
+      if (held.dx !== 0 || held.dy !== 0) prev = held;
+      g.pcd = 0; g.acd = 0; g.qd = undefined; g.rt = true; g.paused = false; g.mode = "play";
+      const x0 = g.hero.x, y0 = g.hero.y;
+      if (held.dx !== 0 || held.dy !== 0) act(g, held.dx, held.dy);
+      path.push({ quantized: { dx: s.dx, dy: s.dy }, held: { dx: held.dx, dy: held.dy }, dx: g.hero.x - x0, dy: g.hero.y - y0, x: g.hero.x, y: g.hero.y });
+    }
+    return { ok: true, from, to: { x: g.hero.x, y: g.hero.y }, dx: g.hero.x - from.x, dy: g.hero.y - from.y, steps: n, path };
+  });
+}
 function moveMap(): Record<string, unknown> {
   const g = moveGame();
   if (!g) return { ok: false };
@@ -10737,7 +10805,9 @@ try {
     wall: moveWall,
     enemy: moveEnemy,
     act: moveAct,
+    hold: moveHold,
     stick: moveStick,
+    stickHold: moveStickHold,
     map: moveMap,
     pos: (): object | null => { const g = moveGame(); return g ? { x: g.hero.x, y: g.hero.y } : null; },
     end: (): void => { MOVE_TEST_G = null; GIB_SKIP_SAVE = false; setMoveBias(0, 0); },
@@ -10957,15 +11027,16 @@ export default function App() {
     const s = stickFromCenter(ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2), radius);
     setMoveBias(s.kx, s.ky);
     setStickKnob({ x: s.kx, y: s.ky });
-    if (s.dx === 0 && s.dy === 0) {
+    const held = stickyStickDir(holdRef.current, { dx: s.dx, dy: s.dy }, s.kx, s.ky);
+    if (held.dx === 0 && held.dy === 0) {
       holdRef.current = null;
       setPadHeld("");
       publishPad(true, 0, 0);
       return;
     }
     const prev = holdRef.current;
-    if (!prev || prev.dx !== s.dx || prev.dy !== s.dy) press(s.dx, s.dy);
-    else { setPadHeld(s.dx + "," + s.dy); publishPad(true, s.dx, s.dy); }
+    if (!prev || prev.dx !== held.dx || prev.dy !== held.dy) press(held.dx, held.dy);
+    else { setPadHeld(held.dx + "," + held.dy); publishPad(true, held.dx, held.dy); }
   };
   const stickDown = (ev: { currentTarget: { setPointerCapture?: (id: number) => void }; pointerId: number; clientX: number; clientY: number; preventDefault?: () => void }): void => {
     ev.preventDefault?.();
@@ -11985,13 +12056,13 @@ export default function App() {
       if (!cvHold || !holdRef.current) return;
       ev.preventDefault();
       const [dx, dy] = dirFrom(ev);
+      const r = cv.getBoundingClientRect();
+      const lx = ((ev.clientX - r.left) / r.width) * VW, ly = ((ev.clientY - r.top) / r.height) * VH;
+      const bx = lx - VW / 2, by = ly - (HUD + VIEWH / 2);
+      setMoveBias(bx, by);
       if (dx === 0 && dy === 0) return;
-      {
-        const r = cv.getBoundingClientRect();
-        const lx = ((ev.clientX - r.left) / r.width) * VW, ly = ((ev.clientY - r.top) / r.height) * VH;
-        setMoveBias(lx - VW / 2, ly - (HUD + VIEWH / 2));
-      }
-      holdRef.current.dx = dx; holdRef.current.dy = dy;
+      const held = stickyStickDir(holdRef.current, { dx, dy }, bx, by);
+      holdRef.current.dx = held.dx; holdRef.current.dy = held.dy;
     };
     const onUp = (): void => { if (cvHold) { cvHold = false; holdRef.current = null; } };
     const onTouch = (ev: TouchEvent): void => { ev.preventDefault(); };
