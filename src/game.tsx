@@ -2671,6 +2671,10 @@ function announce(t: string): void {
   try {
     (window as unknown as { __ED16_LAST_MSG?: string }).__ED16_LAST_MSG = t;
     document.documentElement.dataset.ed16Msg = t;
+    if (/Imported|press Save Game|saves on this device/i.test(t)) {
+      (window as unknown as { __ED16_IMPORT_MSG?: string }).__ED16_IMPORT_MSG = t;
+      document.documentElement.dataset.ed16Import = t;
+    }
   } catch { /* ignore */ }
 }
 function msg(g: Game, t: string, c: string): void { g.msgs.push({ t, c }); if (g.msgs.length > 6) g.msgs.shift(); announce(t); }

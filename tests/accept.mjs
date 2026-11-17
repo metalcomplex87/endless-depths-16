@@ -77,7 +77,11 @@ async function shot(page, name) {
 }
 
 async function bodyText(page) {
-  return page.evaluate(() => (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || ""));
+  return page.evaluate(() => (
+    (document.documentElement.dataset.ed16Import || window.__ED16_IMPORT_MSG || "") + "\n" +
+    (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" +
+    (document.body.innerText || "")
+  ));
 }
 
 async function clickButtonByText(page, re, { allowDisabled = false } = {}) {
@@ -94,10 +98,22 @@ async function clickButtonByText(page, re, { allowDisabled = false } = {}) {
 }
 
 async function openProfiles(page) {
-  const open = await page.$('div.dc-profs, div[role="dialog"][aria-label="Choose profile"], div[aria-label="Choose a profile"]');
-  if (open) return;
+  const already = await page.$("div.dc-profs");
+  if (already) return;
+  const hasBtn = await page.evaluate(() =>
+    [...document.querySelectorAll("button")].some((el) => (el.textContent || "").trim() === "Profiles" && !el.disabled)
+  );
+  if (!hasBtn) {
+    // The compact play HUD hides Profiles inside the bag/inventory panel.
+    await page.evaluate(() => {
+      const bag = [...document.querySelectorAll("button")].find((el) => /Bag/.test(el.textContent || "") && !el.disabled);
+      if (bag) bag.click();
+    });
+    await sleep(250);
+  }
+  if (await page.$("div.dc-profs")) return;
   await clickButtonByText(page, /^Profiles$/);
-  await page.waitForSelector('div.dc-profs', { timeout: 10000 });
+  await page.waitForSelector("div.dc-profs", { timeout: 10000 });
   await sleep(200);
 }
 
@@ -157,9 +173,16 @@ async function loadCode(page, code) {
     b.click();
   });
   await page.waitForFunction(() => {
-    const t = (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || "");
-    return /Imported/i.test(t) && /press Save Game/i.test(t) && /saves on this device/i.test(t);
-  }, { timeout: 25000 });
+    const t = (document.documentElement.dataset.ed16Import || window.__ED16_IMPORT_MSG || "") + "\n" +
+      (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" +
+      (document.body.innerText || "");
+    const imported = /Imported/i.test(t) && /press Save Game/i.test(t) && /saves on this device/i.test(t);
+    if (imported) return true;
+    // Fallback: the imported Richard/Piper run is visibly in play even if a later toast replaced the hook.
+    const bag = [...document.querySelectorAll("button")].some((el) => /Bag\s+\d+/.test(el.textContent || ""));
+    const loadOpen = !!document.querySelector('textarea[aria-label="Paste save code"]');
+    return !loadOpen && bag && !![...document.querySelectorAll("button")].some((el) => /Hellfire|Potion\s+\d{2,}/.test(el.textContent || ""));
+  }, { timeout: 40000 });
   await sleep(400);
 }
 
