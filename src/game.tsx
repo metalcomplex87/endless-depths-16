@@ -387,7 +387,7 @@ function setHeroDir(h: Hero, dx: number, dy: number): void {
 function heroDir(h: Hero): number {
   return (typeof h.dir === "number" && h.dir >= 0 && h.dir <= 7) ? (h.dir | 0) : dirFromFace(h.face);
 }
-// Keyboard and on-screen 8-way pad. Q/E/Z/C and numpad 7/9/1/3 are diagonals; WASD/arrows still chord.
+// Keyboard and on-screen 8-way joystick. Q/E/Z/C and numpad 7/9/1/3 are diagonals; WASD/arrows still chord.
 const KEY_DIRS: Record<string, number[]> = {
   arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1],
   arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0],
@@ -417,17 +417,32 @@ function stickDir(dx: number, dy: number, deadX = 13, deadY = 15): number[] {
   if (Math.abs(dx) < deadX && Math.abs(dy) < deadY) return [0, 0];
   return DIR_DXY[dirFromDelta(dx, dy)];
 }
-const PAD_BTNS: { dx: number; dy: number; dir: number; label: string; glyph: string }[] = [
-  { dx: -1, dy: -1, dir: 5, label: "Up-left", glyph: "\u2196" },
-  { dx: 0, dy: -1, dir: 4, label: "Up", glyph: "\u25b2" },
-  { dx: 1, dy: -1, dir: 3, label: "Up-right", glyph: "\u2197" },
-  { dx: -1, dy: 0, dir: 6, label: "Left", glyph: "\u25c0" },
-  { dx: 0, dy: 0, dir: -1, label: "Wait", glyph: "WAIT" },
-  { dx: 1, dy: 0, dir: 2, label: "Right", glyph: "\u25b6" },
-  { dx: -1, dy: 1, dir: 7, label: "Down-left", glyph: "\u2199" },
-  { dx: 0, dy: 1, dir: 0, label: "Down", glyph: "\u25bc" },
-  { dx: 1, dy: 1, dir: 1, label: "Down-right", glyph: "\u2198" },
-];
+// Virtual joystick: small dead zone as a fraction of the base radius (min 10px).
+const STICK_DEAD = 0.16;
+function stickFromCenter(px: number, py: number, radius: number, deadFrac = STICK_DEAD): { dx: number; dy: number; kx: number; ky: number } {
+  const dist = Math.hypot(px, py);
+  const travel = Math.max(8, radius * 0.58);
+  const dead = Math.max(10, radius * deadFrac);
+  let kx = 0, ky = 0;
+  if (dist > 0.5) {
+    const t = Math.min(1, dist / travel);
+    kx = (px / dist) * t * travel;
+    ky = (py / dist) * t * travel;
+  }
+  if (dist < dead) return { dx: 0, dy: 0, kx, ky };
+  const d = DIR_DXY[dirFromDelta(px, py)];
+  return { dx: d[0], dy: d[1], kx, ky };
+}
+function publishPad(held: boolean, dx: number, dy: number, step = false): void {
+  try {
+    const w = window as unknown as { __ED16_PAD?: { held: boolean; dx: number; dy: number; steps: number[][] } };
+    const prev = w.__ED16_PAD || { held: false, dx: 0, dy: 0, steps: [] };
+    const steps = Array.isArray(prev.steps) ? prev.steps : [];
+    if (step && (dx !== 0 || dy !== 0)) steps.push([dx, dy]);
+    w.__ED16_PAD = { held, dx, dy, steps };
+    if (document.documentElement && document.documentElement.dataset) document.documentElement.dataset.ed16Pad = held ? (dx + "," + dy) : "";
+  } catch { /* tests only */ }
+}
 const baseHp = (L: number): number => 40 + 10 * (L - 1);
 const baseAtk = (L: number): number => Math.round(3 + 1.4 * (L - 1));
 const xpNeed = (L: number): number => Math.round(40 * Math.pow(L, 1.6));
@@ -628,31 +643,39 @@ function actExtraLoot(act: number): { gems: number; goldMul: number } {
   const k = act - POST_ACT0;
   return { gems: Math.min(6, Math.floor(k / 20)), goldMul: safePow(1.015, k) };
 }
-function layoutMetrics(vpW: number, vpH: number, safeBottom = 0, chrome = 0, safeTop = 0): { vpH: number; padCell: number; utilH: number; padH: number; saveH: number; dockH: number; canvasMax: number; saveBottom: number; dockBottom: number; fits: boolean } {
+function layoutMetrics(vpW: number, vpH: number, safeBottom = 0, chrome = 0, safeTop = 0): { vpH: number; padCell: number; padSize: number; utilH: number; padH: number; saveH: number; dockH: number; canvasMax: number; saveBottom: number; dockBottom: number; fits: boolean } {
   // vpH is the visible visual-viewport height. Safe-area insets and any simulated
   // browser chrome are subtracted so the HUD, canvas, and dock all fit with no scroll.
+  // The joystick is sized as large as leftover space allows; the canvas shrinks first.
   const h = Math.max(1, vpH - chrome - safeTop - safeBottom);
   const w = Math.max(1, vpW);
   const tight = h < 700 || w <= 360;
   const compact = h < 620 || w <= 360;
-  const padCell = h < 560 ? 40 : (compact ? 44 : (w >= 400 ? 52 : 48));
-  const gap = compact ? 3 : 4;
-  const padH = padCell * 3 + gap * 2;
   const saveH = tight ? 36 : 42;
   const utilH = tight ? 36 : 40;
   const utilBlock = utilH + 4; // .dc-util top padding
   const ctrlPad = tight ? 6 : 8;
-  // Save Game (full width), Save Code / LOAD, and Profiles — three dock rows under the D-pad.
+  // Save Game (full width), Save Code / LOAD, and Profiles — three dock rows under the stick.
   const saveRows = 3;
   const saveGap = 6;
   const saveBlockH = saveH * saveRows + saveGap * (saveRows - 1);
+  const chromeExceptPad = utilBlock + ctrlPad + 6 + saveBlockH + ctrlPad + 4;
+  const minCanvas = compact ? 200 : 260;
+  const potionMin = compact ? 96 : 112;
+  const padMaxH = Math.max(120, h - chromeExceptPad - minCanvas);
+  const padMaxW = Math.max(120, w - potionMin - (tight ? 6 : 8) - 8);
+  const padMin = compact ? 128 : 148;
+  const padCap = compact ? 196 : 228;
+  const padSize = Math.max(padMin, Math.min(padMaxH, padMaxW, padCap));
+  const padH = padSize;
+  const padCell = padSize;
   const dockH = ctrlPad + padH + 6 + saveBlockH + ctrlPad;
   const canvasMax = Math.max(72, h - utilBlock - dockH - 4);
   const dockBottom = h;
   const saveBottom = dockBottom;
   const chromeMin = utilBlock + dockH + 72;
   const fits = canvasMax >= 72 && chromeMin <= h + 0.5;
-  return { vpH: h, padCell, utilH, padH, saveH, dockH, canvasMax, saveBottom, dockBottom, fits };
+  return { vpH: h, padCell, padSize, utilH, padH, saveH, dockH, canvasMax, saveBottom, dockBottom, fits };
 }
 function layoutFitsPhone(w: number, h: number, chrome = 0, safeBottom = 0): boolean { return layoutMetrics(w, h, safeBottom, chrome).fits; }
 const WRAP_MAX = 440;
@@ -8673,9 +8696,9 @@ function layoutPlay(vw: number, vh: number, nUlt: number, safeBottom: number = 0
   const sz = ultBtnSize(vw, vh);
   const btnW = sz.w, btnH = sz.h;
   const ultColH = n <= 0 ? 0 : btnH;
-  const padCell = vh < 500 ? 44 : (vw <= 360 ? 46 : 52);
-  const padW = padCell * 3 + 8;
-  const padH = padCell * 3 + 6;
+  const padSize = layoutMetrics(vw, vh, safeBottom).padSize;
+  const padW = padSize;
+  const padH = padSize;
   const rowH = vh < 500 ? 40 : 50;
   const btnsH = 4 * rowH + 18;
   const ctrlH = Math.max(padH, btnsH, ultColH) + 12;
@@ -9783,7 +9806,12 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-actions { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .dc-pauseov { position: absolute; inset: 0; background: rgba(8,6,14,0.72); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 8; color: #f0e8ff; }
 .dc-pauseov b { font-size: 28px; letter-spacing: 2px; }
-.dc-pad { display: grid; grid-template-columns: repeat(3, var(--ed-pad, 52px)); grid-template-rows: repeat(3, var(--ed-pad, 52px)); gap: 4px; flex-shrink: 0; }
+.dc-pad { display: none; }
+.dc-stick { position: relative; width: var(--ed-stick, 168px); height: var(--ed-stick, 168px); flex-shrink: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+.dc-stick-base { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 50% 42%, #3a3250 0%, #221c30 68%, #141018 100%); border: 3px solid #5a4e78; box-shadow: inset 0 0 18px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.45); pointer-events: none; }
+.dc-stick-knob { position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; margin-left: -21%; margin-top: -21%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d8ccf8, #6a5a90 55%, #3a3050); border: 2px solid #e8e0ff; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; will-change: transform; }
+.dc-stick.held .dc-stick-base { border-color: #9a88cc; }
+.dc-stick-lock { position: absolute; right: 8px; top: 8px; font-size: 16px; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px #000; }
 .dc-k { border: none; border-radius: 12px; background: #2a2438; color: #e8e0ff; font-size: 22px; touch-action: none; -webkit-tap-highlight-color: transparent; padding: 0; cursor: pointer; }
 .dc-k:active, .dc-k.held { background: #4a3e66; transform: scale(0.95); }
 .dc-k.diag { font-size: 20px; }
@@ -10137,6 +10165,8 @@ export default function App() {
   const gRef = useRef<Game | null>(null);
   const holdRef = useRef<{ dx: number; dy: number; last: number } | null>(null);
   const padIdsRef = useRef<Set<number>>(new Set());
+  const stickRef = useRef<HTMLDivElement | null>(null);
+  const [stickKnob, setStickKnob] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const potionPtrAt = useRef(0);
   const invRef = useRef<boolean>(false);
   const quitRef = useRef<boolean>(false);
@@ -10329,16 +10359,39 @@ export default function App() {
     if (!g || invRef.current) return;
     setPadHeld(dx + "," + dy);
     holdRef.current = { dx, dy, last: performance.now() };
+    publishPad(true, dx, dy, true);
     safeAct(g, dx, dy);
   };
-  const release = (): void => { holdRef.current = null; setPadHeld(""); padIdsRef.current.clear(); };
-  const padDown = (ev: { currentTarget: { setPointerCapture?: (id: number) => void }; pointerId: number; preventDefault?: () => void }, dx: number, dy: number): void => {
+  const release = (): void => { holdRef.current = null; setPadHeld(""); padIdsRef.current.clear(); setStickKnob({ x: 0, y: 0 }); publishPad(false, 0, 0); };
+  const applyStick = (ev: { clientX: number; clientY: number }): void => {
+    const el = stickRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const radius = Math.min(r.width, r.height) / 2;
+    const s = stickFromCenter(ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2), radius);
+    setStickKnob({ x: s.kx, y: s.ky });
+    if (s.dx === 0 && s.dy === 0) {
+      holdRef.current = null;
+      setPadHeld("");
+      publishPad(true, 0, 0);
+      return;
+    }
+    const prev = holdRef.current;
+    if (!prev || prev.dx !== s.dx || prev.dy !== s.dy) press(s.dx, s.dy);
+    else { setPadHeld(s.dx + "," + s.dy); publishPad(true, s.dx, s.dy); }
+  };
+  const stickDown = (ev: { currentTarget: { setPointerCapture?: (id: number) => void }; pointerId: number; clientX: number; clientY: number; preventDefault?: () => void }): void => {
     ev.preventDefault?.();
     try { ev.currentTarget.setPointerCapture?.(ev.pointerId); } catch { /* ignore */ }
     padIdsRef.current.add(ev.pointerId);
-    press(dx, dy);
+    applyStick(ev);
   };
-  const padRelease = (ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }, kind: "up" | "leave" | "cancel"): void => {
+  const stickMove = (ev: { pointerId: number; clientX: number; clientY: number; preventDefault?: () => void }): void => {
+    if (!padIdsRef.current.has(ev.pointerId)) return;
+    ev.preventDefault?.();
+    applyStick(ev);
+  };
+  const stickRelease = (ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }, kind: "up" | "leave" | "cancel"): void => {
     if (kind === "leave" && !padLeaveReleases(!!ev.currentTarget?.hasPointerCapture?.(ev.pointerId))) return;
     padIdsRef.current.delete(ev.pointerId);
     if (padIdsRef.current.size === 0) release();
@@ -10473,7 +10526,8 @@ export default function App() {
       de.style.setProperty("--ed-safe-r", sr + "px");
       de.style.setProperty("--ed-safe-b", sb + "px");
       de.style.setProperty("--ed-safe-l", sl + "px");
-      de.style.setProperty("--ed-pad", m.padCell + "px");
+      de.style.setProperty("--ed-pad", m.padSize + "px");
+      de.style.setProperty("--ed-stick", m.padSize + "px");
       de.style.setProperty("--ed-canvas-max", m.canvasMax + "px");
       de.style.setProperty("--ed-save-h", m.saveH + "px");
       de.style.setProperty("--ed-util-h", m.utilH + "px");
@@ -10869,7 +10923,7 @@ export default function App() {
       if (g.mode === "play" && !paused && (g.eq.rh && g.eq.rh.kind === "beamsword" || g.eq.lh && g.eq.lh.kind === "beamsword")) sfx("bhum");
       musicTick();
       if (g.mode === "play") { petFollow(g, dt); petShotTick(g, dt); if (!g.vault && Math.random() < 0.3 + 0.5 * THDREAD) themeAmbient(g); }
-      if (hd && g.mode === "play" && !paused && (g.rt ? (g.pcd ?? 0) <= 1e-6 : now - hd.last > 165 / MVMUL)) { hd.last = now; lastAuto = now; act(g, hd.dx, hd.dy); }
+      if (hd && g.mode === "play" && !paused && (g.rt ? (g.pcd ?? 0) <= 1e-6 : now - hd.last > 165 / MVMUL)) { hd.last = now; lastAuto = now; act(g, hd.dx, hd.dy); publishPad(true, hd.dx, hd.dy, true); }
       if (g.mode === "play" && !paused && calc(g.lvl, g.eq).range > 0) autoTurn(g);
       else if (!hd && g.mode === "play" && !paused && now - lastAuto > 330) { lastAuto = now; autoTurn(g); }
       visTick(g, (g.mode !== "title" && !paused) ? dt : 0);
@@ -10890,7 +10944,7 @@ export default function App() {
       text(RT[rar].toUpperCase() + " GEAR", VW / 2, 206, RC[rar], "center", 9);
       for (let i = 0; i < 8; i++) { ctx.fillStyle = RC[i]; ctx.fillRect(VW / 2 - 56 + i * 14, 216, 12, 4); }
       text("A Prismatic equipped awakens Super Elites and double/triple bosses.", VW / 2, 248, "#c87860", "center", 5);
-      text("Drag/hold or 8-way D-pad to move. Bump to attack.", VW / 2, 264, "#a898c8", "center", 6);
+      text("Hold and slide the joystick, or use keys. Bump to attack.", VW / 2, 264, "#a898c8", "center", 6);
       text("Keys: WASD+chords QEZC Numpad  I bag H potion Enter stairs R ult K dig", VW / 2, 274, "#a898c8", "center", 6);
       text("BEST DEPTH " + g.best + "   BEST LEVEL " + g.bestLvl, VW / 2, 290, "#ffd840", "center", 8);
     };
@@ -11379,7 +11433,7 @@ export default function App() {
         keyHeld.add(tok);
         const cd = chordDir();
         const dx = cd[0], dy = cd[1];
-        if (dx !== 0 || dy !== 0) { holdRef.current = { dx, dy, last: now }; safeAct(g, dx, dy); }
+        if (dx !== 0 || dy !== 0) { holdRef.current = { dx, dy, last: now }; publishPad(true, dx, dy, true); safeAct(g, dx, dy); }
       }
       else if (kl === " " || kl === ".") safeAct(g, 0, 0);
       else if (kl === "i" || kl === "b" || kl === "tab") api?.openInv();
@@ -11402,8 +11456,8 @@ export default function App() {
       keyHeld.delete(tok);
       const cd = chordDir();
       if (cd[0] !== 0 || cd[1] !== 0) {
-        if (holdRef.current) { holdRef.current.dx = cd[0]; holdRef.current.dy = cd[1]; }
-      } else if (holdRef.current && !cvHold) { holdRef.current = null; setPadHeld(""); }
+        if (holdRef.current) { holdRef.current.dx = cd[0]; holdRef.current.dy = cd[1]; publishPad(true, cd[0], cd[1]); }
+      } else if (holdRef.current && !cvHold) { holdRef.current = null; setPadHeld(""); publishPad(false, 0, 0); }
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
@@ -11572,9 +11626,9 @@ export default function App() {
         <div className="dc-stage">
           <canvas ref={cvRef} tabIndex={0} className="dc-cv" />
           {g && g.paused && g.mode === "play" && (
-            <div className="dc-pauseov" role="dialog" aria-label="Paused">
+            <div className="dc-pauseov" role="dialog" aria-label="Paused" onClick={togglePause} style={{ cursor: "pointer" }}>
               <b>PAUSED</b>
-              <div className="dc-sm">Tap PAUSE or press P to resume</div>
+              <div className="dc-sm">Tap here or press P to resume</div>
             </div>
           )}
           {!inv && !ioOpen && !(g && (g.shopOpen || g.stashOpen || g.gambOpen)) && (
@@ -12017,12 +12071,21 @@ export default function App() {
         </div>
         <div className="dc-ctrl">
           <div className="dc-padcol">
-          <div className="dc-pad" onContextMenu={(e) => e.preventDefault()}>
-            {PAD_BTNS.map((b) => b.dx === 0 && b.dy === 0 ? (
-              <button key="pause" className={"dc-k w" + (g && g.paused ? " held" : "")} style={btn} aria-label={locked ? "Pause (locked)" : "Pause"} disabled={locked} onClick={togglePause}>{locked ? "\ud83d\udd12" : "PAUSE"}</button>
-            ) : (
-              <button key={b.label} className={"dc-k" + (b.dx !== 0 && b.dy !== 0 ? " diag" : "") + (padHeld === b.dx + "," + b.dy ? " held" : "")} style={btn} aria-label={b.label} onPointerDown={(ev: { currentTarget: { setPointerCapture?: (id: number) => void }; pointerId: number; preventDefault?: () => void }) => padDown(ev, b.dx, b.dy)} onPointerUp={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => padRelease(ev, "up")} onPointerLeave={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => padRelease(ev, "leave")} onPointerCancel={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => padRelease(ev, "cancel")}>{b.glyph}</button>
-            ))}
+          <div
+            ref={stickRef}
+            className={"dc-stick" + (padHeld ? " held" : "") + (locked ? " locked" : "")}
+            role="application"
+            aria-label={locked ? "Move stick (locked)" : "Move stick"}
+            onContextMenu={(e) => e.preventDefault()}
+            onPointerDown={stickDown}
+            onPointerMove={stickMove}
+            onPointerUp={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => stickRelease(ev, "up")}
+            onPointerLeave={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => stickRelease(ev, "leave")}
+            onPointerCancel={(ev: { pointerId: number; currentTarget?: { hasPointerCapture?: (id: number) => boolean } }) => stickRelease(ev, "cancel")}
+          >
+            <div className="dc-stick-base" />
+            <div className="dc-stick-knob" style={{ transform: "translate(" + stickKnob.x + "px," + stickKnob.y + "px)" }} />
+            {locked ? <div className="dc-stick-lock" aria-hidden="true">{"\ud83d\udd12"}</div> : null}
           </div>
           <div className="dc-saveload">
             <button className={"dc-b dc-savegame" + (locked ? "" : " go")} style={btn} disabled={locked || !g || g.mode === "title"} onClick={saveToProfile} aria-label={SAVE_GAME_LBL}>{SAVE_GAME_LBL}</button>
@@ -12033,7 +12096,6 @@ export default function App() {
           </div>
           <div className="dc-actions">
             <button className="dc-b" style={btn} disabled={!playing || !g || g.potions <= 0} onPointerDown={(ev: { button?: number; preventDefault?: () => void; stopPropagation?: () => void }) => { ev.preventDefault?.(); ev.stopPropagation?.(); if (!potionPointerShouldFire(ev)) return; potionPtrAt.current = performance.now(); potion(); }} onClick={() => { if (potionClickIsDuplicate(performance.now(), potionPtrAt.current)) return; potion(); }}>{"\ud83e\uddea"} Potion {g ? g.potions : 0}</button>
-          </div>
           {g && g.mode === "play" && ultsOf(g.eq).length > 0 && (
             <div className="dc-ults">
               {(() => {
@@ -12051,6 +12113,7 @@ export default function App() {
               })()}
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

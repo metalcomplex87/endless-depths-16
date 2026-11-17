@@ -172,7 +172,7 @@ async function inspect(page) {
       r.top >= vis.y - pad && r.left >= vis.x - pad && r.bottom <= vis.b + pad && r.right <= vis.r + pad && r.width > 0 && r.height > 0;
     const canvas = document.querySelector("canvas.dc-cv");
     const cr = canvas ? canvas.getBoundingClientRect() : null;
-    const wanted = ["Bag", "Stairs", "Back", "Save Game", "Save Code", "LOAD", "Profiles", "Potion", "PAUSE"];
+    const wanted = ["Bag", "Stairs", "Back", "Save Game", "Save Code", "LOAD", "Profiles", "Potion"];
     const buttons = [...document.querySelectorAll("button")].map((el) => {
       const text = (el.textContent || "").replace(/\s+/g, " ").trim();
       const r = el.getBoundingClientRect();
@@ -183,6 +183,9 @@ async function inspect(page) {
       if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return null;
       return { text: text.slice(0, 40) || el.getAttribute("aria-label") || el.className, r: { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height }, visible: within(r) };
     }).filter(Boolean);
+    const stick = document.querySelector(".dc-stick");
+    const sr = stick ? stick.getBoundingClientRect() : null;
+    const pauseBtn = [...document.querySelectorAll("button")].some((el) => /^PAUSE$/i.test((el.textContent || "").trim()));
     const util = document.querySelector(".dc-util");
     const ur = util ? util.getBoundingClientRect() : null;
     const wrap = document.querySelector(".dc-wrap");
@@ -201,6 +204,8 @@ async function inspect(page) {
       scroll: { x: window.scrollX, y: window.scrollY, docH: document.documentElement.scrollHeight, wrapSH: wrap ? wrap.scrollHeight : 0, wrapCH: wrap ? wrap.clientHeight : 0, rootH: root ? root.getBoundingClientRect().height : 0 },
       canvas: cr && { top: cr.top, left: cr.left, bottom: cr.bottom, right: cr.right, width: cr.width, height: cr.height, visible: within(cr) },
       canvasAboveUtil: !!(cr && ur && cr.bottom <= ur.top + 2),
+      stick: sr && { top: sr.top, left: sr.left, bottom: sr.bottom, right: sr.right, width: sr.width, height: sr.height, visible: within(sr) },
+      pauseOnPad: pauseBtn,
       buttons,
       missing,
       clipped: clipped.map((b) => b.text + " @ " + JSON.stringify(b.r)),
@@ -230,6 +235,9 @@ async function runCase(c) {
     record(c.name + " no page or wrap scroll / overflow", noScroll, JSON.stringify(info.scroll));
     record(c.name + " message log (canvas bottom) does not cover buttons", info.canvasAboveUtil,
       JSON.stringify({ canvasBottom: info.canvas && info.canvas.bottom }));
+    const stickOk = !!(info.stick && info.stick.visible && info.stick.width >= 120 && info.stick.height >= 120 && !info.pauseOnPad);
+    record(c.name + " joystick visible and large, no PAUSE button on the pad", stickOk,
+      JSON.stringify({ stick: info.stick, pauseOnPad: info.pauseOnPad }));
     record(c.name + " screenshot", true, shot);
   } catch (err) {
     record(c.name + " ERROR", false, err && err.stack ? err.stack : String(err));

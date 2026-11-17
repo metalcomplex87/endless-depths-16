@@ -200,8 +200,7 @@ async function unlockIfNeeded(page) {
 async function pressSaveGame(page) {
   await unlockIfNeeded(page);
   await page.evaluate(() => {
-    const pause = [...document.querySelectorAll("button")].find((el) => /PAUSE/i.test(el.textContent || "") && !el.disabled);
-    if (pause) pause.click();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", code: "KeyP", bubbles: true, cancelable: true }));
   });
   await sleep(150);
   await page.waitForFunction(() => {
