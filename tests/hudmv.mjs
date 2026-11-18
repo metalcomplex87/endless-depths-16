@@ -51,9 +51,9 @@ async function main() {
   const bad = tab.rows.filter((r) => r.top > r.max || r.max > 100);
   rec("move-speed rolls stay inside the per-item range (max 100%)", bad.length === 0, tab.rows.filter((r) => r.rar === 7).map((r) => "il" + r.il + ": max " + r.max + " med " + r.med + " p99 " + r.p99).join(" | "));
   const cl = await H(page, "mvClampTest");
-  rec("old items clamped to the new per-item range", cl.armor3000p === 100 && cl.weapon3000p <= 100 && cl.weapon3000p > 0 && cl.legs20r4 <= cl.maxLegs20r4 && cl.head1500r6 <= cl.maxHead1500r6, JSON.stringify(cl));
+  rec("old items: limited to +100% per item, never lowered otherwise; earlier clamp undone once; pets keep run speed", cl.armor200 === 100 && cl.weapon150 === 100 && cl.legs20r4at90 === 90 && cl.clampedHead1500[1] === 100 && cl.clampedChest215[1] === 100 && cl.newItemAtOldMax === cl.clampedHead1500[0] && cl.pet40 === 40 && cl.reloadKeeps === 100, JSON.stringify(cl));
   const gear = await H(page, "mvGear", 100);
-  rec("total move speed hard-capped at +300%", gear.mv === 300 && gear.mvRaw > 300, JSON.stringify(gear));
+  rec("total move speed hard-capped at +400%", gear.mv === 400 && gear.mvRaw > 400, JSON.stringify(gear));
   // E. walk at +300% through hazard floors: never inside a wall or on water/lava, camera keeps up
   let samples = 0, wall = 0, hz = 0, maxLag = 0, moved = 0;
   for (const d of [61, 77, 95, 133]) {
@@ -67,13 +67,13 @@ async function main() {
       await page.keyboard.up(key);
     }
   }
-  const el = await page.$("canvas"); await el.screenshot({ path: OUT + "/mv-300-walk.png" });
-  rec("+300% walking: no wall/water/lava tunnelling, camera follows", wall === 0 && hz === 0 && moved > 20, JSON.stringify({ samples, moved, wall, hz, maxCamLagPx: maxLag }));
+  const el = await page.$("canvas"); await el.screenshot({ path: OUT + "/mv-400-walk.png" });
+  rec("+400% walking: no wall/water/lava tunnelling, camera follows", wall === 0 && hz === 0 && moved > 20, JSON.stringify({ samples, moved, wall, hz, maxCamLagPx: maxLag }));
   // F. Bag stats chip
   await page.keyboard.press("i"); await sleep(600);
   const chip = await page.evaluate(() => { const e = document.querySelector("[data-mv]"); return e ? e.textContent : null; });
   await page.screenshot({ path: OUT + "/bag-stats-move.png" });
-  rec("Bag stats shows total with cap", !!chip && /Move speed \+300% \(cap 300%\)/.test(chip), chip);
+  rec("Bag stats shows total with cap", !!chip && /Move speed \+400% \(cap 400%\)/.test(chip), chip);
   await b.close();
   fs.writeFileSync(OUT + "/results.json", JSON.stringify(results, null, 1));
   const f = results.filter((r) => !r.pass).length;

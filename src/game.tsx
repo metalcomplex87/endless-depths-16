@@ -120,7 +120,7 @@ interface ChestDeal { price: number; buys: number }
 interface Merchant { x: number; y: number }
 interface Ult { n: string; el: El; pat: number; c2: string; i: number; fx?: number }
 
-interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number }
+interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number; mvv?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
 interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number }
@@ -137,7 +137,7 @@ interface Banner { txt: string; sub: string; c: string; rar: number; t: number }
 // the player already visited (the portal stays open for good, and the cave keeps its state so loot never refills).
 type CaveState = { ch?: number[][]; dr?: Drop[]; gb?: number[][]; clr?: number; n?: number };
 type PortalSpot = { x: number; y: number; kind?: "vault" | "camp" | "proceed" | "secret" | "goblin"; w?: number; h?: number; sup?: number; cs?: CaveState };
-interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: number; block: number; regen: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; ward: number; mv: number; mvRaw?: number }
+interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: number; block: number; regen: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; ward: number; mv: number; mvRaw?: number; bw?: Bulwark | null }
 interface Hero { x: number; y: number; ax: number; ay: number; face: number; dir?: number; hp: number; bump: number; bdx: number; bdy: number; as?: number }
 interface FloorSnap {
   d: number; map: string; seen: string; chests: Chest[]; drops: Drop[];
@@ -170,6 +170,7 @@ interface Game {
   actCampAt?: number; paused?: boolean;
   front?: number; snapPrev?: FloorSnap | null; snapCur?: FloorSnap | null;
   lootToast?: number; lootToastTxt?: string;
+  bwLsReady?: number; bwImmUntil?: number; // Prismatic Bulwark Last Stand clock (petAbiT seconds; runtime only)
   petAbiT?: number; petAegisUntil?: number; petAegisCd?: number; petStormCd?: number; petTwinUntil?: number; petTwinCd?: number; petTwinAcc?: number; petHarvest?: number; petPhoenixD?: number; petAbiPet?: number; petAbiFx?: { n: string; t: number; c: string };  petSplitUntil?: number; petSplitCd?: number; petSplitN?: number; petNeedleCd?: number; petThunderCd?: number; petWellCd?: number; petChronoUntil?: number; petChronoCd?: number; petApexCd?: number; petSoulD?: number; petEmberStill?: number; petEmberWard?: number; petEmberHp?: number; petLegionAcc?: number;
   muted: boolean; notify: () => void; sfx: (n: string, v?: number) => void;
   wallBreak?: boolean; cracks?: number[]; digAt?: { x: number; y: number }; digClock?: number; wallVer?: number;
@@ -1993,6 +1994,41 @@ function prisGated(g: Game): boolean {
 
 function deepPrisGated(g: Game): boolean { return g.depth >= DEEP_PRIS_MIN && prisGated(g); }
 function cavePortalChance(g: Game): number { return 0.04 * gemPortalMul(g); }
+// ---------- Prismatic Bulwark (option A1) + linear star curve (option C1), approved 2026-11-18 ----------
+// Derived ONLY from what is equipped now (star counts on Prismatic items) and the current depth, never stored,
+// so every existing profile / stash item gets it retroactively. Paramount is excluded from the offence side.
+// S_eff = sum over equipped Prismatic items (all 7 slots, gems excluded) of (stars + 3); k = min(1, S_eff / 78).
+// r = depth ramp 0 at d200 -> 1 at d1300.
+interface Bulwark { s: number; k: number; r: number; hpMul: number; dr: number; res: number; cap: number; bossMul: number; pct: number; lsCd: number }
+const BW_SREF = 78;          // 6 Prismatics at 10 stars
+const BW_PER_ITEM = 3;       // each equipped Prismatic counts as 3 stars on top of its own
+const BW_CAP0 = 0.60, BW_CAP_K = 0.25;  // A1/C1 single-hit cap: 60% - 25%*k of max HP (0* 54%, 5* 45%, 10* 35%)
+const BW_HP_K = 0.6, BW_HP_DEEP = 2.0;  // C1 max HP x(1 + 0.6k + 2k*r)
+const BW_DR = 0.45;          // C1 damage reduction after defence: 45%*k
+const BW_RES = 0.30;         // C1 resistance: a further 30%*k off ranged shots and boss special attacks
+const BW_BOSS = 1.5;         // C1 damage vs bosses x(1 + 1.5k)  (not Paramount)
+const BW_PCT = 0.0055;       // C1 basic attacks also deal 0.55%*k*r of the boss's max HP (once per attack per boss)
+const BW_R0 = 200, BW_R1 = 1300;
+const BW_LS_IMM = 1.2, BW_LS_CD0 = 30, BW_LS_CDMIN = 10; // A1 Last Stand: lethal hit -> 1 HP + 1.2s immunity, cd 30 - S_eff/4 (min 10)
+function bwStars(eq: Eq | null | undefined): number {
+  if (!eq) return 0;
+  let n = 0;
+  for (const k of EQK) { const it = eq[k]; if (it && it.kind !== "gem" && it.rar >= 7) n += Math.max(0, Math.min(10, it.st ? it.st.length : 0)) + BW_PER_ITEM; }
+  return n;
+}
+function bwRamp(depth: number): number { return Math.max(0, Math.min(1, ((depth || 0) - BW_R0) / (BW_R1 - BW_R0))); }
+let BW_OFF = false; // true only inside calcFoe (and the before/after test sim)
+// Enemy scaling reads the hero's stats WITHOUT the Bulwark, so foes are not re-tuned to cancel the new HP.
+function calcFoe(lvl: number, eq: Eq): Stats { const o = BW_OFF; BW_OFF = true; try { return calc(lvl, eq); } finally { BW_OFF = o; } }
+function bulwarkOf(eq: Eq | null | undefined, depth: number): Bulwark | null {
+  if (BW_OFF) return null;
+  const s = bwStars(eq);
+  if (s <= 0) return null;
+  const k = Math.min(1, s / BW_SREF), r = bwRamp(depth);
+  return { s, k, r, hpMul: 1 + BW_HP_K * k + BW_HP_DEEP * k * r, dr: BW_DR * k, res: BW_RES * k, cap: BW_CAP0 - BW_CAP_K * k, bossMul: 1 + BW_BOSS * k, pct: BW_PCT * k * r, lsCd: Math.max(BW_LS_CDMIN, BW_LS_CD0 - s / 4) };
+}
+const BW_LOG = { capped: 0, lastStand: 0 };
+function bwDepth(): number { return STAT_G ? (STAT_G.depth || 0) : 0; }
 function isBossFoe(e: En): boolean { return !!e.act || (e.cls === 2 && !e.hunt && !e.gob && !e.child); }
 function bossAtkMul(e: En): number {
   if (!isBossFoe(e)) return 1;
@@ -3052,6 +3088,9 @@ function calc(lvl: number, eq: Eq): Stats {
       s.spd += 35 * mul; s.mv += 12 * mul;
     }
   }
+  const bw = bulwarkOf(eq, bwDepth());
+  s.bw = bw;
+  if (bw) s.maxHp = safeMul(s.maxHp, bw.hpMul); // C1 toughness from Prismatic stars (depth-ramped)
   s.maxHp = Math.max(1, Math.round(s.maxHp)); // whole numbers only (gem/star multipliers used to leave 58995.799...)
   s.crit = Math.min(75, s.crit); s.spd = Math.min(90, s.spd); s.block = Math.min(60, s.block); s.regen = Math.round(s.regen * 10) / 10; s.mvRaw = Math.round(s.mv); s.mv = Math.min(MV_CAP, Math.round(s.mv));
   return s;
@@ -4642,7 +4681,7 @@ function mkEnemy(g: Game, x: number, y: number, cls: number, opts?: { full?: boo
   let atk = enemyAtkAt(d) * f.atk * am;
   let hpv = hp;
   if (g.eq) {
-    const hs = calc(g.lvl, g.eq);
+    const hs = calcFoe(g.lvl, g.eq);
     const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
     const two = isTwo(main);
     const edef = (0.5 + 0.85 * d) * f.def * dm * (hs.magic ? 0 : 1 - hs.pierce);
@@ -4660,7 +4699,7 @@ function mkEnemy(g: Game, x: number, y: number, cls: number, opts?: { full?: boo
     if (se) atk = safeMul(atk, sm);
   }
   if (tr.includes("brutal")) atk *= 1.3;
-  if (g.eq) { const hs = calc(g.lvl, g.eq); const C = hs.maxHp * (se ? SE_CAP : lesser ? 0.16 : combatAtkCap(cls)); atk = Math.min(atk, atkForHit(C, hs.def)); }
+  if (g.eq) { const hs = calcFoe(g.lvl, g.eq); const C = hs.maxHp * (se ? SE_CAP : lesser ? 0.16 : combatAtkCap(cls)); atk = Math.min(atk, atkForHit(C, hs.def)); }
   const base = pre + f.v[v];
   const lesserTag = lesser && tr.length && (!f.tr || tr[tr.length - 1] !== f.tr) ? TRN[tr[tr.length - 1]] + " " : "";
   const name = se ? "Super Elite " + (tr.length ? TRN[tr[tr.length - 1]] + " " : "") + base : cls === 2 ? pick(BOSSN) + " the " + base + " " + pick(BOSST) : lesser ? "Lesser " + lesserTag + base : cls === 1 ? TRN[tr[tr.length - 1]] + " " + base : base;
@@ -4718,7 +4757,7 @@ function resolveShot(g: Game, s: Shot): void {
   else {
     // shooter gone: still apply the stored hit if the hero stayed put
     if (R() * 100 < st.block) { floatTxt(g, h.x, h.y, "BLOCK", "#80c0ff"); g.sfx("block"); return; }
-    let dmg = s.dmg as number;
+    let dmg = bwMitigate(st, s.dmg as number, true);
     if (g.ward > 0) { const ab = Math.min(g.ward, dmg); g.ward -= ab; dmg -= ab; }
     if (dmg > 0) applyHeroDmg(g, dmg, 3);
   }
@@ -5255,7 +5294,7 @@ function mkHunter(g: Game, x: number, y: number): En {
   e.hp = e.mhp = Math.round(e.mhp * HUNTER_HP_MUL);
   const hm = 1 - (1 - HUNTER_ATK_MUL) * Math.min(1, Math.max(0, (g.depth - 4) / 8));
   if (g.eq) {
-    const hs = calc(g.lvl, g.eq);
+    const hs = calcFoe(g.lvl, g.eq);
     e.atk = Math.max(1, Math.round(atkForHit(hs.maxHp * combatAtkCap(2) * hm, hs.def)));
   } else e.atk = Math.max(1, Math.round(e.atk * hm));
   e.xp = Math.round(e.xp * 1.3);
@@ -5306,18 +5345,36 @@ function huntMove(g: Game, e: En): void {
   }
   if (best) { if (best[0] !== e.x) e.face = best[0] > e.x ? 1 : -1; e.x = best[0]; e.y = best[1]; }
 }
-// ======================= movement speed (armor only) =======================
-// 2026-11-18 rework: Movement Speed can roll on ANY gear slot (weapons, shields, armor, jewelry; not pets or gems).
-// One item: up to +100%, but the ceiling grows with item level and rarity, and high rolls are rare (cubic skew).
-// Total from all gear + pet + set bonuses is hard-capped at +300%.
-const MV_CAP = 300;      // total, in %
+// ======================= movement speed =======================
+// 2026-11-18 rework v2 (11:50 CT): Movement Speed can roll on EVERY gear slot including pets (not gems).
+// One item: up to +100%; the best possible roll grows with item level (100% reachable from ilvl 1000 at Prismatic),
+// lower rarities scale it down, high rolls are rare (cubic skew). Total is hard-capped at +400%.
+// No destructive range clamp on load any more: a stored value is only limited to 0..100. Items that the 11:11-11:28 builds
+// clamped down (stored value == that build's ceiling) are restored once to +100% (marker it.mvv = MVV).
+const MV_CAP = 400;      // total, in % (was 300 at 11:11, 200 before)
 const MV_ITEM_MAX = 100; // one item, in %
 const MVCH = [0.06, 0.1, 0.15, 0.2, 0.26, 0.32, 0.4, 0.5];
 // the best roll an item of this level can ever have (rarity 7); lower rarities scale it down (mvRarMul)
-function mvItemCeil(ilvl: number): number { const x = Math.max(1, Math.min(3000, ilvl || 1)) / 3000; return Math.min(MV_ITEM_MAX, Math.round(8 + 92 * Math.pow(x, 0.55))); }
+const MV_FULL_IL = 1000; // item level where a Prismatic can roll the full +100%
+function mvItemCeil(ilvl: number): number { const x = Math.max(1, Math.min(MV_FULL_IL, ilvl || 1)) / MV_FULL_IL; return Math.min(MV_ITEM_MAX, Math.round(8 + 92 * Math.pow(x, 0.5))); }
+// the ceiling the 11:11-11:28 builds clamped stored values to (used once to detect and undo that clamp)
+function mvOldClampMax(ilvl: number, rar: number): number { const x = Math.max(1, Math.min(3000, ilvl || 1)) / 3000; const c = Math.min(MV_ITEM_MAX, Math.round(8 + 92 * Math.pow(x, 0.55))); return Math.max(1, Math.round(c * mvRarMul(rar))); }
+const MVV = 2; // movement-speed rules version stamped on every item
 function mvRarMul(rar: number): number { return 0.4 + 0.6 * Math.max(0, Math.min(7, rar | 0)) / 7; }
 function mvItemMax(ilvl: number, rar: number): number { return Math.max(1, Math.round(mvItemCeil(ilvl) * mvRarMul(rar))); }
-function mvCanRoll(k: Kind): boolean { return k !== "pet" && k !== "gem"; }
+function mvCanRoll(k: Kind): boolean { return k !== "gem"; }
+// load-time fix-up: never lowers a value except to the +100% per-item limit; undoes the earlier range clamp once
+function mvFixItem(it: Item): void {
+  const old = it.mvv !== MVV;
+  it.mvv = MVV;
+  if (it.bonus.mv === undefined) return;
+  if (!mvCanRoll(it.kind)) { delete it.bonus.mv; return; }
+  let v = Math.max(0, Math.round(Number(it.bonus.mv) || 0));
+  if (old && v > 0 && v < MV_ITEM_MAX && v === mvOldClampMax(it.ilvl, it.rar)) { v = MV_ITEM_MAX; MV_RESTORED.n++; }
+  it.bonus.mv = Math.min(MV_ITEM_MAX, v);
+  if (!it.bonus.mv) delete it.bonus.mv;
+}
+const MV_RESTORED = { n: 0 };
 let MVMUL = 1; // 1 + total move speed / 100: walk animation, hold-to-walk repeat and key repeat all speed up by this
 function mvRoll(ilvl: number, rar: number, isSet: boolean = false): number {
   // 15% of the item's max is the floor; the rest is u^3 (median roll ~ 26% of max, top 5% of max in ~1.7% of rolls)
@@ -5694,6 +5751,7 @@ function makePet(ilvl: number, rar: number, depth?: number): Item {
   const st = rollStars("pet", rar, false, depth ?? ilvl);
   if (st) it.st = st;
   if (rar >= 7) { it.pab = petAbiRoll(it); it.prt = petRareRoll(it); }
+  if (R() < MVCH[Math.max(0, Math.min(7, rar))]) it.bonus.mv = mvRoll(ilvl, rar); // pets can roll run speed too (2026-11-18 v2)
   rollWW(it, true);
   return it;
 }
@@ -5832,8 +5890,17 @@ function tryPetSecondSoul(g: Game, st: Stats): boolean {
   g.sfx("sparkle");
   return true;
 }
+// C1 defence: damage reduction (all hits) and resistance (ranged shots and boss special attacks)
+function bwMitigate(st: Stats, dmg: number, special: boolean): number {
+  const bw = st.bw;
+  if (!bw || dmg <= 0) return dmg;
+  let m = 1 - bw.dr;
+  if (special) m *= 1 - bw.res;
+  return Math.max(1, Math.round(safeMul(dmg, m)));
+}
 function applyHeroDmg(g: Game, dmg: number, shake: number): void {
   const now = g.petAbiT ?? 0;
+  if ((g.bwImmUntil ?? 0) > now) { floatTxt(g, g.hero.x, g.hero.y, "IMMUNE", "#ffd0ff"); return; }
   if ((g.petAegisUntil ?? 0) > now) {
     floatTxt(g, g.hero.x, g.hero.y, "IMMUNE", "#ffe080");
     return;
@@ -5850,8 +5917,23 @@ function applyHeroDmg(g: Game, dmg: number, shake: number): void {
     if (soak > 0) floatTxt(g, g.hero.x + 0.3, g.hero.y - 0.2, "WARD " + soak, "#ffb040");
     if (dmg <= 0) return;
   }
+  const bw = st.bw;
+  if (bw) { // A1: no single hit can take more than cap% of max HP
+    const capV = Math.max(1, Math.floor(st.maxHp * bw.cap));
+    if (dmg > capV) { dmg = capV; BW_LOG.capped++; }
+  }
   if (dmg >= g.hero.hp && tryPetPhoenix(g, st)) return;
   if (dmg >= g.hero.hp && tryPetSecondSoul(g, st)) return;
+  if (bw && dmg >= g.hero.hp && (g.bwLsReady ?? 0) <= now) { // A1 Last Stand
+    g.hero.hp = 1;
+    g.bwLsReady = now + bw.lsCd; g.bwImmUntil = now + BW_LS_IMM;
+    BW_LOG.lastStand++;
+    floatTxt(g, g.hero.x, g.hero.y - 0.3, "LAST STAND", "#ffd0ff");
+    fxAdd(g, "ring", g.hero.ax * TS + 12, g.hero.ay * TS + 12, 0, 0, 0.5, "#ffd0ff", "#ffffff", 2.5 * TS);
+    g.shake = Math.max(g.shake, shake);
+    g.sfx("block");
+    return;
+  }
   g.hero.hp -= dmg;
   floatTxt(g, g.hero.x, g.hero.y, "-" + dmg, "#ff5050");
   g.shake = Math.max(g.shake, shake);
@@ -7072,7 +7154,7 @@ function canEnterCamp(g: Game): boolean {
 }
 function recapActAtk(g: Game, atk: number, act: number): number {
   if (!g.eq) return Math.max(1, Math.round(atk));
-  const hs = calc(g.lvl, g.eq);
+  const hs = calcFoe(g.lvl, g.eq);
   const C = hs.maxHp * actHitCap(act);
   return Math.max(1, Math.round(Math.min(atk, (C + Math.sqrt(C * C + 4 * C * hs.def)) / 2)));
 }
@@ -7156,11 +7238,11 @@ function mkActBoss(g: Game, x: number, y: number): En {
   const sh = actShieldFrac(act);
   const post = actPostMul(act);
   if (g.eq) {
-    const hs = calc(g.lvl, g.eq);
+    const hs = calcFoe(g.lvl, g.eq);
     const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
     PRIS_STAR_LEGACY = true;
     let hsWant: Stats;
-    try { hsWant = calc(g.lvl, eqStarCapped(g.eq, PRIS_STAR_BASE)); } finally { PRIS_STAR_LEGACY = false; }
+    try { hsWant = calcFoe(g.lvl, eqStarCapped(g.eq, PRIS_STAR_BASE)); } finally { PRIS_STAR_LEGACY = false; }
     const ev = Math.max(1, hsWant.atk * combatSwingMul(hsWant, isTwo(main)));
     const want = Math.max(1, (actFightSec(act) / RT_ATK) * ev / (1 + sh));
     // Want-based at every depth (beatable with a 5★-capped version of the current kit).
@@ -7608,6 +7690,69 @@ function simActBossTTK(depth: number, stars: number, golden = false): { depth: n
   const turns = Math.max(1, Math.ceil(pool / dmg));
   const ttk = turns * RT_ATK;
   return { depth, act, post: actPostMul(act), starMul: prisStarMulN(stars), heroAtk: hs.atk, ev, bossHp: boss.mhp, bossAtk: boss.atk, dmg, turns, ttk };
+}
+// Prismatic Bulwark / C1 fight simulator (test hook): real calc, real heroAttack on a real mkActBoss, real enemyAttack back.
+function simBwFight(depth: number, stars: number, on: boolean, nPris = 6, swings = 240): Record<string, number | boolean | string> {
+  const oldG = STAT_G, oldOff = BW_OFF, oldPm = BOSS_PM_TEST_FORCE;
+  BW_OFF = !on;
+  try {
+    const act = actOf(depth);
+    const ilvl = Math.max(1, depth + 1 + Math.floor(act / 2));
+    const full = fullPrisEq(ilvl, stars);
+    const eq: Eq = { head: full.head, chest: full.chest, arms: full.arms, legs: full.legs, rh: full.rh, lh: full.lh, pet: null };
+    const slots: EqKey[] = ["head", "chest", "arms", "legs", "rh", "lh"];
+    for (let i = nPris; i < 6; i++) { const k = slots[i]; eq[k] = k === "rh" ? makeItem(ilvl, 6, "sword") : k === "lh" ? makeItem(ilvl, 6, "shield") : makeItem(ilvl, 6, k as Kind); }
+    const lvl = Math.max(1, depth);
+    const g = newGame(null);
+    g.mode = "play"; g.depth = depth; g.lvl = lvl; g.area = "dungeon"; g.eq = eq;
+    g.sfx = () => undefined; g.notify = () => undefined;
+    STAT_G = g;
+    const st = calc(lvl, eq);
+    g.hero.hp = st.maxHp;
+    const hx = g.hero.x, hy = g.hero.y;
+    const boss = mkActBoss(g, hx + 1, hy);
+    boss.x = hx + 1; boss.y = hy; boss.ax = boss.x; boss.ay = boss.y; boss.awake = true; boss.abIntro = true;
+    const pool = safeNum(boss.mhp + (boss.mshd ?? 0));
+    // offence: average damage per attack over many swings (boss HP inflated so it never dies; shields off while measuring)
+    g.en = [boss];
+    const big = safeMul(boss.mhp, 1e6);
+    boss.hp = big; boss.shd = 0; boss.mshd = 0; boss.ovn = 0; boss.ovhp = 0;
+    let dealt = 0;
+    for (let i = 0; i < swings; i++) { const h0 = boss.hp; heroAttack(g, boss, st, 1, 1, 0); dealt += Math.max(0, h0 - boss.hp); boss.hp = big; boss.stun = 0; }
+    const per = Math.max(1, dealt / swings);
+    const ttk = pool / per * RT_ATK;
+    // basic-hit model (same as the options file): expected swing damage only, no spells/procs/ults
+    const evb = Math.max(1, st.atk * combatSwingMul(st, isTwo(eq.rh)));
+    const bwm = st.bw ? st.bw.bossMul : 1, pc = st.bw ? st.bw.pct : 0;
+    const perB = Math.max(1, dmgF(evb, boss.def) * bwm + boss.mhp * pc);
+    const ttkBasic = pool / perB * RT_ATK;
+    // defence: worst melee hit and worst special (0.6x ranged/ability) from this boss at boss power x3 + 3 overshield marks
+    boss.pm = 3; boss.ovm = 3; boss.weak = 0;
+    BOSS_PM_TEST_FORCE = 3;
+    let worst = 0, worstSp = 0, dead = 0;
+    for (let i = 0; i < 400; i++) {
+      const sp = i % 2 === 1;
+      g.mode = "play"; g.hero.hp = st.maxHp; g.ward = 0; g.bwLsReady = 1e12; g.bwImmUntil = 0; g.petAegisUntil = 0;
+      const blk = st.block; st.block = 0;
+      enemyAttack(g, boss, sp ? 0.6 : 1, st);
+      st.block = blk;
+      const f = (st.maxHp - Math.max(0, g.hero.hp)) / st.maxHp;
+      if (sp) worstSp = Math.max(worstSp, f); else worst = Math.max(worst, f);
+      if (g.hero.hp <= 0) dead++;
+    }
+    // Last Stand: a hit far above max HP from low HP leaves 1 HP, the next hit is ignored, then it is on cooldown
+    let ls = "n/a";
+    if (on && st.bw) {
+      g.mode = "play"; g.hero.hp = Math.round(st.maxHp * 0.2); g.bwLsReady = 0; g.bwImmUntil = 0; g.petAegisUntil = 0; g.petPhoenixD = depth; g.petSoulD = depth;
+      applyHeroDmg(g, st.maxHp * 5, 3);
+      const a = g.hero.hp;
+      applyHeroDmg(g, st.maxHp * 5, 3);
+      const b = g.hero.hp;
+      ls = "hp after lethal " + a + ", after 2nd hit in immunity " + b + ", cd " + st.bw.lsCd.toFixed(1) + "s";
+    }
+    const bw = st.bw;
+    return { depth, stars, nPris, on, act, ilvl, maxHp: st.maxHp, def: st.def, atk: st.atk, s: bw ? bw.s : 0, k: bw ? +bw.k.toFixed(3) : 0, r: bw ? +bw.r.toFixed(3) : 0, hpMul: bw ? +bw.hpMul.toFixed(3) : 1, dr: bw ? +bw.dr.toFixed(3) : 0, res: bw ? +bw.res.toFixed(3) : 0, cap: bw ? +bw.cap.toFixed(3) : 1, bossMul: bw ? +bw.bossMul.toFixed(3) : 1, pct: bw ? +bw.pct.toFixed(5) : 0, lsCd: bw ? bw.lsCd : 0, bossHp: boss.mhp, pool, perHit: per, ttk, ttkBasic, worstHit: +worst.toFixed(3), worstSpecial: +worstSp.toFixed(3), oneShots: dead, lastStand: ls };
+  } finally { STAT_G = oldG; BW_OFF = oldOff; BOSS_PM_TEST_FORCE = oldPm; }
 }
 function spillTiles(g: Game, x: number, y: number, n: number): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
@@ -9135,7 +9280,7 @@ function packItem(it: Item | null): unknown {
     it.spells ? it.spells.map((s: Spell) => [ELS.indexOf(s.el), SHAPES.indexOf(s.sh), s.mod, r3(s.ch), r3(s.pw), r3(s.r), s.name]) : 0,
     it.pas ? it.pas.map((p: Passive) => [ELS.indexOf(p.el), PTYPES.indexOf(p.ty), p.mod, r3(p.pw), p.name]) : 0,
     it.ult === undefined ? -1 : it.ult, it.ef ? it.ef.map((e: number[]) => [e[0], r3(e[1])]) : 0, it.pt === undefined ? -1 : it.pt, it.set === undefined ? -1 : it.set, it.st ? it.st.map((e: number[]) => [e[0], r3(e[1] ?? 1)]) : 0, wepNeedsEl(it.kind) ? ELS.indexOf(ensureWepEl(it)) : -1,
-    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number; s?: number } }) => (z.g && z.g.s ? [z.c, z.g.typ, z.g.rar, z.g.s] : [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1])) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab, it.prt === undefined ? -1 : it.prt, it.kind === "gem" && it.gs ? it.gs : 0, it.ww ? 1 : 0];
+    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number; s?: number } }) => (z.g && z.g.s ? [z.c, z.g.typ, z.g.rar, z.g.s] : [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1])) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab, it.prt === undefined ? -1 : it.prt, it.kind === "gem" && it.gs ? it.gs : 0, it.ww ? 1 : 0, it.mvv ?? 0];
 }
 function unpackItem(a: unknown): Item | null {
   if (!Array.isArray(a) || a.length < 13) return null;
@@ -9148,7 +9293,7 @@ function unpackItem(a: unknown): Item | null {
     d: String(a[8] ?? "").split("").map((c: string) => Number(c)), spells: sp, pas: pa, ult: n(a[12]) >= 0 ? n(a[12]) : undefined,
     ef: Array.isArray(a[13]) ? (a[13] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, pt: n(a[14]) >= 0 ? n(a[14]) : undefined, set: n(a[15]) >= 0 ? n(a[15]) : undefined, st: Array.isArray(a[16]) ? (a[16] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, wel: (ELS as string[]).includes(ELS[n(a[17])]) ? ELS[n(a[17])] : undefined,
     sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); const zs = row.length > 3 ? n(row[3]) : 0; return { c: Math.max(0, Math.min(6, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? (zs >= 1 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)), s: Math.floor(zs) } : { typ: typ, rar: Math.max(0, Math.min(7, rr)) }) : undefined }; }) : undefined,
-    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined, gs: a.length > 23 && n(a[23]) >= 1 && n(a[23]) <= 10 ? Math.floor(n(a[23])) : undefined, ww: a.length > 24 && n(a[24]) === 1 ? 1 : undefined };
+    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined, gs: a.length > 23 && n(a[23]) >= 1 && n(a[23]) <= 10 ? Math.floor(n(a[23])) : undefined, ww: a.length > 24 && n(a[24]) === 1 ? 1 : undefined, mvv: a.length > 25 && n(a[25]) > 0 ? Math.floor(n(a[25])) : undefined };
   if ([o.rar, o.ilvl, o.atk, o.def, o.block].some((v: number) => !isFinite(v))) return null;
   return validItem(o);
 }
@@ -9313,7 +9458,7 @@ function validItem(o: unknown): Item | null {
     if (!it.ef.length) it.ef = undefined;
   } else it.ef = undefined;
   if (it.ww === 1 && it.kind !== "gem") it.ww = 1; else delete it.ww;
-  if (it.bonus.mv !== undefined) { if (mvCanRoll(it.kind)) { it.bonus.mv = Math.max(0, Math.min(mvItemMax(it.ilvl, it.rar), Math.round(Number(it.bonus.mv) || 0))); if (!it.bonus.mv) delete it.bonus.mv; } else delete it.bonus.mv; } // retroactive: clamp to the new per-item range
+  mvFixItem(it); // movement speed: 0..100 per item; undo the 11:11-11:28 clamp once (see mvFixItem)
   if (typeof it.set === "number" && isFinite(it.set) && it.set >= 0 && it.set < SETS.length) it.set = Math.floor(it.set); else delete it.set;
   if (it.kind === "gem") {
     const typ = typeof it.gt === "number" && isFinite(it.gt) ? Math.floor(it.gt) : Math.floor(Number(it.d[0]) || 0);
@@ -11661,6 +11806,10 @@ function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY
 function hurtEn(g: Game, e: En, dmg: number, src?: DmgSrc | null): number {
   if (dmg <= 0 || e.hp <= 0) return 0;
   markHitDir(g, e);
+  if (isBossFoe(e) && !(src && src.p) && !e.chm) { // C1: Prismatic stars hit bosses harder (Paramount unchanged)
+    const bw = bulwarkOf(g.eq, g.depth);
+    if (bw) dmg = Math.max(1, safeRound(safeMul(dmg, bw.bossMul)));
+  }
   const fortune = petAbiOf(g, 5);
   if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.25 * petAbiMul(fortune))));
   peakNote(g, dmg, src);
@@ -12473,6 +12622,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     g.shots.push({ x0: h.ax * TS + 12, y0: h.ay * TS + 10, x1: e.ax * TS + 12, y1: e.ay * TS + 12, t: 0.14, max: 0.14, c: sc, typ: heroShotTyp(g.eq, st.magic) });
   }
   const hitIds = new Set<number>();
+  const bwPctDone = new Set<number>();
   const strike = (tg: En, mul: number): void => {
     if (tg.hp <= 0) return;
     hitIds.add(tg.id);
@@ -12493,10 +12643,20 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     const world = petRareOf(g, PRT_WORLD);
     if (world) dmg = Math.max(1, safeRound(dmg * (1 + 0.15 * petAbiMul(world))));
     const hitV = { dx: tg.x - h.x, dy: tg.y - h.y };
+    let bwPct = 0;
+    if (isBossFoe(tg) && !bwPctDone.has(tg.id)) { // C1: one %-max-HP strike per attack per boss (deep floors only)
+      bwPctDone.add(tg.id);
+      const bw = st.bw ?? bulwarkOf(g.eq, g.depth);
+      if (bw && bw.pct > 0) bwPct = Math.max(1, safeRound(safeMul(tg.mhp, bw.pct) / bw.bossMul)); // hurtEn re-applies bossMul -> exactly pct*mhp
+    }
     const atkSrc: DmgSrc = { n: (main ? ((WI[main.kind as WT] && WI[main.kind as WT].n) || "Weapon") : "Unarmed") + " Attack", t: st.magic && wel ? ELN[wel] : "Physical", c: st.magic && wel ? ELC[wel] : PHYS_COL, k: scrit ? 2 : crit ? 1 : 0 };
     withHit(hitV, () => {
       dmg = hurtEn(g, tg, dmg, atkSrc);
     });
+    if (bwPct > 0 && tg.hp > 0) { // separate hit so on-hit effects do not scale off the %-HP part
+      const pd = withHit(hitV, () => hurtEn(g, tg, bwPct, { n: "Prismatic Strike", t: "Star", c: "#ffb8ff" }));
+      if (pd > 0) floatTxt(g, tg.x + 0.35, tg.y - 0.55, String(pd), "#ffb8ff");
+    }
     wallHitChip(g, tg, atkSrc.k ?? 0);
     if (world && !twin && R() < 0.12) {
       const raw = st.atk * petAbiMul(world);
@@ -12608,6 +12768,7 @@ function enemyAttack(g: Game, e: En, mul: number, st: Stats): void {
   g.sfx("ehit");
   if (R() * 100 < st.block) { floatTxt(g, h.x, h.y, "BLOCK", "#80c0ff"); g.sfx("block"); efOnBlock(g, e, mul); return; }
   let dmg = Math.max(1, Math.round(dmgF(e.atk * mul * bossAtkMul(e) * (e.weak > 0 ? 0.7 : 1), st.def) * (0.85 + R() * 0.3)));
+  dmg = bwMitigate(st, dmg, mul !== 1 || Math.abs(e.x - h.x) + Math.abs(e.y - h.y) > 1);
   if (g.ward > 0) {
     const ab = Math.min(g.ward, dmg);
     g.ward -= ab; dmg -= ab;
@@ -14323,7 +14484,7 @@ const WW_NAME = "Waterwalker / Lavastrider", WW_DESC = "walk across water and la
 const WW_CH_GEAR = [0, 0, 0.003, 0.006, 0.012, 0.02, 0.03, 0.045]; // per item, by rarity (Common..Prismatic)
 const WW_CH_PET = [0, 0, 0.005, 0.01, 0.018, 0.03, 0.045, 0.065];
 let HZ_FORCE: "" | "water" | "lava" | "both" = "";
-function rollWW(it: Item, pet: boolean): void { if (R() < (pet ? WW_CH_PET : WW_CH_GEAR)[Math.max(0, Math.min(7, it.rar))]) it.ww = 1; }
+function rollWW(it: Item, pet: boolean): void { it.mvv = MVV; if (R() < (pet ? WW_CH_PET : WW_CH_GEAR)[Math.max(0, Math.min(7, it.rar))]) it.ww = 1; }
 function hzAt(g: Game, x: number, y: number): number { const a = g.hz; return a && a.length === MW * MH && inb(x, y) ? a[y * MW + x] : 0; }
 function hzSolid(g: Game, x: number, y: number): boolean { const v = hzAt(g, x, y); return v === HZ_WATER || v === HZ_LAVA; }
 function heroWW(g: Game): boolean { for (const k of EQK) { const it = g.eq[k]; if (it && it.ww) return true; } return false; }
@@ -16214,7 +16375,7 @@ function drawPassives(ctx: CanvasRenderingContext2D, g: Game, sx: number, sy: nu
   ctx.globalAlpha = 1;
 }
 
-const STATROWS: [keyof Stats, string][] = [["maxHp", "Max HP"], ["atk", "Attack"], ["def", "Defense"], ["crit", "Crit %"], ["spd", "Double Strike %"], ["block", "Block %"], ["regen", "Regen / turn"], ["ward", "Spectral Ward"], ["mv", "Move Speed % (cap 300)"]];
+const STATROWS: [keyof Stats, string][] = [["maxHp", "Max HP"], ["atk", "Attack"], ["def", "Defense"], ["crit", "Crit %"], ["spd", "Double Strike %"], ["block", "Block %"], ["regen", "Regen / turn"], ["ward", "Spectral Ward"], ["mv", "Move Speed % (cap 400)"]];
 
 function prisArcOverlay() {
   return (
@@ -16934,11 +17095,20 @@ try {
       }
       return { ok: true, rows };
     },
-    mvClampTest: (): Record<string, unknown> => { // old items: armor with +200, a weapon with +150, a low-level item with +90, a pet with mv
-      const mk = (kind: Kind, il: number, rar: number, mv: number): Item => { const it = makeItem(il, rar, kind as never, il); it.bonus.mv = mv; return validItem(JSON.parse(JSON.stringify(it))) as Item; };
-      const a = mk("chest" as Kind, 3000, 7, 200), w = mk("sword" as Kind, 3000, 7, 150), lo = mk("legs" as Kind, 20, 4, 90), lo2 = mk("head" as Kind, 1500, 6, 60);
-      return { ok: true, armor3000p: a.bonus.mv, weapon3000p: w.bonus.mv, legs20r4: lo.bonus.mv, maxLegs20r4: mvItemMax(20, 4), head1500r6: lo2.bonus.mv, maxHead1500r6: mvItemMax(1500, 6) };
+    mvClampTest: (): Record<string, unknown> => { // pre-v2 items (no mvv marker) and new items
+      const mk = (kind: Kind, il: number, rar: number, mv: number, fresh = false): Item => { const it = kind === "pet" ? makePet(il, rar) : makeItem(il, rar, kind as never, il); it.bonus.mv = mv; if (!fresh) delete it.mvv; return validItem(JSON.parse(JSON.stringify(it))) as Item; };
+      const r0 = MV_RESTORED.n;
+      const a = mk("chest" as Kind, 3000, 7, 200), w = mk("sword" as Kind, 3000, 7, 150), lo = mk("legs" as Kind, 20, 4, 90);
+      const cl = mk("head" as Kind, 1500, 7, mvOldClampMax(1500, 7)), cl2 = mk("chest" as Kind, 215, 7, mvOldClampMax(215, 7));
+      const nw = mk("arms" as Kind, 1500, 7, mvOldClampMax(1500, 7), true), pet = mk("pet" as Kind, 500, 7, 40);
+      const again = validItem(JSON.parse(JSON.stringify(cl))) as Item;
+      return { ok: true, armor200: a.bonus.mv, weapon150: w.bonus.mv, legs20r4at90: lo.bonus.mv, clampedHead1500: [mvOldClampMax(1500, 7), cl.bonus.mv], clampedChest215: [mvOldClampMax(215, 7), cl2.bonus.mv], newItemAtOldMax: nw.bonus.mv, pet40: pet.bonus.mv, reloadKeeps: again.bonus.mv, restored: MV_RESTORED.n - r0 };
     },
+    bwSim: (depth: number, stars: number, on: boolean, nPris?: number): Record<string, unknown> => simBwFight(depth, stars, on, nPris ?? 6),
+    bwTier: (stars: number, depth: number, nPris?: number): Record<string, unknown> => { const eq = fullPrisEq(Math.max(1, depth), stars); if ((nPris ?? 6) < 7) eq.pet = null; const b = bulwarkOf(eq, depth); return { ok: true, b }; },
+    bwGear: (stars: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const il = Math.max(1, g.depth + 1); const full = fullPrisEq(il, stars); g.eq.head = full.head; g.eq.chest = full.chest; g.eq.arms = full.arms; g.eq.legs = full.legs; g.eq.rh = full.rh; g.eq.lh = full.lh; STAT_G = g; const st = calc(g.lvl, g.eq); g.hero.hp = st.maxHp; g.notify(); return { ok: true, maxHp: st.maxHp, bw: st.bw }; },
+    bwLive: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); const items: Record<string, unknown> = {}; for (const k of EQK) { const it = g.eq[k]; if (it) items[k] = { kind: it.kind, ilvl: it.ilvl, rar: it.rar, stars: it.st ? it.st.length : 0, mv: it.bonus.mv ?? 0, mvv: it.mvv ?? 0 }; } return { ok: true, depth: g.depth, maxHp: st.maxHp, hp: g.hero.hp, bw: st.bw, mv: st.mv, mvRaw: st.mvRaw, items, restored: MV_RESTORED.n, log: { ...BW_LOG } }; },
+    bwHit: (frac: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); const h0 = g.hero.hp; applyHeroDmg(g, Math.round(st.maxHp * frac), 3); return { ok: true, h0, h1: g.hero.hp, maxHp: st.maxHp, took: (h0 - g.hero.hp) / st.maxHp, mode: g.mode, log: { ...BW_LOG } }; },
     mvGear: (each: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (const k of ["head", "chest", "arms", "legs"] as EqKey[]) if (!g.eq[k]) g.eq[k] = makeItem(3000, 6, k as Kind, 3000); if (!g.eq.rh) g.eq.rh = makeItem(3000, 6, "sword", 3000); let n = 0; for (const k of EQK) { const it = g.eq[k]; if (it && mvCanRoll(it.kind)) { it.bonus.mv = each; n++; } } const st = calc(g.lvl, g.eq); return { ok: true, items: n, mv: st.mv, mvRaw: st.mvRaw, step: heroStepDur(g) }; },
     mvProbe: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const h = g.hero, k = h.y * MW + h.x, ct = camTarget(g); return { ok: true, x: h.x, y: h.y, wall: g.map[k] === 0, hzBlock: hzBlocksHero(g, h.x, h.y), hz: g.hz ? g.hz[k] : 0, camLag: Math.round(Math.hypot(ct.x - IP.camX, ct.y - IP.camY)), mv: calc(g.lvl, g.eq).mv, rt: !!g.rt }; },
     paraShake: (clear?: boolean): Record<string, unknown> => { if (clear) PARA_SHK_LOG.length = 0; const curve: number[][] = []; for (let t = 0; t <= PARA_END + 0.001; t += 0.2) curve.push([Math.round(t * 10) / 10, Math.round(paraShakeAmp(t) * 10) / 10]); return { ok: true, curve, log: PARA_SHK_LOG.slice(-3000) }; },
@@ -21257,6 +21427,8 @@ export default function App() {
                 <span className="dc-chip">Crit {cur.crit}%</span>
                 <span className="dc-chip">Dbl {cur.spd}%</span>
                 <span className="dc-chip" style={{ color: "#80ffc0" }} data-mv={cur.mv}>Move speed +{cur.mv}% (cap {MV_CAP}%){(cur.mvRaw ?? 0) > MV_CAP ? " \u00b7 gear " + cur.mvRaw + "%" : ""}</span>
+                {cur.bw && <span className="dc-chip" style={{ color: "#ffb8ff" }} data-bw={JSON.stringify({ s: cur.bw.s, cap: Math.round(cur.bw.cap * 1000) / 10, dr: Math.round(cur.bw.dr * 1000) / 10, res: Math.round(cur.bw.res * 1000) / 10, hp: Math.round(cur.bw.hpMul * 100) / 100, boss: Math.round(cur.bw.bossMul * 100) / 100, pct: Math.round(cur.bw.pct * 10000) / 100, ls: Math.round(cur.bw.lsCd * 10) / 10 })}>Prismatic Bulwark ({cur.bw.s} star power): max hit {Math.round(cur.bw.cap * 100)}% HP {"\u00b7"} Last Stand every {Math.round(cur.bw.lsCd * 10) / 10}s</span>}
+                {cur.bw && <span className="dc-chip" style={{ color: "#ffb8ff" }}>Stars: HP x{(Math.round(cur.bw.hpMul * 100) / 100).toFixed(2)} {"\u00b7"} Dmg taken -{Math.round(cur.bw.dr * 100)}% {"\u00b7"} Resist -{Math.round(cur.bw.res * 100)}% {"\u00b7"} Boss dmg x{(Math.round(cur.bw.bossMul * 100) / 100).toFixed(2)}{cur.bw.pct > 0 ? " \u00b7 +" + (cur.bw.pct * 100).toFixed(2) + "% boss HP/hit" : ""}</span>}
                 {cur.block > 0 && <span className="dc-chip">Block {cur.block}%</span>}
                 {cur.regen > 0 && <span className="dc-chip" style={{ color: "#60ff80" }}>Regen {cur.regen}/turn</span>}
                 {cur.ward > 0 && <span className="dc-chip" style={{ color: "#9ae8ff" }}>Ward {Math.round(g.ward)}/{cur.ward}</span>}

@@ -361,3 +361,16 @@ Paramount is untouched: same beam, visuals, sound, damage and cooldown (it never
   - Easing 18 → 4 as the white dims (to 5.8 s).
   - A residual 4 → 0 by 6.8 s.
 - **Unchanged:** every other part of Paramount. Reduced-motion users get no shake.
+
+## 2026-11-18 (11:45–12:xx CT): Prismatic Bulwark (A1) + linear star curve (C1); run speed v2
+Approved by Metal Complex (voice, 11:45 / 11:50 CT). Source: BOSS-OPTIONS-2026-11-18.md options A1 and C1. B1 and every boss-side nerf are NOT implemented; Paramount unchanged.
+
+**Star power.** `bwStars(eq)`: S = sum over equipped Prismatic items (all 7 slots, gems excluded) of (stars + 3). k = min(1, S/78). r = depth ramp 0 at d200 → 1 at d1300 (`bwRamp`). `bulwarkOf(eq, depth)` derives everything from equipped gear + current depth (nothing stored, so it applies retroactively to every profile). `calc` sets `Stats.bw`.
+- Defence: max HP ×(1 + 0.6k + 2k·r) (in `calc`); damage reduction 45%·k on every enemy hit; resistance a further 30%·k off ranged shots and boss special attacks (`bwMitigate`, in `enemyAttack` and the shooter-gone branch of `resolveShot`); single-hit cap 60% − 25%·k of max HP (`applyHeroDmg`).
+- A1 Last Stand (`applyHeroDmg`, after pet Phoenix/Second Soul): a lethal hit leaves 1 HP, 1.2 s immunity, cooldown 30 − S/4 s (min 10). Clock = `g.petAbiT`; `g.bwLsReady`, `g.bwImmUntil` are runtime only.
+- Offence: damage vs bosses ×(1 + 1.5k) in `hurtEn` (not Paramount `src.p`); each basic attack also lands one "Prismatic Strike" for 0.55%·k·r of the boss's max HP (`heroAttack` strike, separate hit so on-hit effects don't scale off it).
+- Enemy scaling (`mkEnemy` atk/HP want, hunter, `recapActAtk`, `mkActBoss`) now uses `calcFoe` = stats without the Bulwark, so foes are not re-tuned to cancel the new HP.
+- Bag stats: two chips (Bulwark cap + Last Stand cd; star HP/DR/resist/boss dmg/%HP).
+- Test hooks: bwSim / bwTier / bwGear / bwLive / bwHit; `simBwFight` (real calc + heroAttack on mkActBoss + enemyAttack). Test: tests/bulwark.mjs (screenshots-bulwark/, not published).
+
+**Run speed v2.** Every slot incl. pets can roll it (`mvCanRoll` = not gem); ceiling `8 + 92·(min(ilvl,1000)/1000)^0.5` ×rarity (0.4 + 0.6·rar/7) → +100% at Prismatic ilvl 1000+; total cap 400% (`MV_CAP`). Load no longer clamps to the ilvl range: `mvFixItem` only limits 0..100, and once per item (marker `it.mvv = MVV = 2`, packed at index 25) restores to +100% any value exactly equal to the 11:11–11:28 builds' clamp ceiling (`mvOldClampMax`), undoing that clamp.
