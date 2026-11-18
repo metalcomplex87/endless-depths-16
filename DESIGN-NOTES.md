@@ -289,3 +289,75 @@ Paramount is untouched: same beam, visuals, sound, damage and cooldown (it never
   - The seed is now decoded once per session and cached (`jaxSeedCache`).
   - The live `MW`/`MH` are restored after that one decode.
 - The Jax seeding rules themselves are unchanged.
+
+## 2026-11-18 (second build): saving, camp/floor objects, HUD, movement, Paramount shake
+
+### Bulletproof saving
+- **Save Game** writes localStorage, sessionStorage and IndexedDB. Each write is read back to verify it; localStorage is retried once, and on a quota error the redundant `_bak` copies are freed first (this profile's, then the others').
+- **On-screen result:** a pill shows `✔ GAME SAVED` with every layer (device ✓/✗ · backup DB ✓/✗ · tab ✓/✗). If localStorage fails, a Save Code is copied during the same tap.
+- **When everything fails:** you get `✖ SAVE FAILED` with the reason, and the Save Code panel opens with the code already copied.
+- **Eviction:** `navigator.storage.persist()` is requested at boot and on every Save. The storage line reports whether the data is protected.
+- **Rolling backups:** the last 5 saves per profile are kept in IndexedDB (`ed16_roll_p{n}_{i}`). Save Game always adds one, and autosaves add one at most every 45 s. At boot, if localStorage, sessionStorage and the IndexedDB main copy are all gone, the newest valid rolling backup is restored.
+- **Autosave triggers:** `visibilitychange` (hidden), `pagehide`, `beforeunload` and `freeze`.
+- **LOAD:**
+  - The title LOAD code button is reachable at 360–430 px: the title block is anchored to the bottom, and on an empty profile LOAD is listed first.
+  - The dock and menu LOAD use `locked && hasSave()`, so an empty profile can always load a code.
+
+### Trophy case (camp only)
+- **Footprint:** 2×2 at a fixed spot, top-left (15,26), on every visit and every profile.
+- **Movement and interaction:** the case is solid, and bumping it from any of its 8 side tiles opens it.
+- **Placement and state:** `placeTrophyCase` places it during camp generation. `leaveCamp` and `genFloor` clear `trophyAt`, and draw and bump both require `area === "camp"`, so a stale value carried on a saved dungeon floor is ignored.
+
+### 2×2 chests and shrine
+- **Coordinates:** chests (regular, buried, Resplendent) and the swarm shrine use (x,y) as the top-left of a 2×2 footprint (`Chest.fit = 1`, `Shrine.f = 1`).
+- **Drawing:** chests use the same pixel art at 2× scale, with the glow and Resplendent trim kept.
+- **Fitting (`fit2x2`):**
+  - All four tiles must be plain room floor: no corridor, stairs or ring around stairs, portal, merchant, trader, drop, hazard, hero or enemy.
+  - A spot is only accepted when the floor's flood-fill component count does not grow.
+  - If no spot within 4 tiles qualifies, the chest stays 1×1 (`fit = 2`).
+- **Old saves:** chests and shrines with no flag are fitted on their first frame (`visTick`).
+- **Hazards:** they are placed after fitting and keep clear of the footprints. `refitIfSplit` re-fits if hazards or the artifact cave pinch a floor apart.
+- **Opening:** bumping any footprint tile opens the chest.
+- **Shrine swarm:**
+  - The shrine is solid for enemies too, so they gather around it.
+  - Swarm enemies follow a distance field to the shrine until they are within 2 tiles of it, or within 4 tiles of the hero. After that they hunt the hero, with a BFS when far away.
+  - While the swarm runs, the shrine has a pulsing glow, a light column and a flashing ring.
+  - The timer, kill counter and reward tiers are unchanged.
+
+### Torch light
+- **Rendering:** one cached radial-gradient sprite per flame colour. It is drawn with `lighter` compositing after the weather tint.
+- **Darkness value** (`lightDark`, 0..1):
+  - Weather: storm 0.55, rain 0.32, blizzard 0.30, lightning 0.22, snow 0.18, drizzle 0.16, drift/frost 0.12.
+  - Dark biome: up to 0.45 from floor-tile luminance.
+  - Depth: up to 0.22, plus dread.
+- **Light size:** radius = 1.5 + 2.4·D tiles; alpha = 0.2 + 0.6·D, with a gentle two-sine flicker. Lightning flashes wash it out briefly.
+
+### HUD
+- **Bottom row:** laid out with measured widths: PL | area name (ellipsised) | gems + gold | BEST D.
+- **Gold format:** below 100,000, gold shows full digits with separators; above that it is compact (12.6M g).
+- **HP:** `calc()` rounds `maxHp` to an integer, and HP is clamped to max.
+- **Camp peak card:** it has a separate **TOP PARAMOUNT** block. TOP PRISMATIC ULT counts regular Prismatic ults only, and old saves that filed Paramount under it are migrated.
+
+### Movement Speed rework
+- **Where it rolls:** any gear slot (head, chest, arms, legs, weapons, shields), with the existing chance by rarity (6% common up to 50% Prismatic). Pets and gems never roll it; the Windstrider pet ability and set bonuses are unchanged.
+- **Per-item ceiling:** `mvItemCeil(ilvl) = 8 + 92·(min(ilvl,3000)/3000)^0.55`, capped at 100. Rarity scales it by 0.4 + 0.6·rar/7.
+- **Roll:** max × (0.15 + 0.85·u³), so high rolls are rare. Set pieces take the better of two u.
+- **Stars:** Prismatic star multipliers no longer scale Movement Speed.
+- **Total cap:** +300% (`MV_CAP`). The Bag stats chip shows `Move speed +X% (cap 300%)`, plus the gear total when it is over the cap.
+- **Old items:** `validItem` clamps existing rolls to the new per-item max, retroactively for equipped gear, the bag and the stash.
+- **Speed behaviour:** movement stays tile-by-tile with the same collision, hazard and slide checks, so higher speed only shortens the step cooldown (0.24 s / (1 + mv/100)).
+
+### Eternal Reapers (ult id 26, formerly "Event Horizon Reaping")
+- **What changed:** its own show (`fx` 10, 2.9 s): four giant scythes sweep in from the screen corners, leaving rainbow crescents, then one colossal rainbow scythe rises over the hero and reaps a full circle.
+- **SFX:** a singing-blade whoosh plus a slash impact per sweep, then the great scythe chord.
+- **Unchanged:** damage, cooldown and every other ult. The name comes from the id, so saved items show it everywhere.
+
+### Paramount: screen shake only
+- **What it shakes:** the whole world view (floor included), with the beam anchored to the shaking hero. The HUD and the DOM touch controls do not move.
+- **Curve (`paraShakeAmp`, px):**
+  - 0 before impact (1.6 s).
+  - Then 1.5 + 14.5·(0.3q + 0.7q³), plus a kick on every 0.4 s pulse, while the beam widens (to 4.0 s).
+  - 18 during the full white (4.0–4.4 s).
+  - Easing 18 → 4 as the white dims (to 5.8 s).
+  - A residual 4 → 0 by 6.8 s.
+- **Unchanged:** every other part of Paramount. Reduced-motion users get no shake.

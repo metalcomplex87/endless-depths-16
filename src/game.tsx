@@ -118,14 +118,14 @@ interface Trader { x: number; y: number; stock: Item[] }
 type MerchId = "helmet" | "gloves" | "chest" | "boots" | "twoHand" | "oneHand" | "pet" | "gem";
 interface ChestDeal { price: number; buys: number }
 interface Merchant { x: number; y: number }
-interface Ult { n: string; el: El; pat: number; c2: string; i: number }
+interface Ult { n: string; el: El; pat: number; c2: string; i: number; fx?: number }
 
 interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
-interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean }
+interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean; fit?: number } // fit 1 = 2x2 footprint at x..x+1,y..y+1; 2 = legacy 1x1 (no room for 2x2)
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
 interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean; rest?: number; drag?: number; bounces?: number; streak?: number; age?: number; hzs?: number }
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
@@ -137,7 +137,7 @@ interface Banner { txt: string; sub: string; c: string; rar: number; t: number }
 // the player already visited (the portal stays open for good, and the cave keeps its state so loot never refills).
 type CaveState = { ch?: number[][]; dr?: Drop[]; gb?: number[][]; clr?: number; n?: number };
 type PortalSpot = { x: number; y: number; kind?: "vault" | "camp" | "proceed" | "secret" | "goblin"; w?: number; h?: number; sup?: number; cs?: CaveState };
-interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: number; block: number; regen: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; ward: number; mv: number }
+interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: number; block: number; regen: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; ward: number; mv: number; mvRaw?: number }
 interface Hero { x: number; y: number; ax: number; ay: number; face: number; dir?: number; hp: number; bump: number; bdx: number; bdy: number; as?: number }
 interface FloorSnap {
   d: number; map: string; seen: string; chests: Chest[]; drops: Drop[];
@@ -394,9 +394,14 @@ const ULTS: Ult[] = Array.from({ length: 50 }, (_: unknown, i: number): Ult => {
   const el = ELS[(pat + row * 3) % 7];
   return { n: UWORD[el][row] + " " + UPAT[pat], el, pat, c2: "hsl(" + ((i * 47) % 360) + ",95%,65%)", i };
 });
+// 2026-11-18: id 26 (was "Event Horizon Reaping") is its own ultimate. Names come from the id, so every saved item
+// (all profiles, stash, Save Codes) shows the new name. Damage and cooldown are unchanged; fx 10 = its own show + sound.
+ULTS[26].n = "Eternal Reapers"; ULTS[26].fx = 10;
+const UDESC_FX: Record<number, string> = { 10: "a host of giant scythes carve huge sweeping slashes across the screen, then one colossal rainbow scythe reaps everything" };
+function ultPatDesc(u: Ult): string { return (u.fx !== undefined && UDESC_FX[u.fx]) || UDESC[u.pat]; }
 function ultDesc(u: number): string {
   const x = ULTS[u] ?? ULTS[0];
-  return "\u2605 ULTIMATE: " + x.n + " - " + UDESC[x.pat] + ". Hits every enemy in view. Damage scales with your Attack, the item's level, your level versus the depth, and (if Prismatic) star power and how many Prismatic ultimates are fused. Can kill any foe, including bosses. 1 min cooldown.";
+  return "\u2605 ULTIMATE: " + x.n + " - " + ultPatDesc(x) + ". Hits every enemy in view. Damage scales with your Attack, the item's level, your level versus the depth, and (if Prismatic) star power and how many Prismatic ultimates are fused. Can kill any foe, including bosses. 1 min cooldown.";
 }
 function ultWeapon(eq: Eq): Item | null {
   if (eq.rh && eq.rh.ult !== undefined) return eq.rh;
@@ -763,7 +768,7 @@ function prisStarMul(it: Item | null | undefined): number {
 function itemAtk(it: Item): number { return safeRound(safeMul(it.atk, prisStarMul(it))); }
 function itemDef(it: Item): number { return safeRound(safeMul(it.def, prisStarMul(it))); }
 function itemBlock(it: Item): number { return safeRound(safeMul(it.block, prisStarMul(it))); }
-function itemBonus(it: Item, b: Bonus): number { return safeMul(it.bonus[b] ?? 0, prisStarMul(it)); }
+function itemBonus(it: Item, b: Bonus): number { return b === "mv" ? Math.min(MV_ITEM_MAX, it.bonus.mv ?? 0) : safeMul(it.bonus[b] ?? 0, prisStarMul(it)); } // Movement Speed is not star-scaled (per-item max +100%)
 function actPostMul(act: number): number { return safePow(ACT_POST_PER, Math.max(0, Math.max(1, act) - POST_ACT0)); }
 function actLootF(act: number): number {
   const base = 1.2 + Math.max(1, act) * 0.025;
@@ -1155,7 +1160,7 @@ function spawnMonstersOnMap(g: Game): void {
   used.add(g.hero.y * MW + g.hero.x);
   const stairs: number[][] = [];
   for (let k = 0; k < MW * MH; k++) if (map[k] === 2 || map[k] === TILE_UP) { used.add(k); stairs.push([k % MW, (k / MW) | 0]); }
-  for (const c of g.chests) used.add(c.y * MW + c.x);
+  for (const c of g.chests) for (const k of chestCells(c)) used.add(k);
   for (const d of g.drops) used.add(d.y * MW + d.x);
   if (g.merchant) used.add(g.merchant.y * MW + g.merchant.x);
   if (g.portal) markPortalUsed(g, used);
@@ -1241,7 +1246,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.vault = null; g.arena = null; g.gobCave = null;
   g.area = "dungeon";
   g.shopOpen = false; g.stashOpen = false; g.gambOpen = false;
-  g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined;
+  g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined; g.trophyAt = undefined;
   g.cracks = unpackCracks(snap.cracks, g.map); g.digAt = undefined; g.digClock = undefined;
   placeNearTile(g, nearTile);
   spawnMonstersOnMap(g);
@@ -2980,7 +2985,7 @@ function makeItem(ilvl: number, rar: number, kind?: Kind, depth?: number): Item 
     const b = pool[Math.floor(sr() * pool.length)];
     if (bonus[b] === undefined) bonus[b] = bonusVal(b, ilvl, rar);
   }
-  if (isArmor(k) && R() < MVCH[rar]) bonus.mv = bonusVal("mv", ilvl, rar);
+  if (mvCanRoll(k) && R() < MVCH[rar]) bonus.mv = bonusVal("mv", ilvl, rar);
   nb = 0;
   let spells: Spell[] | undefined;
   let pas: Passive[] | undefined;
@@ -3047,7 +3052,8 @@ function calc(lvl: number, eq: Eq): Stats {
       s.spd += 35 * mul; s.mv += 12 * mul;
     }
   }
-  s.crit = Math.min(75, s.crit); s.spd = Math.min(90, s.spd); s.block = Math.min(60, s.block); s.regen = Math.round(s.regen * 10) / 10; s.mv = Math.min(MV_CAP, Math.round(s.mv));
+  s.maxHp = Math.max(1, Math.round(s.maxHp)); // whole numbers only (gem/star multipliers used to leave 58995.799...)
+  s.crit = Math.min(75, s.crit); s.spd = Math.min(90, s.spd); s.block = Math.min(60, s.block); s.regen = Math.round(s.regen * 10) / 10; s.mvRaw = Math.round(s.mv); s.mv = Math.min(MV_CAP, Math.round(s.mv));
   return s;
 }
 
@@ -4449,6 +4455,7 @@ function packChest(c: Chest): Chest {
   const o: Chest = { x: c.x, y: c.y, open: !!c.open, rar: Math.max(0, Math.min(4, Math.floor(Number(c.rar) || 0))) };
   if (c.starter) o.starter = true;
   if (c.bur) o.bur = true;
+  if (c.fit === 1 || c.fit === 2) o.fit = c.fit;
   if (c.starter && !o.open && Array.isArray(c.items)) {
     o.items = c.items.map((it: unknown) => validItem(it)).filter((it: Item | null): it is Item => !!it);
   }
@@ -4719,8 +4726,8 @@ function resolveShot(g: Game, s: Shot): void {
 
 
 const enemyAt = (g: Game, x: number, y: number): En | null => { for (const e of g.en) if (e.hp > 0 && e.x === x && e.y === y) return e; for (const e of g.pend) if (e.x === x && e.y === y) return e; return null; };
-const chestAt = (g: Game, x: number, y: number): Chest | null => { for (const c of g.chests) if (!c.open && c.x === x && c.y === y) return c; return null; };
-const walkable = (g: Game, x: number, y: number): boolean => inb(x, y) && g.map[y * MW + x] !== 0 && !enemyAt(g, x, y) && !chestAt(g, x, y) && !merchAt(g, x, y) && !campBlocked(g, x, y) && !hzSolid(g, x, y);
+const chestAt = (g: Game, x: number, y: number): Chest | null => { for (const c of g.chests) if (!c.open && (c.fit === 1 ? x >= c.x && x <= c.x + 1 && y >= c.y && y <= c.y + 1 : c.x === x && c.y === y)) return c; return null; };
+const walkable = (g: Game, x: number, y: number): boolean => inb(x, y) && g.map[y * MW + x] !== 0 && !enemyAt(g, x, y) && !chestAt(g, x, y) && !merchAt(g, x, y) && !campBlocked(g, x, y) && !hzSolid(g, x, y) && !shrineHit(g, x, y);
 
 function los(g: Game, x0: number, y0: number, x1: number, y1: number): boolean {
   const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -5109,7 +5116,7 @@ function genFloor(g: Game): void {
   bagSalvNoted = false;
   g.trader = null; g.shopOpen = false; g.stashOpen = false; g.floorTurn = 0;
   g.portal = null; g.secret = null; g.gobPort = null; g.vault = null; g.arena = null; g.gobCave = null; g.gobT = 0; g.warnGobs = []; g.warnPort = ""; g.warn = undefined;
-  g.area = "dungeon"; g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined;
+  g.area = "dungeon"; g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined; g.trophyAt = undefined;
   // Expand the single-tile stamps into 1x2 vertical pairs when there is room.
   if (needDown) {
     placeStairPair(g, 2, sx, sy, false);
@@ -5230,8 +5237,10 @@ function genFloor(g: Game): void {
   maybeSpawnSecretPortal(g);
   if (!CAVE_FORCE) rollExtraPortals(g);
   maybeSpawnShrine(g);
+  fitBigObjects(g); // 2x2 chests before hazards, so water/lava keeps clear of their footprints
   genHazards(g);
   maybeSpawnArtifactCave(g);
+  refitIfSplit(g);
 }
 const HUNTER_CHANCE = 0.025; // ~2.5% of floors
 const HUNTER_MIN_DEPTH = 4;
@@ -5298,18 +5307,23 @@ function huntMove(g: Game, e: En): void {
   if (best) { if (best[0] !== e.x) e.face = best[0] > e.x ? 1 : -1; e.x = best[0]; e.y = best[1]; }
 }
 // ======================= movement speed (armor only) =======================
-const MV_CAP = 200; // per item and total, in %
-const MV_TYPICAL = 100; // soft cap for ordinary rolls
+// 2026-11-18 rework: Movement Speed can roll on ANY gear slot (weapons, shields, armor, jewelry; not pets or gems).
+// One item: up to +100%, but the ceiling grows with item level and rarity, and high rolls are rare (cubic skew).
+// Total from all gear + pet + set bonuses is hard-capped at +300%.
+const MV_CAP = 300;      // total, in %
+const MV_ITEM_MAX = 100; // one item, in %
 const MVCH = [0.06, 0.1, 0.15, 0.2, 0.26, 0.32, 0.4, 0.5];
+// the best roll an item of this level can ever have (rarity 7); lower rarities scale it down (mvRarMul)
+function mvItemCeil(ilvl: number): number { const x = Math.max(1, Math.min(3000, ilvl || 1)) / 3000; return Math.min(MV_ITEM_MAX, Math.round(8 + 92 * Math.pow(x, 0.55))); }
+function mvRarMul(rar: number): number { return 0.4 + 0.6 * Math.max(0, Math.min(7, rar | 0)) / 7; }
+function mvItemMax(ilvl: number, rar: number): number { return Math.max(1, Math.round(mvItemCeil(ilvl) * mvRarMul(rar))); }
+function mvCanRoll(k: Kind): boolean { return k !== "pet" && k !== "gem"; }
 let MVMUL = 1; // 1 + total move speed / 100: walk animation, hold-to-walk repeat and key repeat all speed up by this
 function mvRoll(ilvl: number, rar: number, isSet: boolean = false): number {
-  const typ = Math.max(1, Math.round((2 + rar * 8) * (1 + Math.min(ilvl, 60) / 60) * (0.75 + R() * 0.5)));
-  const base = Math.min(MV_TYPICAL, typ);
-  const jack = rar >= 7 ? 0.035 : isSet ? 0.008 : rar >= 6 ? 0.005 : 0;
-  if (jack <= 0 || R() >= jack) return base;
-  if (rar >= 7 && R() < 0.015) return MV_CAP;
-  const u = R();
-  return Math.min(199, 101 + Math.round(Math.pow(u, 5) * 98));
+  // 15% of the item's max is the floor; the rest is u^3 (median roll ~ 26% of max, top 5% of max in ~1.7% of rolls)
+  const mx = mvItemMax(ilvl, rar), u = R();
+  const f = 0.15 + 0.85 * Math.pow(isSet ? Math.max(u, R()) : u, 3); // set pieces get the better of two rolls
+  return Math.max(1, Math.min(mx, Math.round(mx * f)));
 }
 
 // ======================= 100 unique effects: 50 weapon on-hit (0-49) + 50 armor passives (50-99) =======================
@@ -6502,6 +6516,62 @@ function drawDreadDecal(ctx: CanvasRenderingContext2D, sx: number, sy: number, h
   else { ctx.fillStyle = "#ff4010"; ctx.fillRect(sx + 3, sy + 16, 14, 2); ctx.fillStyle = "#ffc040"; ctx.fillRect(sx + 6, sy + 15, 6, 1); } // lava seam
   ctx.globalAlpha = 1;
 }
+// ---------- 2026-11-18: torch light ----------
+// One cached radial-gradient sprite per flame colour, drawn with "lighter" compositing after the weather tint, so the
+// warm pool cuts through rain, storms and snow. Size and strength follow how dark the scene is (lightDark()).
+const TL_SPR = new Map<number, HTMLCanvasElement>();
+function torchLightSprite(typ: number): HTMLCanvasElement | null {
+  const key = typ >= 3 ? typ : 0;
+  let c = TL_SPR.get(key); if (c) return c;
+  try {
+    c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d"); if (!x) return null;
+    const rgb = key === 3 ? "110,190,255" : key === 4 ? "110,255,140" : "255,170,70";
+    const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, "rgba(" + rgb + ",0.95)"); gr.addColorStop(0.22, "rgba(" + rgb + ",0.55)"); gr.addColorStop(0.55, "rgba(" + rgb + ",0.18)"); gr.addColorStop(1, "rgba(" + rgb + ",0)");
+    x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
+    TL_SPR.set(key, c); return c;
+  } catch { return null; }
+}
+const TL_LUM = new Map<HTMLCanvasElement, number>();
+function floorLum(g: Game): number { // average brightness (0..1) of this floor's ground tile, measured once per tile canvas
+  const tl = g.tiles && g.tiles[1]; if (!tl) return 0.3;
+  const hit = TL_LUM.get(tl); if (hit !== undefined) return hit;
+  let lum = 0.3;
+  try { const d = tl.getContext("2d")!.getImageData(0, 0, tl.width, tl.height).data; let s2 = 0, n = 0; for (let i = 0; i < d.length; i += 16) { s2 += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255; n++; } if (n) lum = s2 / n; } catch { /* ignore */ }
+  TL_LUM.set(tl, lum); return lum;
+}
+let TL_FORCE_DARK: number | null = null;
+// 0 = bright floor (light stays subtle) .. 1 = pitch dark (big, bright pools)
+function lightDark(g: Game): number {
+  if (TL_FORCE_DARK !== null) return TL_FORCE_DARK;
+  const k = floorWx(g);
+  const wx = k === "storm" ? 0.55 : k === "rain" ? 0.32 : k === "blizzard" ? 0.3 : k === "lightning" ? 0.22 : k === "snow" ? 0.18 : k === "drizzle" ? 0.16 : k === "drift" || k === "frost" ? 0.12 : 0;
+  const biome = Math.max(0, Math.min(1, (0.42 - floorLum(g)) / 0.3)) * 0.45;
+  const deep = Math.min(0.22, Math.max(0, g.depth - 50) / 1500 * 0.22) + THDREAD * 0.15;
+  return Math.max(0, Math.min(1, wx + biome + deep));
+}
+let TL_LAST = { n: 0, dark: 0, r: 0 };
+function drawTorchLights(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const ts = g.torches; if (!ts || !ts.length || g.area === "camp") return;
+  const D = lightDark(g), rad = TS * (1.5 + 2.4 * D), a0 = 0.2 + 0.6 * D;
+  const fl = WX.flash > 0 ? Math.max(0.3, 1 - WX.flash) : 1; // lightning washes torches out for a moment
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  let n = 0;
+  for (const tch of ts) {
+    const k = tch.y * MW + tch.x; if (!g.seen[k]) continue;
+    const ox = tch.dir === 1 ? 4 : tch.dir === 2 ? -4 : 0, oy = tch.dir === 0 ? 4 : tch.dir === 3 ? -3 : 0;
+    const cx = tch.x * TS - camX + 12 + ox, cy = tch.y * TS - camY + 9 + oy;
+    if (cx < -rad || cx > VW + rad || cy < HUD - rad || cy > HUD + VIEWH + rad) continue;
+    const spr = torchLightSprite(tch.typ | 0); if (!spr) break;
+    const f = 0.86 + 0.09 * Math.sin(t * 7.3 + tch.ph) + 0.05 * Math.sin(t * 13.1 + tch.ph * 2.1), r = rad * (0.95 + 0.05 * f);
+    ctx.globalAlpha = a0 * f * fl * (g.vis[k] ? 1 : 0.55);
+    ctx.drawImage(spr, cx - r, cy - r, r * 2, r * 2);
+    n++;
+  }
+  ctx.restore();
+  TL_LAST = { n, dark: Math.round(D * 100) / 100, r: Math.round(rad) };
+}
 function drawTorch(ctx: CanvasRenderingContext2D, tch: Torch, sx: number, sy: number, t: number): void {
   const flick = 0.62 + 0.38 * Math.sin(t * 11 + tch.ph);
   const flick2 = 0.5 + 0.5 * Math.sin(t * 17 + tch.ph * 1.7);
@@ -6770,8 +6840,16 @@ function portalKind(g: Game): "vault" | "camp" | "proceed" | "secret" | "goblin"
 }
 function portalHue(g: Game): string { return portalHueFor(g, g.portal); }
 function portalLabel(g: Game): string { return portalLabelFor(g, g.portal); }
+// Trophy case: camp only, a fixed 2x2 footprint (top-left TROPHY_X/TROPHY_Y), the same on every visit and profile.
+// Bottom-left corner of the 18x18 camp room, clear of the fire, rest spot, stash, merchant, hero spawn and the portal.
+const TROPHY_X = 15, TROPHY_Y = 26;
+function placeTrophyCase(g: Game): void { g.trophyAt = g.area === "camp" ? { x: TROPHY_X, y: TROPHY_Y } : undefined; }
+function trophyHit(g: Game, x: number, y: number): boolean {
+  const t = g.trophyAt;
+  return !!t && g.area === "camp" && x >= t.x && x <= t.x + 1 && y >= t.y && y <= t.y + 1;
+}
 function campBlocked(g: Game, x: number, y: number): boolean {
-  return !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y) || shrineAt(g, x, y) || !!(g.trophyAt && g.trophyAt.x === x && g.trophyAt.y === y);
+  return trophyHit(g, x, y) || !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y) || shrineAt(g, x, y) || !!(g.trophyAt && g.trophyAt.x === x && g.trophyAt.y === y);
 }
 function merchAt(g: Game, x: number, y: number): boolean {
   return !!(g.merchant && g.merchant.x === x && g.merchant.y === y);
@@ -7952,10 +8030,7 @@ function genCamp(g: Game): void {
   g.stashAt = { x: cx + 5, y: cy };
   placeMerchant(g);
   placePortalNear(g, "proceed", cx, cy - 6);
-  g.trophyAt = undefined;
-  for (const [tx, ty] of [[cx - 3, cy - 3], [cx + 3, cy - 3], [cx - 3, cy + 3], [cx + 3, cy + 3]]) {
-    if (g.map[ty * MW + tx] === 1 && !campBlocked(g, tx, ty) && !portalAt(g, tx, ty) && !(tx === cx && ty === cy + 2)) { g.trophyAt = { x: tx, y: ty }; break; }
-  }
+  placeTrophyCase(g);
   g.hero.x = cx; g.hero.y = cy + 2; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
   nudgeHeroOffFeatures(g);
   g.campSpot = undefined;
@@ -7997,7 +8072,7 @@ function leaveCamp(g: Game): void {
   const nxt = (g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth) + 1;
   peakStretchStart(g, nxt);
   g.area = "dungeon";
-  g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined;
+  g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined; g.trophyAt = undefined;
   const cur = g.snapCur && g.snapCur.d === nxt ? g.snapCur : null;
   if (cur) {
     g.front = Math.max(floorFront(g), nxt);
@@ -8289,7 +8364,9 @@ function hookGet(k: string): string | null {
   try { return testIdb && typeof testIdb[k] === "string" ? testIdb[k] : null; } catch { return null; }
 }
 function idbPut(k: string, v: string | null): void { void idbPutDone(k, v); }
+let IDB_SIM_DOWN = false; // test hook: behave as if IndexedDB is unavailable
 function idbPutDone(k: string, v: string | null): Promise<boolean> {
+  if (IDB_SIM_DOWN) { lastIdbErr = "IndexedDB unavailable"; return Promise.resolve(false); }
   if (testIdb) {
     if (v === null) delete testIdb[k]; else testIdb[k] = v;
   }
@@ -8325,6 +8402,7 @@ function idbPutDone(k: string, v: string | null): Promise<boolean> {
   }));
 }
 function idbGet(k: string): Promise<string | null> {
+  if (IDB_SIM_DOWN) return Promise.resolve(null);
   if (testIdb) return Promise.resolve(testIdb[k] ?? null);
   return idb().then((db: IDBDatabase | null) => new Promise<string | null>((res) => {
     if (!db) { res(null); return; }
@@ -8437,6 +8515,74 @@ function lsSet(k: string, v: string): boolean {
 function lsRemove(k: string): void {
   try { probeStores(); if (lsHandle) lsHandle.removeItem(k); } catch { /* storage unavailable */ }
 }
+// ---------- bulletproof saving (2026-11-18) ----------
+// Every save writes localStorage, sessionStorage and IndexedDB, each verified by read-back, with a retry and a quota
+// fallback. Rolling backups (last ROLL_N saves per profile) live in IndexedDB. navigator.storage.persist() asks the
+// browser not to evict the site's data.
+let persistState: "unknown" | "granted" | "denied" | "unsupported" = "unknown";
+let persistAsked = false;
+function requestPersist(): void {
+  if (persistAsked && persistState !== "unknown") return;
+  persistAsked = true;
+  try {
+    const st = (typeof navigator !== "undefined" ? (navigator as unknown as { storage?: { persist?: () => Promise<boolean>; persisted?: () => Promise<boolean> } }).storage : undefined);
+    if (!st || typeof st.persist !== "function") { persistState = "unsupported"; return; }
+    const was = typeof st.persisted === "function" ? st.persisted() : Promise.resolve(false);
+    void was.then((p: boolean) => {
+      if (p) { persistState = "granted"; return undefined; }
+      return (st.persist as () => Promise<boolean>)().then((ok: boolean) => { persistState = ok ? "granted" : "denied"; });
+    }).catch(() => { persistState = "denied"; });
+  } catch { persistState = "unsupported"; }
+}
+const ROLL_N = 5;            // rolling backups per profile (IndexedDB)
+const ROLL_AUTO_MS = 45000;  // autosaves add a rolling backup at most this often; Save Game always adds one
+function rollKey(id: ProfId, i: number): string { return "ed16_roll_p" + id + "_" + i; }
+function rollIdxKey(id: ProfId): string { return "ed16_roll_p" + id + "_i"; }
+const rollLastAt: Partial<Record<ProfId, number>> = {};
+const rollLastRaw: Partial<Record<ProfId, string>> = {};
+let rollQ: Promise<unknown> = Promise.resolve();
+let rollWrites = 0;
+function pushRollingBackup(id: ProfId, raw: string, manual: boolean): Promise<boolean> {
+  const now = Date.now();
+  if (!manual && now - (rollLastAt[id] ?? 0) < ROLL_AUTO_MS) return Promise.resolve(false);
+  if (rollLastRaw[id] === raw) return Promise.resolve(true);
+  rollLastAt[id] = now; rollLastRaw[id] = raw;
+  const job = rollQ.then(() => idbGet(rollIdxKey(id))).then((v: string | null) => {
+    const i = ((Number(v) || 0) + 1) % ROLL_N;
+    return idbPutDone(rollKey(id, i), raw).then((ok: boolean) => (ok ? idbPutDone(rollIdxKey(id), String(i)).then(() => { rollWrites++; return true; }) : false));
+  }).catch(() => false);
+  rollQ = job;
+  return job;
+}
+async function newestRollingBackup(id: ProfId): Promise<string | null> {
+  let best: string | null = null;
+  for (let i = 0; i < ROLL_N; i++) {
+    let r: string | null = null;
+    try { r = await idbGet(rollKey(id, i)); } catch { r = null; }
+    if (r && parseSaveRaw(r) && savedT(r) > savedT(best)) best = r;
+  }
+  return best;
+}
+// Result of the last save, per layer: true = written and read back, false = failed, null = not tried / pending.
+const SAVE_LAYERS: { ls: boolean | null; ss: boolean | null; idb: boolean | null; t: number } = { ls: null, ss: null, idb: null, t: 0 };
+let SAVE_MANUAL = false;
+function copyTextSafe(text: string): Promise<boolean> {
+  // Clipboard API first, then the execCommand fallback (works on older iOS inside a tap).
+  const fallback = (): boolean => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; ta.style.top = "0";
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(() => true, () => fallback());
+  } catch { /* fall through */ }
+  return Promise.resolve(fallback());
+}
 function storageProbe(): boolean {
   try { probeStores(); return !!lsHandle; } catch { return false; }
 }
@@ -8478,9 +8624,21 @@ async function syncFromIdb(): Promise<boolean> {
       lsSet(stk, isv);
     }
   }
+  // Last line of defence: a profile with no valid save anywhere (main, _bak, session) is restored from its newest
+  // rolling backup in IndexedDB.
+  for (const p of PROFILES) {
+    if (parseSaveRaw(profBlob(p.id))) continue;
+    const r = await newestRollingBackup(p.id);
+    if (!r) continue;
+    if (p.id === activeProf) { memSave = r; saveFlag = true; pulled = true; } else memSaveBy[p.id] = r;
+    lsSet(profSaveKey(p.id), r);
+    void idbPutDone(profSaveKey(p.id), r);
+    ROLL_RESTORED.push(p.id);
+  }
   migrateProfiles();
   return pulled;
 }
+const ROLL_RESTORED: ProfId[] = [];
 function b64e(s: string): string { const b = new TextEncoder().encode(s); let o = ""; for (let i = 0; i < b.length; i += 4096) o += String.fromCharCode(...Array.from(b.subarray(i, i + 4096))); return btoa(o); }
 function b64d(s: string): string { const bin = atob(s); const b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return new TextDecoder().decode(b); }
 function currentRaw(): string | null { migrateProfiles(); let best: string | null = null; for (const r of [lsGet(activeSaveKey()), hookGet(activeSaveKey()), memSave, ssGet(activeSaveKey())]) if (r && savedT(r) > savedT(best)) best = r; return best; }
@@ -8683,10 +8841,12 @@ function lsKeys(): string[] {
   }
   return keys;
 }
-function freeRedundantSaves(): number {
+function freeRedundantSaves(activeOnly = false): number {
+  // Backups only (the _bak keys). They also live in IndexedDB, and rolling backups are IndexedDB-only.
   let freed = 0;
   for (const k of lsKeys()) {
     if (isLegacyStoreKey(k) || !isRedundantGameKey(k)) continue;
+    if (activeOnly && k !== activeBakKey() && k !== profStashBakKey(activeProf)) continue;
     const prev = lsGet(k);
     if (!prev) continue;
     try { lsRemove(k); freed += prev.length; } catch { /* ignore */ }
@@ -8724,7 +8884,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     vi: g.vault && vault ? packSideInterior(g) : null,
     sc: packPortal(g.secret),
     gp: packPortal(g.gobPort),
-    pk: g.pk && (g.pk.s || g.pk.u || g.pk.d0) ? g.pk : null,
+    pk: g.pk && (g.pk.s || g.pk.u || g.pk.p || g.pk.d0) ? g.pk : null,
     pks: g.pkShow ?? null,
     bpm: g.bpm ?? null,
   };
@@ -8780,7 +8940,8 @@ function storageReportLine(): string {
     storeAvailLabel("IndexedDB", idbFactory, idbDenied, !!testIdb),
   ].join(" · ");
   const used = lsHandle ? (" · " + kb(lsUsedBytes()) + " used") : "";
-  return stores + used + " · " + parts.join(" · ");
+  const pers = persistState === "granted" ? " · protected from eviction" : persistState === "denied" ? " · not protected from eviction (keep a Save Code)" : "";
+  return stores + used + pers + " · " + parts.join(" · ");
 }
 function writeDurable(key: string, raw: string): boolean {
   // Success if ANY durable store verifies: localStorage or IndexedDB. sessionStorage is a same-session cache only.
@@ -8791,13 +8952,17 @@ function writeDurable(key: string, raw: string): boolean {
     return false;
   }
   let lsOk = lsSet(key, raw);
+  if (!lsOk) lsOk = lsSet(key, raw); // one plain retry (transient failures)
   if (!lsOk) {
-    const freed = freeRedundantSaves();
-    if (freed > 0) lsOk = lsSet(key, raw);
+    // Quota: free this profile's backups first (they are mirrored in IndexedDB), then other profiles' backups.
+    if (freeRedundantSaves(true) > 0) lsOk = lsSet(key, raw);
+    if (!lsOk && freeRedundantSaves(false) > 0) lsOk = lsSet(key, raw);
   }
-  try { ssSet(key, raw); } catch { /* not durable, never counted */ }
+  let ssOk = false;
+  try { ssOk = ssSet(key, raw); } catch { ssOk = false; }
   if (testIdb) testIdb[key] = raw;
-  idbPut(key, raw);
+  SAVE_LAYERS.ls = lsOk; SAVE_LAYERS.ss = ssOk; SAVE_LAYERS.idb = null; SAVE_LAYERS.t = Date.now();
+  void idbPutDone(key, raw).then((ok: boolean) => { if (SAVE_LAYERS.t && memSave === raw) SAVE_LAYERS.idb = ok; }, () => { SAVE_LAYERS.idb = false; });
   const idbHookOk = !!(testIdb && testIdb[key] === raw);
   const durable = lsOk || idbHookOk || (lsGet(key) === raw);
   if (!durable) {
@@ -8819,6 +8984,7 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
   if (g.mode !== "play") return false;
   lastPersistOk = false;
   lastPersistErr = "";
+  if (!persistAsked) requestPersist();
   try {
     // Always persist a zeroed autosave timer so a reload cannot immediately
     // rewrite the slot (and pick up mid-tick HP changes) before the player moves.
@@ -8835,6 +9001,7 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
     memSave = raw;
     persistStash(g);
     const ok = writeDurable(activeSaveKey(), raw);
+    try { void pushRollingBackup(activeProf, raw, SAVE_MANUAL); } catch { /* backups are best-effort */ }
     saveFlag = ok;
     lastPersistOk = ok;
     if (!ok) g.saveT = prevSaveT;
@@ -8858,7 +9025,9 @@ function flushPlaySave(g: Game | null, quiet = true): boolean {
 }
 function saveGameNow(g: Game): boolean {
   // Dedicated "Save Game" path: write this exact moment into the active profile and require a read-back.
-  const ok = flushPlaySave(g, false);
+  SAVE_MANUAL = true;
+  let ok = false;
+  try { ok = flushPlaySave(g, false); } finally { SAVE_MANUAL = false; }
   if (!ok && viewerBlocksSaving()) offerBlockedSaveCode(g);
   return ok;
 }
@@ -9144,7 +9313,7 @@ function validItem(o: unknown): Item | null {
     if (!it.ef.length) it.ef = undefined;
   } else it.ef = undefined;
   if (it.ww === 1 && it.kind !== "gem") it.ww = 1; else delete it.ww;
-  if (it.bonus.mv !== undefined) { if (isArmor(it.kind)) it.bonus.mv = Math.max(0, Math.min(MV_CAP, Math.round(it.bonus.mv))); else delete it.bonus.mv; }
+  if (it.bonus.mv !== undefined) { if (mvCanRoll(it.kind)) { it.bonus.mv = Math.max(0, Math.min(mvItemMax(it.ilvl, it.rar), Math.round(Number(it.bonus.mv) || 0))); if (!it.bonus.mv) delete it.bonus.mv; } else delete it.bonus.mv; } // retroactive: clamp to the new per-item range
   if (typeof it.set === "number" && isFinite(it.set) && it.set >= 0 && it.set < SETS.length) it.set = Math.floor(it.set); else delete it.set;
   if (it.kind === "gem") {
     const typ = typeof it.gt === "number" && isFinite(it.gt) ? Math.floor(it.gt) : Math.floor(Number(it.d[0]) || 0);
@@ -9322,6 +9491,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.pk = cleanPeakTrack(s.pk) ?? {}; g.pkShow = cleanPeakTrack(s.pkShow) ?? null; g.bpm = cleanBpm(s.bpm);
     g.gambler = null;
     if (g.area === "camp") placeMerchant(g);
+    placeTrophyCase(g);
     const fromSaveItems = Array.isArray(s.stash) ? (s.stash as unknown[]).map((o: unknown) => validItem(o)).filter((x: Item | null): x is Item => x !== null) : [];
     const fromSaveGold = typeof s.stashGold === "number" && isFinite(s.stashGold) ? Math.max(0, Math.floor(s.stashGold)) : 0;
     const savedBank = typeof s.bankGold === "number" && isFinite(s.bankGold) ? Math.max(0, Math.floor(s.bankGold)) : undefined;
@@ -11182,6 +11352,9 @@ function applyStarStats(s: Stats, eq: Eq): void {
     }
   }
 }
+// HUD money: full digits with separators below 100,000 (99,999g), then compact (123K, 12.6M, 4.21B ...)
+function hudNum(n: number): string { const v = Math.max(0, Math.floor(safeNum(n))); return v < 100000 ? v.toLocaleString("en-US") : fmtBig(v); }
+let HUD_ROW: { pl: number[]; gold: number[]; best: number[]; area: number[] } = { pl: [0, 0], gold: [0, 0], best: [0, 0], area: [0, 0] };
 function fmtg(n: number): string { return fmtBig(Math.floor(Math.max(0, n))) + "g"; }
 function goldLine(cost: number, gold: number, kind: "price" | "sell" | "salvage" | "potion"): { t: string; bad: boolean } {
   const lab = kind === "sell" ? "Sell" : kind === "salvage" ? "Salvage" : "Price";
@@ -11239,7 +11412,7 @@ function occUsed(g: Game, used: Set<number>): void {
   for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) used.add(k);
   if (g.merchant) used.add(g.merchant.y * MW + g.merchant.x);
   if (g.portal) markPortalUsed(g, used);
-  for (const c of g.chests) used.add(c.y * MW + c.x);
+  for (const c of g.chests) for (const k of chestCells(c)) used.add(k);
   for (const e of g.en) if (e.hp > 0) used.add(e.y * MW + e.x);
   for (const d of g.drops) used.add(d.y * MW + d.x);
 }
@@ -11354,8 +11527,8 @@ function elMul(e: En, el: El): number { if (e.elW === el) return 1.7; if (e.elR 
 // Every player-owned damage impact goes through hurtEn / applyHpDmg and is noted here.
 // Two separate maxima: s = anything that is not a Prismatic ultimate, u = Prismatic ultimate hits only.
 interface PeakHit { v: number; n: string; t: string; c: string; k: number; u?: number }
-interface PeakTrack { s?: PeakHit; u?: PeakHit; d0?: number; d1?: number }
-interface DmgSrc { n: string; t: string; c: string; k?: number; u?: number; x?: boolean }
+interface PeakTrack { s?: PeakHit; u?: PeakHit; p?: PeakHit; d0?: number; d1?: number } // p = Paramount Ultimate (kept apart from regular Prismatic ults)
+interface DmgSrc { n: string; t: string; c: string; k?: number; u?: number; x?: boolean; p?: number }
 const PHYS_COL = "#ffffff";
 const PEAK_FB: DmgSrc = { n: "Hit", t: "Physical", c: PHYS_COL };
 let DMG_SRC: DmgSrc | null = null;
@@ -11389,7 +11562,8 @@ function cleanPeakTrack(x: unknown): PeakTrack | undefined {
   const o = x as Record<string, unknown>;
   const t: PeakTrack = {};
   const s = cleanPeak(o.s); if (s) t.s = s;
-  const u = cleanPeak(o.u); if (u) t.u = u;
+  const u = cleanPeak(o.u); if (u) { if (u.n === "Paramount Ultimate") t.p = u; else t.u = u; } // old saves filed Paramount under u
+  const pp = cleanPeak(o.p); if (pp && (!t.p || pp.v > t.p.v)) t.p = pp;
   if (isFinite(Number(o.d0)) && Number(o.d0) > 0) t.d0 = Math.floor(Number(o.d0));
   if (isFinite(Number(o.d1)) && Number(o.d1) > 0) t.d1 = Math.floor(Number(o.d1));
   return t;
@@ -11400,7 +11574,10 @@ function peakNote(g: Game | null, dmg: number, src?: DmgSrc | null): void {
   if (!g.pk) g.pk = {};
   const v = Math.round(dmg);
   const rec: PeakHit = { v, n: s.n, t: s.t, c: s.c, k: s.k ?? 0 };
-  if (s.u !== undefined) {
+  if (s.p) {
+    if (s.u !== undefined) rec.u = s.u;
+    if (!g.pk.p || v > g.pk.p.v) g.pk.p = rec;
+  } else if (s.u !== undefined) {
     rec.u = s.u;
     if (!g.pk.u || v > g.pk.u.v) g.pk.u = rec;
   } else if (!g.pk.s || v > g.pk.s.v) g.pk.s = rec;
@@ -11408,7 +11585,7 @@ function peakNote(g: Game | null, dmg: number, src?: DmgSrc | null): void {
 function peakStretchStart(g: Game, d0: number): void { g.pk = { d0 }; }
 function peakArriveCamp(g: Game): void {
   const pk = g.pk;
-  if (pk && (pk.s || pk.u)) g.pkShow = { s: pk.s, u: pk.u, d0: pk.d0, d1: g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth };
+  if (pk && (pk.s || pk.u || pk.p)) g.pkShow = { s: pk.s, u: pk.u, p: pk.p, d0: pk.d0, d1: g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth };
 }
 function fmtFull(n: number): string {
   const v = Math.max(0, Math.round(n));
@@ -11422,7 +11599,7 @@ let PEAK_LAST_RECT: { x: number; y: number; w: number; h: number; fireY: number;
 function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number): void {
   PEAK_LAST_RECT = null;
   const pk = g.pkShow;
-  if (g.area !== "camp" || !pk || (!pk.s && !pk.u) || !g.fireAt) return;
+  if (g.area !== "camp" || !pk || (!pk.s && !pk.u && !pk.p) || !g.fireAt) return;
   const fx = g.fireAt.x * TS - camX + 12, fyTop = g.fireAt.y * TS - camY - 8;
   const por = g.portal && g.portal.kind === "proceed" ? g.portal : null;
   const pcx = por ? (por.x + (por.w ?? 1) / 2) * TS - camX : fx;
@@ -11438,8 +11615,9 @@ function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY
   const sSz = pk.s ? big(sNum) : 0, uSz = pk.u ? big(uNum) : 0;
   const LBL = 8, SUB = 7;
   const blockH = (sz: number): number => LBL + 2 + sz + 2 + SUB + 1;
-  const hS = pk.s ? blockH(sSz) : 12, hU = pk.u ? blockH(uSz) : 12, gap = 4;
-  const H = hS + gap + hU;
+  const pNum = pk.p ? fmtFull(pk.p.v) : "", pSz = pk.p ? big(pNum) : 0;
+  const hS = pk.s ? blockH(sSz) : 12, hU = pk.u ? blockH(uSz) : 12, gap = 4, hP = pk.p ? blockH(pSz) + gap : 0;
+  const H = hS + gap + hU + hP;
   const bandTop = pBot, bandBot = fyTop;
   let y0 = bandBot - bandTop >= H ? bandTop + (bandBot - bandTop - H) / 2 : bandTop;
   y0 = Math.max(HUD + 2, Math.min(HUD + VIEWH - H - 2, y0));
@@ -11476,6 +11654,7 @@ function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY
   const yU = y0 + hS + gap;
   if (pk.u) block("TOP PRISMATIC ULT", pk.u, uSz, uNum, yU);
   else { ctx.globalAlpha = 0.6; outlined("No Prismatic ult used", cx, yU + 2, 8, "#9a94a8", "800", 3); ctx.globalAlpha = 1; }
+  if (pk.p) block("TOP PARAMOUNT", pk.p, pSz, pNum, yU + hU + gap);
   ctx.restore();
   PEAK_LAST_RECT = { x: 4, y: y0, w: VW - 8, h: H, fireY: fyTop + 10, portalY: pBot - 4, cx };
 }
@@ -12274,6 +12453,7 @@ function superShake(g: Game): void {
   rumble(g, 70);
 }
 function shakeOff(g: Game): number[] {
+  if (g.para) return [0, 0]; // Paramount drives its own whole-world shake (paraShakeAmp)
   const a = Math.min(8, (SCSH.t > 0 ? SCSH.amp * (SCSH.t / SCSH.dur) : 0) + (g.shake > 0 ? g.shake : 0));
   if (a <= 0) return [0, 0];
   return [Math.round((Math.random() - 0.5) * a), Math.round((Math.random() - 0.5) * a)];
@@ -12478,7 +12658,12 @@ function enemyTurn(g: Game, e: En, st: Stats): void {
     fireEnemyShot(g, e, st, 0.7);
     return;
   }
-  if (e.hunt) { huntMove(g, e); return; }
+  if (e.sw && g.swarm && g.shrine && !e.gat) { // shrine swarm: rush the shrine first, then turn on the hero
+    if (md <= 4) e.gat = 1;
+    else if (swarmToShrine(g, e)) return;
+    else e.gat = 1;
+  }
+  if (e.hunt || (e.sw && md > 14)) { huntMove(g, e); return; }
   if (md > 14) return;
   const sx = Math.sign(dx), sy = Math.sign(dy);
   const opts: number[][] = Math.abs(dx) > Math.abs(dy) ? [[sx, 0], [0, sy], [0, sy === 0 ? 1 : -sy], [0, sy === 0 ? -1 : sy]] : [[0, sy], [sx, 0], [sx === 0 ? 1 : -sx, 0]];
@@ -12642,6 +12827,7 @@ function camTick(g: Game, dt: number): void {
 function camXY(): number[] { return [Math.round(IP.camX * PX) / PX, Math.round(IP.camY * PX) / PX]; }
 function visTick(g: Game, dt: number): void {
   floorCrackTick(g, dt);
+  if (needsFit(g)) fitBigObjects(g);
   if (dt > 0) { swarmTick(g, dt); slideTick(g, dt); hzFxTick(dt); ultShowTick(g, dt); }
   const h = g.hero;
   if (IP.h !== h) { IP.h = h; IP.hp = null; IP.camOk = false; IP.em.clear(); }
@@ -12747,12 +12933,12 @@ interface UShow {
 }
 const USHOWS: UShow[] = [];
 const USHOW_CAP = 3;
-const UDUR = [2.3, 2.1, 2.2, 2.4, 2.3, 2.3, 2.0, 2.2, 2.0, 2.6];
+const UDUR = [2.3, 2.1, 2.2, 2.4, 2.3, 2.3, 2.0, 2.2, 2.0, 2.6, 2.9];
 function ushowRand(n: number, seed: number): number[] { const f = rng32(seed | 1); const a: number[] = []; for (let i = 0; i < n; i++) a.push(f()); return a; }
 function ultShowStart(g: Game, u: Ult, hx: number, hy: number, ts: En[], golden: boolean): UShow {
   const [cx, cy] = camXY();
   const s: UShow = {
-    pat: u.pat, el: u.el, elI: Math.max(0, ELS.indexOf(u.el)), row: Math.floor(u.i / 10), golden, t: 0, dur: UDUR[u.pat] ?? 2.2,
+    pat: u.fx ?? u.pat, el: u.el, elI: Math.max(0, ELS.indexOf(u.el)), row: Math.floor(u.i / 10), golden, t: 0, dur: UDUR[u.pat] ?? 2.2,
     x: hx, y: hy, vx: cx, vy: cy + HUD, vw: VW, vh: VIEWH,
     tg: ts.slice(0, 24).map((e: En) => [e.ax * TS + 12, e.ay * TS + 12]), seed: (R() * 1e9) | 0, r: [], ev: [],
     c: golden ? GOLD : ELC[u.el], c2: golden ? "#fff8c0" : u.c2, map: g.map,
@@ -12795,6 +12981,13 @@ function ushowEvents(s: UShow): void {
     case 6: { s.tg.forEach((p: number[]) => { let a = Math.atan2(p[1] - s.y, p[0] - s.x) + Math.PI / 2; if (a < 0) a += 6.2832; E(0.1 + (a / 6.2832) * 0.65, p, 12); }); break; }
     case 7: { const n = Math.max(6, s.tg.length); for (let i = 0; i < Math.min(26, n); i++) E(0.5 + i * 0.07, uSpot(s, i), 14); break; }
     case 8: { s.tg.forEach((p: number[], i: number) => E(0.25 + (i % 8) * 0.12, p, 10)); break; }
+    case 10: { // Eternal Reapers: each target is cut by one of four sweeps, then all by the great scythe
+      s.tg.forEach((p: number[], i: number) => E(UREAP_T0[i % 4] + 0.32, p, 10));
+      for (let i = 0; i < 4; i++) E(UREAP_T0[i] + 0.3, uSpot(s, 30 + i), 8);
+      E(UREAP_BIG + 0.55, [s.x, s.y], 30);
+      s.tg.forEach((p: number[]) => E(UREAP_BIG + 0.6, p, 8));
+      break;
+    }
     default: { const m = uMael(s); s.tg.forEach((p: number[], i: number) => E(m.hitT[i], p, 12)); break; }
   }
   s.ev.sort((a: UShowEv, b: UShowEv) => a.t - b.t);
@@ -12855,6 +13048,21 @@ function uImpact(ctx: CanvasRenderingContext2D, s: UShow, x: number, y: number, 
   ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = uHue(s, k); ctx.lineWidth = 2.5 * (1 - p) + 0.5;
   ctx.beginPath(); ctx.ellipse(x, y, size * (0.3 + p * 1.2), size * (0.15 + p * 0.55), 0, 0, 6.2832); ctx.stroke();
   for (let j = 0; j < 6; j++) { const an = j * 1.047 + k, d = size * (0.2 + p * 1.1); uMote(ctx, s, x + Math.cos(an) * d, y + Math.sin(an) * d * 0.55 - p * 10, 0.9, an + p * 4, 1 - p); }
+}
+const UREAP_T0 = [0.12, 0.42, 0.72, 1.02]; // start of the four giant scythe sweeps
+const UREAP_BIG = 1.35;                    // the great rainbow scythe
+function uScythe(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number, R: number, fill: string | CanvasGradient, edge: string, a: number): void {
+  // a reaper's scythe: long shaft along ang, a crescent blade at its head curving back
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.globalAlpha = a;
+  ctx.strokeStyle = "rgba(60,40,30,0.9)"; ctx.lineWidth = Math.max(2, R * 0.05);
+  ctx.beginPath(); ctx.moveTo(-R * 0.75, 0); ctx.lineTo(R * 0.3, 0); ctx.stroke();
+  ctx.fillStyle = fill;
+  ctx.beginPath(); ctx.moveTo(R * 0.28, -R * 0.02);
+  ctx.quadraticCurveTo(R * 0.2, -R * 0.75, -R * 0.55, -R * 0.62);
+  ctx.quadraticCurveTo(R * 0.02, -R * 0.5, R * 0.3, R * 0.06); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, R * 0.025);
+  ctx.beginPath(); ctx.moveTo(R * 0.28, -R * 0.02); ctx.quadraticCurveTo(R * 0.2, -R * 0.75, -R * 0.55, -R * 0.62); ctx.stroke();
+  ctx.restore();
 }
 function drawUltShows(ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
   if (!USHOWS.length) return;
@@ -13008,6 +13216,59 @@ function drawUltShow(ctx: CanvasRenderingContext2D, s: UShow, camX: number, camY
         uGlow(ctx, x, gy, wBeam * 3.2, s.c, 0.95); uGlow(ctx, x, gy, wBeam * 1.1, "#ffffff", 1);
         ctx.globalAlpha = 0.6; ctx.strokeStyle = uHue(s, i); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, gy, wBeam * 2.4, wBeam * 0.8, 0, 0, 6.2832); ctx.stroke();
         for (let j = 0; j < 5; j++) uMote(ctx, s, x + (R0[(i * 5 + j + Math.floor(t * 20)) % 600] - 0.5) * wBeam * 3, gy - R0[(j * 7 + Math.floor(t * 30)) % 600] * 40, 1, t * 5 + j, 0.9);
+      });
+      break;
+    }
+    case 10: { // ETERNAL REAPERS: four giant scythes sweep the screen from different sides, then a colossal rainbow scythe
+      const D = Math.min(W, H);
+      for (let k = 0; k < 4; k++) {
+        const t0 = UREAP_T0[k], p = (t - t0) / 0.55; if (p < 0 || p > 1.9) continue;
+        const cxk = left + W * (k % 2 === 0 ? 0.08 : 0.92), cyk = top + H * (k < 2 ? 0.1 : 0.9);
+        const dirn = k % 2 === 0 ? 1 : -1, R = D * 0.78;
+        const a0 = Math.atan2(top + H / 2 - cyk, left + W / 2 - cxk) - dirn * 1.1, span = dirn * 2.2;
+        const e = Math.min(1, p), ee = 1 - (1 - e) * (1 - e), an = a0 + span * ee;
+        const fade = Math.max(0, 1 - Math.max(0, p - 1) * 1.15);
+        // the slash: a wide rainbow crescent that lingers after the blade passes
+        for (let b = 0; b < 4; b++) {
+          ctx.globalAlpha = (0.55 - b * 0.1) * fade; ctx.strokeStyle = b === 0 ? "#ffffff" : uHue(s, k * 3 + b); ctx.lineWidth = (14 - b * 3) * (0.6 + 0.4 * fade);
+          ctx.beginPath();
+          const s0 = a0 + span * Math.max(0, ee - 0.55), s1 = an;
+          ctx.arc(cxk, cyk, R * (0.98 - b * 0.03), Math.min(s0, s1), Math.max(s0, s1)); ctx.stroke();
+        }
+        if (p <= 1.05) {
+          const bx = cxk + Math.cos(an) * R, by = cyk + Math.sin(an) * R;
+          const gr = ctx.createLinearGradient(bx - 40, by - 40, bx + 40, by + 40); gr.addColorStop(0, s.c); gr.addColorStop(0.5, s.c2); gr.addColorStop(1, "#ffffff");
+          for (let gh = 3; gh >= 0; gh--) uScythe(ctx, cxk + Math.cos(an - dirn * gh * 0.06) * R * 0.62, cyk + Math.sin(an - dirn * gh * 0.06) * R * 0.62, an - dirn * gh * 0.06 + (dirn > 0 ? 0 : Math.PI), D * 0.42, gr, "#ffffff", gh === 0 ? 0.95 : 0.25);
+        }
+      }
+      // the great rainbow scythe: rises over the hero, winds up, and reaps a full circle
+      const pb = (t - UREAP_BIG) / 1.0;
+      if (pb >= 0 && pb <= 1.5) {
+        const R = D * 0.62, rise = Math.min(1, pb / 0.25), spin = pb < 0.25 ? 0 : Math.min(1, (pb - 0.25) / 0.55), sp = 1 - Math.pow(1 - spin, 3);
+        const an = -Math.PI / 2 - 0.5 * rise + sp * 6.2832, fade = Math.max(0, 1 - Math.max(0, pb - 0.85) * 1.6);
+        uGlow(ctx, hx, hy, R * 1.1, s.c, 0.35 * fade);
+        if (spin > 0) for (let b = 0; b < 7; b++) {
+          ctx.globalAlpha = 0.5 * fade; ctx.strokeStyle = uHue(s, b); ctx.lineWidth = 7;
+          ctx.beginPath(); ctx.arc(hx, hy, R * (1.0 - b * 0.035), -Math.PI / 2 - 0.5 + Math.max(0, sp - 0.6) * 6.2832, an); ctx.stroke();
+        }
+        if (pb <= 1.0) {
+          const bx = hx + Math.cos(an) * R * 0.55, by = hy + Math.sin(an) * R * 0.55;
+          const gr = ctx.createLinearGradient(bx - R * 0.5, by - R * 0.5, bx + R * 0.5, by + R * 0.5);
+          for (let c = 0; c < 7; c++) gr.addColorStop(c / 6, uHue(s, c));
+          for (let gh = 4; gh >= 0; gh--) uScythe(ctx, hx + Math.cos(an - gh * 0.09) * R * 0.5, hy + Math.sin(an - gh * 0.09) * R * 0.5, an - gh * 0.09, R * 0.95, gr, "#ffffff", (gh === 0 ? 1 : 0.22) * fade);
+        }
+        if (pb > 0.8) { const q = (pb - 0.8) / 0.7; uImpact(ctx, s, hx, hy, Math.min(1, q), 3, R * 0.9); }
+      }
+      // slash marks and rising souls on every struck foe
+      s.tg.forEach((pt: number[], i: number) => {
+        for (const th of [UREAP_T0[i % 4] + 0.32, UREAP_BIG + 0.6]) {
+          const q = (t - th) / 0.7; if (q < 0 || q > 1) continue;
+          const x = pt[0] + ox, y = pt[1] + oy, dd = 16 + (1 - q) * 6;
+          ctx.globalAlpha = 1 - q; ctx.strokeStyle = uHue(s, i); ctx.lineWidth = 4 * (1 - q) + 1;
+          ctx.beginPath(); ctx.moveTo(x - dd, y - dd * 0.4); ctx.lineTo(x + dd, y + dd * 0.4); ctx.moveTo(x + dd * 0.4, y - dd); ctx.lineTo(x - dd * 0.4, y + dd); ctx.stroke();
+          uGlow(ctx, x, y, 22, s.c, 1 - q);
+          for (let j = 0; j < 3; j++) uMote(ctx, s, x + (j - 1) * 7 + Math.sin(q * 6 + j) * 3, y - q * 46 - j * 6, 1.2, q * 4 + j, 1 - q);
+        }
       });
       break;
     }
@@ -13253,7 +13514,7 @@ function paraDetonate(g: Game): void {
       P.total = safeNum(P.total + d); P.hit++;
       withHit({ ox: h.x, oy: h.y }, () => {
         const uel = ultBestEl(e);
-        hurtEn(g, e, d, { n: "Paramount Ultimate", t: ELN[uel], c: "#fff0a0", k: 0, u: ps[0].it.ult ?? 0 }); e.hit = 0.6; e.awake = true;
+        hurtEn(g, e, d, { n: "Paramount Ultimate", t: ELN[uel], c: "#fff0a0", k: 0, u: ps[0].it.ult ?? 0, p: 1 }); e.hit = 0.6; e.awake = true;
         floatTxt(g, e.x, e.y - 0.4, fmtFull(d), "#fff0a0");
         if (e.hp <= 0) { P.slain++; kill(g, e); }
       });
@@ -13353,8 +13614,8 @@ const WX_LIST: { k: WxKind; n: string; w: number; icon: string }[] = [
   { k: "wind", n: "Windstorm", w: 15, icon: "\u2248" },
 ];
 // ---------- Item 15: shrine swarm ----------
-type Shrine = { x: number; y: number; used?: number };
-type Swarm = { t: number; kills: number; acc: number; spawned: number; pool: number[] };
+type Shrine = { x: number; y: number; used?: number; f?: number }; // f 1 = 2x2 footprint at x..x+1,y..y+1; 2 = legacy 1x1
+type Swarm = { t: number; kills: number; acc: number; spawned: number; pool: number[]; df?: Int16Array; dfK?: string };
 const SHRINE_MIN_DEPTH = 26, SHRINE_CH = 0.05, SWARM_SEC = 60, SWARM_CAP = 40, SWARM_RATE = 6, SWARM_BURST = 18;
 const SWARM_TIERS: { k: number; n: string; c: string; items: number; min: number; il: number; gold: number; gems: number; pris: number }[] = [
   { k: 25, n: "Bronze", c: "#d08a50", items: 2, min: 1, il: 0, gold: 4, gems: 0, pris: 0 },
@@ -13369,10 +13630,101 @@ function packShrine(s: Shrine | null | undefined): Shrine | null {
   if (!s || typeof s.x !== "number" || typeof s.y !== "number" || !inb(s.x, s.y)) return null;
   const o: Shrine = { x: Math.floor(s.x), y: Math.floor(s.y) };
   if (s.used) o.used = 1;
+  if (s.f === 1 || s.f === 2) o.f = s.f;
   return o;
 }
 function unpackShrine(raw: unknown): Shrine | null { return raw && typeof raw === "object" ? packShrine(raw as Shrine) : null; }
-function shrineAt(g: Game, x: number, y: number): boolean { return !!(g.shrine && g.shrine.x === x && g.shrine.y === y) || !!(g.artCave && !g.artCave.taken && g.artCave.cx === x && g.artCave.cy === y); }
+// ---------- 2026-11-18: 2x2 chests and shrine ----------
+// A chest or shrine keeps its (x,y) as the top-left of a 2x2 footprint once fitted. Old saves (no fit flag) are fitted on
+// the first frame: the footprint is slid to cover or sit next to the old tile, only on plain room floor, never on a
+// corridor, stairs (or the ring around them), portal, merchant, drop, hazard, the hero or an enemy, and only when the
+// floor's connectivity is unchanged (a flood-fill component count). If no spot passes, the object stays 1x1 (fit 2).
+function chestCells(c: Chest): number[] { const k = c.y * MW + c.x; return c.fit === 1 ? [k, k + 1, k + MW, k + MW + 1] : [k]; }
+function shrineCells(s: Shrine): number[] { const k = s.y * MW + s.x; return s.f === 1 ? [k, k + 1, k + MW, k + MW + 1] : [k]; }
+function bigBlockMask(g: Game, skipChest: Chest | null, skipShrine: boolean): Uint8Array {
+  const m = new Uint8Array(MW * MH);
+  for (const c of g.chests) if (!c.open && c !== skipChest) for (const k of chestCells(c)) m[k] = 1;
+  if (g.shrine && !skipShrine) for (const k of shrineCells(g.shrine)) m[k] = 1;
+  return m;
+}
+function floorComponents(g: Game, block: Uint8Array): number {
+  const N = MW * MH, seen = new Uint8Array(N), q = new Int32Array(N);
+  let comps = 0;
+  for (let s0 = 0; s0 < N; s0++) {
+    if (seen[s0] || block[s0] || g.map[s0] === 0) continue;
+    const x0 = s0 % MW, y0 = (s0 / MW) | 0; if (isOuterBarrier(x0, y0) || hzSolid(g, x0, y0)) continue;
+    comps++; seen[s0] = 1; let qh = 0, qt = 0; q[qt++] = s0;
+    while (qh < qt) {
+      const k = q[qh++], x = k % MW, y = (k / MW) | 0;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), ny = y + (d === 2 ? 1 : d === 3 ? -1 : 0);
+        if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue;
+        const nk = ny * MW + nx;
+        if (seen[nk] || block[nk] || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue;
+        seen[nk] = 1; q[qt++] = nk;
+      }
+    }
+  }
+  return comps;
+}
+function bigCellOk(g: Game, x: number, y: number, block: Uint8Array): boolean {
+  if (!inb(x, y) || isOuterBarrier(x, y)) return false;
+  const k = y * MW + x;
+  if (g.map[k] !== 1 || block[k] || isCorridorCell(g.map, x, y) || hzSolid(g, x, y) || portalAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y)) return false;
+  if (g.trader && g.trader.x === x && g.trader.y === y) return false;
+  if (g.hero && g.hero.x === x && g.hero.y === y) return false;
+  if (enemyAt(g, x, y) || g.drops.some((d: Drop) => d.x === x && d.y === y)) return false;
+  if (g.artCave && (artInBlock(g, x, y) || (g.artCave.cx === x && g.artCave.cy === y))) return false;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { // keep stairs and portals approachable from every side
+    if (!inb(x + dx, y + dy)) continue;
+    const t = g.map[(y + dy) * MW + x + dx];
+    if (t === 2 || t === TILE_UP || portalAt(g, x + dx, y + dy)) return false;
+  }
+  return true;
+}
+let FIT_STATS = { tried: 0, big: 0, small: 0, bfs: 0 };
+function fit2x2(g: Game, ax: number, ay: number, block: Uint8Array): { x: number; y: number } | null {
+  const cands: number[][] = [];
+  for (let r = 0; r <= 4; r++) for (let oy = -r - 1; oy <= r; oy++) for (let ox = -r - 1; ox <= r; ox++) {
+    const ring = Math.max(ox < 0 ? -ox - 1 : ox, oy < 0 ? -oy - 1 : oy);
+    if (ring === r) cands.push([ax + ox, ay + oy]);
+  }
+  const base = floorComponents(g, block); FIT_STATS.bfs++;
+  let tries = 0;
+  for (const [x, y] of cands) {
+    if (!bigCellOk(g, x, y, block) || !bigCellOk(g, x + 1, y, block) || !bigCellOk(g, x, y + 1, block) || !bigCellOk(g, x + 1, y + 1, block)) continue;
+    if (++tries > 14) break;
+    const k = y * MW + x, test = block.slice(); test[k] = test[k + 1] = test[k + MW] = test[k + MW + 1] = 1;
+    FIT_STATS.bfs++;
+    if (floorComponents(g, test) <= base) return { x, y };
+  }
+  return null;
+}
+function fitBigObjects(g: Game): void {
+  if (g.area === "camp" && !g.chests.length && !g.shrine) return;
+  if (g.shrine && !g.shrine.f) {
+    const p = fit2x2(g, g.shrine.x, g.shrine.y, bigBlockMask(g, null, true));
+    if (p) { g.shrine.x = p.x; g.shrine.y = p.y; g.shrine.f = 1; } else g.shrine.f = 2;
+    for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.sh = packShrine(g.shrine);
+  }
+  for (const c of g.chests) {
+    if (c.open || c.fit) continue;
+    FIT_STATS.tried++;
+    const p = fit2x2(g, c.x, c.y, bigBlockMask(g, c, false));
+    if (p) { c.x = p.x; c.y = p.y; c.fit = 1; FIT_STATS.big++; } else { c.fit = 2; FIT_STATS.small++; }
+  }
+}
+// hazards and the artifact cave are placed after the chests; if together they pinch the floor apart, re-fit every footprint
+function refitIfSplit(g: Game): void {
+  const none = new Uint8Array(MW * MH);
+  if (floorComponents(g, bigBlockMask(g, null, false)) <= floorComponents(g, none)) return;
+  for (const c of g.chests) if (!c.open && c.fit === 1) c.fit = undefined;
+  if (g.shrine && g.shrine.f === 1) g.shrine.f = undefined;
+  fitBigObjects(g);
+}
+function needsFit(g: Game): boolean { if (g.shrine && !g.shrine.f) return true; for (const c of g.chests) if (!c.open && !c.fit) return true; return false; }
+function shrineHit(g: Game, x: number, y: number): boolean { const s = g.shrine; return !!s && (s.f === 1 ? x >= s.x && x <= s.x + 1 && y >= s.y && y <= s.y + 1 : s.x === x && s.y === y); }
+function shrineAt(g: Game, x: number, y: number): boolean { return shrineHit(g, x, y) || !!(g.artCave && !g.artCave.taken && g.artCave.cx === x && g.artCave.cy === y); }
 let SHRINE_FORCE = false, ART_FORCE = false, ART_PRIZE: "" | "art" | "chest" = "";
 function maybeSpawnShrine(g: Game): boolean {
   if (g.area === "camp" || g.vault || (g.area ?? "dungeon") !== "dungeon" || isActFloor(g.depth)) return false;
@@ -13390,6 +13742,9 @@ function maybeSpawnShrine(g: Game): boolean {
   }
   if (best < 0) return false;
   g.shrine = { x: best % MW, y: (best / MW) | 0 };
+  const p = fit2x2(g, g.shrine.x, g.shrine.y, bigBlockMask(g, null, true));
+  if (!p) { g.shrine = null; return false; } // a new shrine is always 2x2; no room for one, no shrine
+  g.shrine.x = p.x; g.shrine.y = p.y; g.shrine.f = 1;
   return true;
 }
 function markShrineUsed(g: Game): void {
@@ -13444,6 +13799,40 @@ function swarmTick(g: Game, dt: number): void {
   while (S.acc >= 1 && n < 4) { S.acc -= 1; if (live + n < SWARM_CAP && swarmSpawnOne(g)) n++; }
   if (S.acc > 3) S.acc = 3;
 }
+// distance field to the tiles around the shrine (cached per swarm; rebuilt if the floor or the shrine changes)
+function swarmField(g: Game): Int16Array | null {
+  const S = g.swarm, s = g.shrine; if (!S || !s) return null;
+  const key = g.depth + ":" + s.x + "," + s.y + ":" + (g.wallVer || 0);
+  if (S.df && S.dfK === key) return S.df;
+  const N = MW * MH, df = new Int16Array(N).fill(-1), q: number[] = [];
+  for (const k of shrineCells(s)) { df[k] = 0; q.push(k); }
+  for (let i = 0; i < q.length; i++) {
+    const k = q[i], x = k % MW, y = (k / MW) | 0;
+    for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + ox, ny = y + oy; if (!inb(nx, ny)) continue;
+      const nk = ny * MW + nx; if (df[nk] !== -1 || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue;
+      df[nk] = df[k] + 1; q.push(nk);
+    }
+  }
+  S.df = df; S.dfK = key; return df;
+}
+const SWARM_GATHER = 2; // within 2 tiles of the shrine footprint = arrived; from then on it hunts the hero
+function swarmToShrine(g: Game, e: En): boolean {
+  const df = swarmField(g); if (!df) return false;
+  const cur = df[e.y * MW + e.x];
+  if (cur < 0 || cur <= SWARM_GATHER) return false;
+  let best: number[] | null = null, bd = cur, side: number[] | null = null;
+  for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = e.x + ox, ny = e.y + oy; if (!inb(nx, ny)) continue;
+    const d = df[ny * MW + nx];
+    if (d < 0 || !walkable(g, nx, ny) || (nx === g.hero.x && ny === g.hero.y)) continue;
+    if (d < bd) { bd = d; best = [nx, ny]; } else if (d === cur && !side) side = [nx, ny];
+  }
+  const mv = best || side; if (!mv) return true; // crowded: wait a beat
+  if (mv[0] !== e.x) e.face = mv[0] > e.x ? 1 : -1;
+  e.x = mv[0]; e.y = mv[1];
+  return true;
+}
 function endSwarm(g: Game, died: boolean): void {
   const S = g.swarm; if (!S) return;
   g.swarm = null;
@@ -13474,9 +13863,25 @@ function endSwarm(g: Game, died: boolean): void {
 }
 function drawShrine(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
   const s = g.shrine;
-  if (!s || !g.vis[s.y * MW + s.x]) return;
-  const sx = s.x * TS - camX, sy = s.y * TS - camY, cx = sx + 12;
+  if (!s || !shrineCells(s).some((k: number) => g.vis[k])) return;
+  const big = s.f === 1;
+  if (g.swarm) { // swarm active: a flashing, pulsing beacon so the shrine is always easy to find
+    const ccx = s.x * TS - camX + (big ? TS : 12), ccy = s.y * TS - camY + (big ? TS : 12);
+    const p = 0.5 + 0.5 * Math.sin(t * 7), flash = Math.floor(t * 4) % 2 === 0;
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const R0 = (big ? 62 : 40) * (0.85 + 0.25 * p);
+    const gl = ctx.createRadialGradient(ccx, ccy, 4, ccx, ccy, R0);
+    gl.addColorStop(0, "rgba(255,90,130," + (0.55 + 0.35 * p).toFixed(2) + ")"); gl.addColorStop(0.5, "rgba(255,40,90," + (0.25 + 0.2 * p).toFixed(2) + ")"); gl.addColorStop(1, "rgba(120,0,40,0)");
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(ccx, ccy, R0, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 0.35 + 0.3 * p; ctx.fillStyle = "rgba(255,120,160,0.6)"; ctx.fillRect(ccx - 6, ccy - 160, 12, 160); // light column
+    ctx.globalAlpha = flash ? 0.95 : 0.45; ctx.strokeStyle = flash ? "#ffffff" : "#ff3060"; ctx.lineWidth = 2;
+    const rr = (t * 1.4) % 1; ctx.beginPath(); ctx.arc(ccx, ccy, (big ? 20 : 12) + rr * (big ? 44 : 28), 0, 6.2832); ctx.stroke();
+    ctx.restore();
+  }
+  const sx0 = s.x * TS - camX, sy0 = s.y * TS - camY;
   ctx.save();
+  if (big) { ctx.translate(sx0, sy0); ctx.scale(2, 2); }
+  const sx = big ? 0 : sx0, sy = big ? 0 : sy0, cx = sx + 12;
   if (!s.used) {
     const p = 0.6 + 0.4 * Math.sin(t * 3);
     const gl = ctx.createRadialGradient(cx, sy + 8, 2, cx, sy + 8, 26);
@@ -13934,9 +14339,9 @@ function hzReservedMask(g: Game): Uint8Array {
   const mark = (x: number, y: number, r: number): void => { for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (inb(xx, yy)) m[yy * MW + xx] = 1; };
   for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) mark(k % MW, (k / MW) | 0, 1);
   for (const p of allPortals(g)) for (const c of portalCells(p)) mark(c.x, c.y, 1);
-  for (const c of g.chests) mark(c.x, c.y, 1);
+  for (const c of g.chests) for (const k of chestCells(c)) mark(k % MW, (k / MW) | 0, 1);
   for (const d of g.drops) mark(d.x, d.y, 0);
-  if (g.shrine) mark(g.shrine.x, g.shrine.y, 1);
+  if (g.shrine) for (const k of shrineCells(g.shrine)) mark(k % MW, (k / MW) | 0, 1);
   if (g.artCave) { for (let k = 0; k < MW * MH; k++) if (artInBlock(g, k % MW, (k / MW) | 0)) m[k] = 1; }
   if (g.trader) mark(g.trader.x, g.trader.y, 1);
   if (g.merchant) mark(g.merchant.x, g.merchant.y, 1);
@@ -14750,6 +15155,29 @@ const easeOut = (v: number): number => 1 - Math.pow(1 - clamp01(v), 3);
 // Paramount v3 timeline (real seconds): 0-1.6 charge -> 1.6 beam impact -> 1.6-4.0 beam widens + white-out
 // (walls ripped away progressively) -> 4.0 climactic explosion (damage lands, final wall rip) -> afterglow to 6.8.
 const PARA_IMPACT = 1.6;
+// 2026-11-18: Paramount beam screen shake (the only Paramount change). Amplitude in game pixels, by Paramount time:
+// 0 before the beam lands; from impact it follows the beam's width output (0.3*q + 0.7*q^3) with a kick on each
+// 0.4 s impact pulse; peaks during the full white flash; eases down as the white dims; a small residual fades to 0.
+function paraShakeAmp(t: number): number {
+  if (t < PARA_IMPACT) return 0;
+  if (t < PARA_DET) {
+    const q = (t - PARA_IMPACT) / (PARA_DET - PARA_IMPACT), out = 0.3 * q + 0.7 * q * q * q;
+    const kick = Math.max(0, 1 - ((t - PARA_IMPACT) % 0.4) / 0.12) * (0.8 + 2.2 * q);
+    return 1.5 + 14.5 * out + kick;
+  }
+  if (t < PARA_DET + 0.4) return 18;                                                       // full-screen white flash
+  if (t < PARA_DET + 1.8) { const q = (t - PARA_DET - 0.4) / 1.4; return 4 + 14 * (1 - q) * (1 - q); } // white dims
+  if (t < PARA_END) return 4 * (1 - (t - PARA_DET - 1.8) / (PARA_END - PARA_DET - 1.8));  // residual rumble
+  return 0;
+}
+let PARA_SHK: number[] = [0, 0];
+const PARA_SHK_LOG: number[][] = [];
+function paraShakeOff(t: number): number[] {
+  const a = paraShakeAmp(t);
+  if (a <= 0 || reducedFx()) return [0, 0];
+  const ox = a * (0.6 * Math.sin(t * 53) + 0.4 * Math.sin(t * 91 + 1.3)), oy = a * (0.6 * Math.sin(t * 61 + 0.7) + 0.4 * Math.sin(t * 83 + 2.1));
+  return [Math.round(ox), Math.round(oy)];
+}
 let PARA_RNG = 1;
 function paraRand(): number { PARA_RNG = (PARA_RNG * 16807) % 2147483647; return PARA_RNG / 2147483647; }
 function drawBolt(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, len: number, segs: number, jag: number, pts?: number[]): void {
@@ -14778,7 +15206,7 @@ function drawParamount(ctx: CanvasRenderingContext2D, g: Game): void {
   if (!P) return;
   const p = P.t;
   const h = g.hero;
-  const hx = h.ax * TS + 12 - PARA_CAM.x, hy = h.ay * TS + 12 - PARA_CAM.y;
+  const hx = h.ax * TS + 12 - PARA_CAM.x + PARA_SHK[0], hy = h.ay * TS + 12 - PARA_CAM.y + PARA_SHK[1]; // beam stays on the shaking hero
   const top = HUD;
   const qc = clamp01(p / PARA_IMPACT); // charge progress
   const qb = clamp01((p - PARA_IMPACT) / (PARA_DET - PARA_IMPACT)); // beam progress
@@ -15204,9 +15632,9 @@ function act(g: Game, dx: number, dy: number): void {
   if (g.merchant && g.merchant.x === nx && g.merchant.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; g.shopOpen = true; g.sfx("chest"); msg(g, "Chest Merchant: \"A chest for every kind of gear. Each holds one item.\"", "#ffd080"); g.notify(); return; }
   if (g.stashAt && g.stashAt.x === nx && g.stashAt.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; openStash(g); return; }
   if (g.restAt && g.restAt.x === nx && g.restAt.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; restAtCamp(g); return; }
-  if (g.shrine && g.shrine.x === nx && g.shrine.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; if (g.shrine.used) msg(g, "The shrine is cracked and silent - its power is spent.", "#a09090"); else if (!g.swarm) startSwarm(g); g.notify(); return; }
+  if (shrineHit(g, nx, ny)) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; if (g.shrine.used) msg(g, "The shrine is cracked and silent - its power is spent.", "#a09090"); else if (!g.swarm) startSwarm(g); g.notify(); return; }
   if (g.artCave && !g.artCave.taken && g.artCave.cx === nx && g.artCave.cy === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; discoverArtifact(g); g.notify(); return; }
-  if (g.trophyAt && g.trophyAt.x === nx && g.trophyAt.y === ny) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; g.trophyOpen = true; g.notify(); return; }
+  if (trophyHit(g, nx, ny)) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; g.trophyOpen = true; g.notify(); return; }
   if (g.fireAt && g.fireAt.x === nx && g.fireAt.y === ny) { h.bump = 0.4; h.bdx = dx; h.bdy = dy; msg(g, "The campfire warms you.", "#ffb040"); g.notify(); return; }
   const px = h.x, py = h.y;
   h.x = nx; h.y = ny;
@@ -15371,7 +15799,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-b:active { transform: scale(0.95); }
 .dc-b:disabled { opacity: 0.4; cursor: default; }
 .dc-b.go { background: #2a7a3a; }
-.dc-title { position: absolute; left: 0; right: 0; top: 75%; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 10px; }
+.dc-title { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 10px; }
 .dc-tb { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 .dc-cell.r7, .dc-prisbox {
   background: #1a1028;
@@ -15429,6 +15857,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-ult.rdy { background: linear-gradient(90deg, #ffd840, #ff60e0, #40d0ff, #ffd840); background-size: 200% 100%; animation: shim 1.2s linear infinite; }
 .dc-ult.rdy .dc-ulti { background: #3a2a10; }
 .dc-title .dc-b { min-width: 128px; min-height: 44px; }
+@media (max-width: 560px) { .dc-title .dc-tb > .dc-b { min-width: 0; flex: 1 1 0; padding-left: 4px; padding-right: 4px; font-size: 12px; white-space: nowrap; } }
 .dc-b.bad { background: #7a2a2a; }
 .dc-msw { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(0, 0, 0, 0.55); border-radius: 6px; touch-action: manipulation; }
 .dc-msw .dc-conf { max-width: 90%; }
@@ -15448,6 +15877,12 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-st.off { color: #ffb070; }
 .dc-st.checking { color: #c0b8d8; }
 .dc-title { z-index: 20; }
+.dc-savenote { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); z-index: 45; padding: 8px 14px; border-radius: 12px; text-align: center; max-width: 92%; min-width: 200px; box-shadow: 0 4px 18px rgba(0,0,0,0.6); border: 2px solid; cursor: pointer; }
+.dc-savenote.ok { background: rgba(10, 60, 24, 0.94); border-color: #60e080; color: #c8ffd4; }
+.dc-savenote.warn { background: rgba(70, 48, 6, 0.95); border-color: #ffc040; color: #ffe8b0; }
+.dc-savenote.err { background: rgba(80, 10, 10, 0.96); border-color: #ff6060; color: #ffd0d0; }
+.dc-savenote-t { font-size: 15px; font-weight: 900; letter-spacing: 0.5px; }
+.dc-savenote-s { font-size: 11px; margin-top: 3px; opacity: 0.95; line-height: 1.3; }
 .dc-tn { color: #ffb080; font-size: 12px; text-align: center; background: rgba(0, 0, 0, 0.7); padding: 4px 8px; border-radius: 6px; }
 .dc-b.hot { background: #1e5a6a; animation: dcPulse 1s ease-in-out infinite; }
 @keyframes dcPulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5); } }
@@ -15758,7 +16193,7 @@ function drawPassives(ctx: CanvasRenderingContext2D, g: Game, sx: number, sy: nu
   ctx.globalAlpha = 1;
 }
 
-const STATROWS: [keyof Stats, string][] = [["maxHp", "Max HP"], ["atk", "Attack"], ["def", "Defense"], ["crit", "Crit %"], ["spd", "Double Strike %"], ["block", "Block %"], ["regen", "Regen / turn"], ["ward", "Spectral Ward"], ["mv", "Move Speed % (max 200)"]];
+const STATROWS: [keyof Stats, string][] = [["maxHp", "Max HP"], ["atk", "Attack"], ["def", "Defense"], ["crit", "Crit %"], ["spd", "Double Strike %"], ["block", "Block %"], ["regen", "Regen / turn"], ["ward", "Spectral Ward"], ["mv", "Move Speed % (cap 300)"]];
 
 function prisArcOverlay() {
   return (
@@ -16367,8 +16802,8 @@ function hzRequiredOk(g: Game): { ok: boolean; bad: string[] } {
   const adjOk = (x: number, y: number): boolean => { if (inb(x, y) && r[y * MW + x]) return true; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (inb(x + dx, y + dy) && r[(y + dy) * MW + x + dx]) return true; return false; };
   for (let k = 0; k < MW * MH; k++) if ((g.map[k] === 2 || g.map[k] === TILE_UP) && !r[k] && !adjOk(k % MW, (k / MW) | 0)) bad.push("stairs@" + (k % MW) + "," + ((k / MW) | 0));
   for (const p of allPortals(g)) if (!portalCells(p).some((c) => adjOk(c.x, c.y))) bad.push("portal@" + p.x + "," + p.y);
-  for (const c of g.chests) if (!c.open && !adjOk(c.x, c.y)) bad.push("chest@" + c.x + "," + c.y);
-  if (g.shrine && !adjOk(g.shrine.x, g.shrine.y)) bad.push("shrine");
+  for (const c of g.chests) if (!c.open && !chestCells(c).some((k: number) => adjOk(k % MW, (k / MW) | 0))) bad.push("chest@" + c.x + "," + c.y);
+  if (g.shrine && !shrineCells(g.shrine).some((k: number) => adjOk(k % MW, (k / MW) | 0))) bad.push("shrine");
   for (let k = 0; k < MW * MH; k++) if (hz[k] === HZ_WATER || hz[k] === HZ_LAVA) { if (g.map[k] !== 1) bad.push("haz-on-nonfloor"); }
   if (g.artCave && g.artCave.ox !== undefined) { const a = g.artCave; const fx = a.ox! - a.sx!, fy = a.oy! - a.sy!; if (!r[fy * MW + fx]) bad.push("art-front"); }
   return { ok: bad.length === 0, bad: bad.slice(0, 8) };
@@ -16420,6 +16855,88 @@ try {
   (window as unknown as { __ED16_HZ?: object }).__ED16_HZ = {
     rates: { HZ_MIN_DEPTH, HZ_WATER_CH, HZ_LAVA_CH, WW_CH_GEAR, WW_CH_PET, ART_CH, SHRINE_CH, SHRINE_MIN_DEPTH, SWARM_TIERS, BURIED_CH, BURIED_CAP, WX_NONE_CH, WX_LIST: WX_LIST.map((w) => ({ k: w.k, w: w.w })) },
     wx: (k: string | null): void => { WX_FORCE = k === null ? null : (k as WxKind | ""); },
+    // 2026-11-18: 2x2 chests/shrine + torch light test hooks
+    big: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      fitBigObjects(g);
+      const none = new Uint8Array(MW * MH), all = bigBlockMask(g, null, false);
+      const c0 = floorComponents(g, none), c1 = floorComponents(g, all);
+      const reach = (() => { // hero flood fill with every 2x2 footprint solid
+        const seen = new Uint8Array(MW * MH), q = [g.hero.y * MW + g.hero.x]; seen[q[0]] = 1;
+        for (let i = 0; i < q.length; i++) { const k = q[i], x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue; const nk = ny * MW + nx; if (seen[nk] || all[nk] || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue; seen[nk] = 1; q.push(nk); } }
+        return seen;
+      })();
+      const adj = (cells: number[]): number[][] => { const out: number[][] = []; for (const k of cells) { const x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny)) continue; const nk = ny * MW + nx; if (cells.includes(nk)) continue; if (reach[nk]) out.push([nx, ny, ox, oy]); } } return out; };
+      const stairsOk: boolean[] = []; for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) stairsOk.push(!!reach[k]);
+      const portalsOk = allPortals(g).map((p: PortalSpot) => portalCells(p).some((c) => !!reach[c.y * MW + c.x] || adj([c.y * MW + c.x]).length > 0));
+      const ch = g.chests.filter((c: Chest) => !c.open).map((c: Chest) => { const cells = chestCells(c), a = adj(cells); return { x: c.x, y: c.y, fit: c.fit, rar: c.rar, bur: !!c.bur, adj: a.length, bumpAll: a.every(([x, y, ox, oy]) => chestAt(g, x - ox, y - oy) === c), corr: cells.some((k: number) => isCorridorCell(g.map, k % MW, (k / MW) | 0)) }; });
+      const sh = g.shrine ? { x: g.shrine.x, y: g.shrine.y, f: g.shrine.f, adj: adj(shrineCells(g.shrine)).length } : null;
+      return { ok: true, depth: g.depth, MW, comps: [c0, c1], stairsOk, portalsOk, chests: ch, shrine: sh, req: hzRequiredOk(g), fit: { ...FIT_STATS } };
+    },
+    legacyChests: (n: number): Record<string, unknown> => { // put old-style 1x1 chests (no fit flag) on random floor and let the fitter handle them
+      const g = LIVE; if (!g) return { ok: false };
+      let made = 0; for (let i = 0; i < 4000 && made < n; i++) { const x = 2 + ri(MW - 4), y = 2 + ri(MH - 4); if (g.map[y * MW + x] !== 1 || chestAt(g, x, y) || portalAt(g, x, y) || enemyAt(g, x, y) || (g.hero.x === x && g.hero.y === y)) continue; g.chests.push({ x, y, open: false, rar: made % 5 }); made++; }
+      return { ok: true, made };
+    },
+    openFrom: (i: number): Record<string, unknown> => { // walk the hero next to closed chest i (any free adjacent tile) and bump into it
+      const g = LIVE; if (!g) return { ok: false };
+      const c = g.chests.filter((q: Chest) => !q.open)[i]; if (!c) return { ok: false };
+      const cells = chestCells(c);
+      for (const k of cells) { const x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny) || cells.includes(ny * MW + nx) || !walkable(g, nx, ny)) continue; g.hero.x = g.hero.ax = nx; g.hero.y = g.hero.ay = ny; g.pcd = 0; act(g, -ox, -oy); return { ok: true, from: [nx, ny], dir: [-ox, -oy], open: c.open }; } }
+      return { ok: false, why: "no free side" };
+    },
+    shrineHere: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.shrine = null; SHRINE_FORCE = true; try { maybeSpawnShrine(g); } finally { SHRINE_FORCE = false; } g.shrUsedD = undefined; return { ok: !!g.shrine, shrine: g.shrine ? { ...g.shrine } : null }; },
+    swarmPos: (heal?: boolean): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; if (heal) { g.hero.hp = calc(g.lvl, g.eq).maxHp; for (const e of g.en) if (e.sw) e.atk = 0; } const s = g.shrine, cx = s.x + 0.5, cy = s.y + 0.5; const sw = g.en.filter((e: En) => e.sw && e.hp > 0); return { ok: true, n: sw.length, gat: sw.filter((e: En) => e.gat).length, dShrine: sw.map((e: En) => Math.round(Math.abs(e.x - cx) + Math.abs(e.y - cy))), dHero: sw.map((e: En) => Math.abs(e.x - g.hero.x) + Math.abs(e.y - g.hero.y)), onShrine: sw.filter((e: En) => shrineHit(g, e.x, e.y)).length }; },
+    chestShow: (): Record<string, unknown> => { // regular, buried and Resplendent chests around the hero, for screenshots
+      const g = LIVE; if (!g) return { ok: false };
+      g.en = []; g.chests = []; g.drops = [];
+      const want = [{ rar: 0 }, { rar: 2 }, { rar: 0, bur: true }, { rar: 4 }];
+      let i = 0;
+      for (let r = 2; r <= 6 && i < want.length; r++) for (const [ox, oy] of [[-r - 1, -r], [r, -r], [-r - 1, r - 1], [r, r - 1], [-1, -r - 1], [-1, r], [-r - 1, -1], [r, -1]]) {
+        if (i >= want.length) break; const x = g.hero.x + ox, y = g.hero.y + oy;
+        if (!inb(x, y) || g.map[y * MW + x] !== 1) continue;
+        const c: Chest = { x, y, open: false, rar: want[i].rar, ...(want[i].bur ? { bur: true } : {}) };
+        g.chests.push(c); fitBigObjects(g); if (c.fit === 1) i++; else g.chests.pop();
+      }
+      IP.camOk = false; computeVis(g);
+      return { ok: i === want.length, placed: i, chests: g.chests.map((c: Chest) => [c.x, c.y, c.rar, c.bur ? 1 : 0, c.fit]) };
+    },
+    shrineView: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; const s = g.shrine; for (const [ox, oy] of [[0, 4], [3, 3], [-3, 3], [0, -3], [4, 0], [-3, 0], [0, 3], [2, 2]]) { const x = s.x + ox, y = s.y + oy; if (walkable(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; break; } } g.en = g.en.filter((e: En) => !!e.sw); IP.camOk = false; computeVis(g); return { ok: true }; },
+    torchView: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (const tc of g.torches || []) { const fx = tc.x + (tc.dir === 1 ? 1 : tc.dir === 2 ? -1 : 0), fy = tc.y + (tc.dir === 0 ? 1 : tc.dir === 3 ? -1 : 0); for (const [x, y] of [[fx, fy + 2], [fx + 2, fy], [fx - 2, fy], [fx, fy - 2], [fx, fy + 1], [fx + 1, fy]]) if (walkable(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.en = []; IP.camOk = false; computeVis(g); return { ok: true, torch: [tc.x, tc.y] }; } } return { ok: false }; },
+    mvTable: (n: number): Record<string, unknown> => { // Movement Speed roll ranges by item level and rarity (sampled with the real roll)
+      const rows: Record<string, unknown>[] = [];
+      for (const il of [1, 10, 25, 50, 100, 200, 300, 500, 1000, 1300, 2000, 3000, 5000]) for (const rar of [0, 3, 5, 6, 7]) {
+        const v: number[] = []; for (let i = 0; i < (n || 4000); i++) v.push(mvRoll(il, rar));
+        v.sort((a2, b2) => a2 - b2); const q = (f: number): number => v[Math.min(v.length - 1, Math.floor(f * v.length))];
+        rows.push({ il, rar, max: mvItemMax(il, rar), min: v[0], med: q(0.5), p90: q(0.9), p99: q(0.99), top: v[v.length - 1], ge90pct: Math.round(v.filter((x) => x >= 0.9 * mvItemMax(il, rar)).length / v.length * 10000) / 100, ch: MVCH[rar] });
+      }
+      return { ok: true, rows };
+    },
+    mvClampTest: (): Record<string, unknown> => { // old items: armor with +200, a weapon with +150, a low-level item with +90, a pet with mv
+      const mk = (kind: Kind, il: number, rar: number, mv: number): Item => { const it = makeItem(il, rar, kind as never, il); it.bonus.mv = mv; return validItem(JSON.parse(JSON.stringify(it))) as Item; };
+      const a = mk("chest" as Kind, 3000, 7, 200), w = mk("sword" as Kind, 3000, 7, 150), lo = mk("legs" as Kind, 20, 4, 90), lo2 = mk("head" as Kind, 1500, 6, 60);
+      return { ok: true, armor3000p: a.bonus.mv, weapon3000p: w.bonus.mv, legs20r4: lo.bonus.mv, maxLegs20r4: mvItemMax(20, 4), head1500r6: lo2.bonus.mv, maxHead1500r6: mvItemMax(1500, 6) };
+    },
+    mvGear: (each: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (const k of ["head", "chest", "arms", "legs"] as EqKey[]) if (!g.eq[k]) g.eq[k] = makeItem(3000, 6, k as Kind, 3000); if (!g.eq.rh) g.eq.rh = makeItem(3000, 6, "sword", 3000); let n = 0; for (const k of EQK) { const it = g.eq[k]; if (it && mvCanRoll(it.kind)) { it.bonus.mv = each; n++; } } const st = calc(g.lvl, g.eq); return { ok: true, items: n, mv: st.mv, mvRaw: st.mvRaw, step: heroStepDur(g) }; },
+    mvProbe: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const h = g.hero, k = h.y * MW + h.x, ct = camTarget(g); return { ok: true, x: h.x, y: h.y, wall: g.map[k] === 0, hzBlock: hzBlocksHero(g, h.x, h.y), hz: g.hz ? g.hz[k] : 0, camLag: Math.round(Math.hypot(ct.x - IP.camX, ct.y - IP.camY)), mv: calc(g.lvl, g.eq).mv, rt: !!g.rt }; },
+    paraShake: (clear?: boolean): Record<string, unknown> => { if (clear) PARA_SHK_LOG.length = 0; const curve: number[][] = []; for (let t = 0; t <= PARA_END + 0.001; t += 0.2) curve.push([Math.round(t * 10) / 10, Math.round(paraShakeAmp(t) * 10) / 10]); return { ok: true, curve, log: PARA_SHK_LOG.slice(-3000) }; },
+    hud: (gold: number, gems: number, best: number, depth?: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.gold = gold; g.gems = gems; g.best = best; if (depth) g.depth = depth; return { ok: true }; },
+    hudRow: (): Record<string, unknown> => ({ ok: true, row: { ...HUD_ROW }, vw: VW, pad: hudRightPad() }),
+    hpTest: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); g.hero.hp = st.maxHp + 0.7; return { ok: true, maxHp: st.maxHp, int: Number.isInteger(st.maxHp) }; },
+    hpNow: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); return { ok: true, hp: g.hero.hp, maxHp: st.maxHp }; },
+    peakTest: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      g.pk = { d0: g.depth };
+      peakNote(g, 214774470, { n: "Paramount Ultimate", t: "Light", c: "#fff0a0", k: 0, u: 3, p: 1 });
+      peakNote(g, 5123456, { n: ULTS[26].n, t: "Void", c: "#a060ff", k: 0, u: 26 });
+      peakNote(g, 812345, { n: "Hit", t: "Physical", c: "#ffffff", k: 1 });
+      const legacy = cleanPeakTrack({ u: { v: 214774470, n: "Paramount Ultimate", t: "Light", c: "#fff0a0", k: 0, u: 3 }, s: { v: 10, n: "Hit", t: "Physical", c: "#ffffff", k: 0 } });
+      return { ok: true, live: { s: g.pk.s && g.pk.s.v, u: g.pk.u && g.pk.u.n + " " + g.pk.u.v, p: g.pk.p && g.pk.p.v }, legacy: { u: legacy && legacy.u ? legacy.u.v : null, p: legacy && legacy.p ? legacy.p.v : null } };
+    },
+    idbDown: (on: boolean): Record<string, unknown> => { IDB_SIM_DOWN = !!on; return { ok: true, down: IDB_SIM_DOWN }; },
+    campView: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.area = "dungeon"; genCamp(g); const t = g.trophyAt; if (t) for (const [x, y] of [[t.x, t.y + 3], [t.x + 3, t.y], [t.x - 2, t.y], [t.x, t.y - 2]]) if (inb(x, y) && g.map[y * MW + x] === 1 && !campBlocked(g, x, y) && !portalAt(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; break; } IP.camOk = false; computeVis(g); return { ok: !!t, area: g.area, trophyAt: t ? { ...t } : null, hero: [g.hero.x, g.hero.y] }; },
+    peek: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; return { ok: true, gold: g.gold, depth: g.depth, xp: g.xp, lvl: g.lvl, mode: g.mode, locked: !!g.locked, prof: activeProf, para: !!g.para, ushows: USHOWS.length, awake: g.en.filter((e: En) => e.hp > 0 && e.awake).length }; },
+    light: (d: number | null): Record<string, unknown> => { TL_FORCE_DARK = d; const g = LIVE; return { ok: true, dark: g ? lightDark(g) : null, lum: g ? floorLum(g) : null, act: g ? isActFloor(g.depth) : null, last: { ...TL_LAST }, torches: g ? (g.torches || []).length : 0 }; },
     force: (o: { haz?: string; art?: boolean; prize?: string; shrine?: boolean; buried?: boolean }): void => { HZ_FORCE = (o.haz || "") as "" | "water" | "lava" | "both"; ART_FORCE = !!o.art; ART_PRIZE = (o.prize || "") as "" | "art" | "chest"; SHRINE_FORCE = !!o.shrine; BURIED_FORCE = !!o.buried; },
     gen: (depth: number, tier?: number): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
@@ -16517,6 +17034,65 @@ try {
       }
       FLOOR_TIER_FORCE = null;
       return { ok: true, depth, n, probs: floorTierProbs(depth).map((x: number) => +x.toFixed(3)), rows: out };
+    },
+    live: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      return { ok: true, mode: g.mode, area: g.area, depth: g.depth, lvl: g.lvl, xp: g.xp, gold: g.gold, turn: g.turn, hp: g.hero.hp, hx: g.hero.x, hy: g.hero.y,
+        awake: g.en.filter((e: En) => e.hp > 0 && e.awake).length, trophyAt: g.trophyAt ? { ...g.trophyAt } : null, prof: activeProf, layers: { ...SAVE_LAYERS }, persist: persistState, rolls: rollWrites, restored: ROLL_RESTORED.slice() };
+    },
+    // Trophy case: camp-only, fixed 2x2, reachable features, bump from every adjacent tile, gone after leaving camp.
+    trophyTest: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const res: Record<string, unknown> = {};
+      const spots: string[] = [];
+      for (const d of [5, 205, 1000]) { g.depth = d; g.actCleared = d; g.area = "dungeon"; genCamp(g); spots.push(g.trophyAt ? g.trophyAt.x + "," + g.trophyAt.y : "none"); }
+      res.spots = spots;
+      const t = g.trophyAt as { x: number; y: number };
+      const foot = [[t.x, t.y], [t.x + 1, t.y], [t.x, t.y + 1], [t.x + 1, t.y + 1]];
+      res.footFloor = foot.every(([x, y]) => g.map[y * MW + x] === 1);
+      const clash: string[] = [];
+      for (const [x, y] of foot) {
+        if (portalAt(g, x, y)) clash.push("portal");
+        if (merchAt(g, x, y)) clash.push("merchant");
+        if (g.stashAt && g.stashAt.x === x && g.stashAt.y === y) clash.push("stash");
+        if (g.restAt && g.restAt.x === x && g.restAt.y === y) clash.push("rest");
+        if (g.fireAt && g.fireAt.x === x && g.fireAt.y === y) clash.push("fire");
+        if (g.hero.x === x && g.hero.y === y) clash.push("hero");
+      }
+      res.clash = clash;
+      // BFS from the hero over floor, treating every camp feature (incl. the case) as solid
+      const seen = new Uint8Array(MW * MH); const q: number[] = [g.hero.y * MW + g.hero.x]; seen[q[0]] = 1;
+      const solid = (x: number, y: number): boolean => g.map[y * MW + x] === 0 || campBlocked(g, x, y) || portalAt(g, x, y);
+      while (q.length) { const c = q.shift() as number; const cx = c % MW, cy = (c / MW) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = cx + dx, y = cy + dy; if (!inb(x, y) || seen[y * MW + x] || solid(x, y)) continue; seen[y * MW + x] = 1; q.push(y * MW + x); } }
+      const nb = (p: { x: number; y: number } | null | undefined, w = 1, hh = 1): boolean => { if (!p) return false; for (let y = p.y - 1; y <= p.y + hh; y++) for (let x = p.x - 1; x <= p.x + w; x++) if (inb(x, y) && seen[y * MW + x]) return true; return false; };
+      res.reach = { fire: nb(g.fireAt), rest: nb(g.restAt), stash: nb(g.stashAt), merchant: nb(g.merchant), portal: nb(g.portal, g.portal ? g.portal.w ?? 1 : 1, g.portal ? g.portal.h ?? 1 : 1), trophy: nb(t, 2, 2) };
+      let floorN = 0, reachN = 0; for (let i = 0; i < MW * MH; i++) { const x = i % MW, y = (i / MW) | 0; if (g.map[i] === 1 && !solid(x, y)) { floorN++; if (seen[i]) reachN++; } }
+      res.floorReach = reachN + "/" + floorN;
+      { // same flood fill with the case ignored: the case must not be what leaves any tile unreachable
+        const seen2 = new Uint8Array(MW * MH); const q2: number[] = [g.hero.y * MW + g.hero.x]; seen2[q2[0]] = 1;
+        const solid2 = (x: number, y: number): boolean => g.map[y * MW + x] === 0 || (campBlocked(g, x, y) && !trophyHit(g, x, y)) || portalAt(g, x, y);
+        for (let qi = 0; qi < q2.length; qi++) { const c = q2[qi], cx = c % MW, cy = (c / MW) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = cx + dx, y = cy + dy; if (!inb(x, y) || seen2[y * MW + x] || solid2(x, y)) continue; seen2[y * MW + x] = 1; q2.push(y * MW + x); } }
+        let lost = 0; for (let i = 0; i < MW * MH; i++) { const x = i % MW, y = (i / MW) | 0; if (seen2[i] && !seen[i] && !trophyHit(g, x, y)) lost++; }
+        res.cutOffByCase = lost;
+      }
+      // bump from all 8 orthogonal neighbours
+      const bumps: string[] = [];
+      const hx0 = g.hero.x, hy0 = g.hero.y;
+      const adj: number[][] = [[t.x - 1, t.y, 1, 0], [t.x - 1, t.y + 1, 1, 0], [t.x + 2, t.y, -1, 0], [t.x + 2, t.y + 1, -1, 0], [t.x, t.y - 1, 0, 1], [t.x + 1, t.y - 1, 0, 1], [t.x, t.y + 2, 0, -1], [t.x + 1, t.y + 2, 0, -1]];
+      for (const [x, y, dx, dy] of adj) {
+        g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.trophyOpen = false;
+        act(g, dx, dy);
+        bumps.push(x + "," + y + (g.trophyOpen && g.hero.x === x && g.hero.y === y ? ":open" : ":FAIL"));
+      }
+      g.trophyOpen = false; g.hero.x = g.hero.ax = hx0; g.hero.y = g.hero.ay = hy0;
+      res.bumps = bumps;
+      // leaving camp clears it; a stale value on a dungeon floor is ignored by bump and draw
+      leaveCamp(g);
+      res.afterLeave = { area: g.area, trophyAt: g.trophyAt ?? null };
+      g.trophyAt = { x: g.hero.x + 1, y: g.hero.y }; // simulate an old run that still carries one
+      res.staleHit = trophyHit(g, g.hero.x + 1, g.hero.y);
+      g.trophyOpen = false; act(g, 1, 0); res.staleOpened = !!g.trophyOpen; g.trophyOpen = false;
+      return res;
     },
     ultCast: (id: number, crowd = 8): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
@@ -16704,7 +17280,7 @@ try {
       const c = pickWalk(g, used, g.hero.x, g.hero.y, 4, 3) || [24, 24];
       g.en = [mkActBoss(g, c[0], c[1])];
       g.portal = { x: 13, y: 13, kind: "camp" };
-      g.fireAt = undefined; g.restAt = undefined; g.stashAt = undefined;
+      g.fireAt = undefined; g.restAt = undefined; g.stashAt = undefined; g.trophyAt = undefined;
       const before = inspectRun(g);
       repairCampBossHybrid(g);
       SAVE_TEST_G = g;
@@ -16735,7 +17311,7 @@ function moveCarveRoom(g: Game, cx = MOVE_CX, cy = MOVE_CY, rad = 3): { x: numbe
   g.hero.y = g.hero.ay = cy;
   g.hero.bump = 0;
   g.en = []; g.pend = []; g.drops = []; g.parts = []; g.floats = []; g.shots = []; g.fx = [];
-  g.chests = []; g.merchant = null; g.trader = null; g.stashAt = undefined; g.restAt = undefined; g.fireAt = undefined; g.portal = null;
+  g.chests = []; g.merchant = null; g.trader = null; g.stashAt = undefined; g.restAt = undefined; g.fireAt = undefined; g.trophyAt = undefined; g.portal = null;
   g.shopOpen = false; g.stashOpen = false; g.paused = false; g.wallBreak = false;
   g.pcd = 0; g.acd = 0; g.qd = undefined; g.rt = true; g.area = "dungeon"; g.vault = null;
   setMoveBias(0, 0);
@@ -18384,6 +18960,18 @@ export default function App() {
   const [ioCode, setIoCode] = useState<string>("");
   const [ioNote, setIoNote] = useState<string>("");
   const [ioMode, setIoMode] = useState<"save" | "load">("save");
+  const [saveNote, setSaveNote] = useState<{ kind: "ok" | "warn" | "err"; txt: string; sub: string; n: number } | null>(null);
+  const saveNoteT = useRef<number>(0);
+  const showSaveNote = (kind: "ok" | "warn" | "err", txt: string, sub: string): void => {
+    const n = Date.now();
+    setSaveNote({ kind, txt, sub, n });
+    try {
+      document.documentElement.dataset.ed16Save = kind;
+      (window as unknown as { __ED16_SAVE_NOTE?: object }).__ED16_SAVE_NOTE = { kind, txt, sub, t: n, layers: { ...SAVE_LAYERS }, persist: persistState, rolls: rollWrites };
+    } catch { /* tests only */ }
+    window.clearTimeout(saveNoteT.current);
+    if (kind === "ok") saveNoteT.current = window.setTimeout(() => setSaveNote(null), 2600);
+  };
   const [loadTxt, setLoadTxt] = useState<string>("");
   const [stor, setStor] = useState<"checking" | "on" | "off" | "blocked">("checking");
   pauseRef.current = profOpen || ioOpen || confirmNew || confirmMS || confirmSL || confirmQuit || !!(gRef.current && (gRef.current.stashOpen || gRef.current.paused));
@@ -18442,34 +19030,41 @@ export default function App() {
     const g = gRef.current;
     if (!g || g.locked) return;
     if (g.mode !== "play") { setIoNote("Start or continue a run first, then tap Save Game."); bump(); return; }
+    requestPersist();
     let ok = false;
     try { ok = saveGameNow(g); } catch { ok = false; }
-    const finish = (verified: boolean): void => {
-      lastPersistOk = verified;
-      if (verified) {
-        const ephemeral = storageEphemeral() || stor !== "on";
+    const lsOk = ok && !!SAVE_LAYERS.ls, ssOk = !!SAVE_LAYERS.ss;
+    // Device storage did not verify: copy a Save Code now, inside the tap (the clipboard needs the user gesture).
+    let code = "";
+    let copyP: Promise<boolean> = Promise.resolve(false);
+    if (!lsOk) { try { code = saveCodeOf(g); } catch { code = ""; } if (code) copyP = copyTextSafe(code); }
+    const expect = memSave;
+    const idbP2: Promise<boolean> = expect && !viewerBlocksSaving() ? idbPutDone(activeSaveKey(), expect).catch(() => false) : Promise.resolve(false);
+    void Promise.all([idbP2, copyP]).then((res: boolean[]) => {
+      const idbOk = !!res[0], copied = !!res[1];
+      SAVE_LAYERS.idb = idbOk;
+      const layers = "device " + (lsOk ? "\u2713" : "\u2717") + " \u00b7 backup DB " + (idbOk ? "\u2713" : "\u2717") + " \u00b7 tab " + (ssOk ? "\u2713" : "\u2717");
+      if (lsOk || idbOk) {
+        lastPersistOk = true; saveFlag = true; lastPersistErr = "";
+        const ephemeral = storageEphemeral();
         floatTxt(g, g.hero.x, g.hero.y - 0.5, "SAVED", "#80ff80");
-        msg(g, ephemeral ? "Saved for this session. This viewer may forget it when you close - tap Save Code and keep a copy." : "Saved to this profile.", "#80ff80");
-      } else if (viewerBlocksSaving() || lastPersistErr === "this viewer blocks saving") {
-        const code = offerBlockedSaveCode(g);
-        msg(g, blockedSaveMessage(), "#ff8080");
+        msg(g, ephemeral ? "Saved for this session. This viewer may forget it when you close - tap Save Code and keep a copy." : "Game saved (" + layers + ").", "#80ff80");
+        showSaveNote("ok", "\u2714 GAME SAVED", layers + (copied ? " \u00b7 Save Code copied too" : ""));
+      } else {
+        lastPersistOk = false;
+        const why = lastPersistErr || lastLsErr || lastIdbErr || "this browser refused to store the save";
         if (code) {
           setIoCode(code); setIoMode("save");
-          setIoNote("This viewer blocks saving to your device. Copy this Save Code and keep it. Paste it with LOAD the next time you open the game.");
+          setIoNote((copied ? "Your Save Code is already copied. " : "") + "This device would not keep the save. Paste the code into Notes or a message to yourself, and use LOAD next time.");
           setIoOpen(true);
         }
-      } else {
-        msg(g, "Save Game failed - " + (lastPersistErr || "the profile was not updated") + ". Tap Save Code and keep a copy so you don't lose this run.", "#ff8080");
+        const tail = copied ? "Your Save Code was copied - paste it somewhere safe." : "Copy the Save Code shown and keep it.";
+        if (ssOk) showSaveNote("warn", "\u26a0 SAVED FOR THIS TAB ONLY", "Device storage failed (" + why + "). " + tail);
+        else showSaveNote("err", "\u2716 SAVE FAILED", why + ". " + tail);
+        msg(g, "Save Game could not reach device storage - " + why + ". " + tail, "#ff8080");
       }
       bump();
-    };
-    if (ok) { finish(true); return; }
-    if (viewerBlocksSaving()) { finish(false); return; }
-    const expect = memSave;
-    void idbPutDone(activeSaveKey(), expect).then((idbOk: boolean) => {
-      if (idbOk && expect && memSave === expect) { lastPersistErr = ""; finish(true); }
-      else { if (!lastPersistErr) lastPersistErr = lastIdbErr || "IndexedDB did not keep the save"; finish(false); }
-    }, () => { if (!lastPersistErr) lastPersistErr = lastIdbErr || "IndexedDB did not keep the save"; finish(false); });
+    }, () => { showSaveNote("err", "\u2716 SAVE FAILED", "Copy the Save Code and keep it."); bump(); });
   };
   const showSaveCode = (): void => {
     const g = gRef.current;
@@ -19000,7 +19595,7 @@ export default function App() {
           // Item 23: each pattern has its own sound design; the element sets the pitch, and the per-ult magic voice
           // (playMagic) keeps every one of the 50 ultimates unique.
           const u = ULTS[v] ?? ULTS[0];
-          const pat = u ? u.pat : 0, eli = Math.max(0, ELS.indexOf(u ? u.el : "holy")), row = Math.floor(v / 10);
+          const pat = u ? (u.fx ?? u.pat) : 0, eli = Math.max(0, ELS.indexOf(u ? u.el : "holy")), row = Math.floor(v / 10);
           const b = [262, 147, 330, 220, 98, 73, 123][eli] * (1 + row * 0.06);
           const sw = (f0: number, f1: number, d: number, vol: number, t0: number): void => nz(d, vol, "bandpass", f0, f1, t0);
           switch (pat) {
@@ -19031,6 +19626,18 @@ export default function App() {
             case 6: // Reaping: a huge whoosh of the scythe, a ringing blade and ghostly wails
               sw(200, 3000, 0.65, 0.12, 0.05); tone(b * 4, b * 4.02, 0.9, "triangle", 0.03, 0.15); tone(b * 6, b * 6.03, 0.7, "sine", 0.02, 0.17);
               for (let i = 0; i < 3; i++) tone(b * 2.5, b * 1.6, 0.8, "sine", 0.02, 0.5 + i * 0.25);
+              break;
+            case 10: // Eternal Reapers: four singing blade whooshes with metallic rings and slash impacts, then the great scythe
+              for (let i = 0; i < 4; i++) {
+                const t0 = [0.12, 0.42, 0.72, 1.02][i];
+                sw(300, 5200, 0.42, 0.13, t0); sw(5200, 900, 0.2, 0.06, t0 + 0.4);           // air cut
+                tone(b * 9 + i * 40, b * 9.05 + i * 40, 0.7, "triangle", 0.02, t0 + 0.1);      // blade singing
+                tone(b * 13.5 + i * 60, b * 13.4 + i * 60, 0.55, "sine", 0.012, t0 + 0.12);
+                nz(0.09, 0.16, "highpass", 3500, 2200, t0 + 0.32); tone(b * 1.5, b * 0.7, 0.18, "square", 0.03, t0 + 0.32); // slash impact
+              }
+              sw(150, 4000, 0.9, 0.16, 1.55); tone(b * 2, b * 2.02, 1.4, "sawtooth", 0.02, 1.6);
+              [6, 7.5, 9, 12].forEach((m: number, j: number) => tone(b * m, b * m * 1.01, 1.1, "sine", 0.014, 1.65 + j * 0.03));
+              nz(0.9, 0.24, "lowpass", 2600, 60, 1.9); tone(b * 0.5, b * 0.15, 1.0, "sine", 0.1, 1.9);
               break;
             case 7: // Judgement: a choir-like chord, then bell-struck pillars slamming down
               [1, 1.25, 1.5, 2].forEach((m: number, i: number) => tone(b * 2 * m, b * 2 * m, 1.6, "sine", 0.018, i * 0.04));
@@ -19356,6 +19963,7 @@ export default function App() {
     let stairsL: number[][] = [];
     // storage self-test (every access is wrapped - a SecurityError can never stop the game)
     probeStores();
+    try { if (hasSaveBlob()) requestPersist(); } catch { /* best-effort */ }
     const lsOk = probeStore("l");
     // Keep stor on "checking" (profile buttons disabled) until IndexedDB has been
     // copied into localStorage. Enabling the picker on the localStorage probe alone
@@ -19500,6 +20108,11 @@ export default function App() {
       const [camX, camY] = camXY();
       ctx.save();
       ctx.beginPath(); ctx.rect(0, HUD, VW, VIEWH); ctx.clip();
+      if (g.para) { // Paramount shake moves the whole world view (floor included); the HUD and touch controls stay put
+        PARA_SHK = paraShakeOff(g.para.t);
+        if (PARA_SHK[0] || PARA_SHK[1]) { ctx.fillStyle = "#000000"; ctx.fillRect(0, HUD, VW, VIEWH); ctx.translate(PARA_SHK[0], PARA_SHK[1]); }
+        if (PARA_SHK_LOG.length < 4000) PARA_SHK_LOG.push([Math.round(g.para.t * 1000) / 1000, Math.round(paraShakeAmp(g.para.t) * 10) / 10, PARA_SHK[0], PARA_SHK[1]]);
+      } else PARA_SHK = [0, 0];
       ctx.fillStyle = "#000000"; ctx.fillRect(0, HUD, VW, VIEWH);
       const tx0 = Math.floor(camX / TS), ty0 = Math.floor((camY + HUD) / TS);
       const tx1 = Math.ceil((camX + VW) / TS), ty1 = Math.ceil((camY + HUD + VIEWH) / TS);
@@ -19538,14 +20151,27 @@ export default function App() {
       drawSplats(ctx, g, camX, camY, false);
       drawSplats(ctx, g, camX, camY, true);
       for (const c of g.chests) {
-        if (!g.vis[c.y * MW + c.x]) continue;
+        const big = c.fit === 1;
+        if (!chestCells(c).some((k: number) => g.vis[k])) continue;
         const csx = c.x * TS - camX, csy = c.y * TS - camY;
+        if (big) { // same pixel art at double scale over 2x2 tiles (Resplendent trim and glow included)
+          ctx.save(); ctx.translate(csx, csy); ctx.scale(2, 2); chestGlow(ctx, 0, 0, c.rar ?? 0, t, c.open); ctx.restore();
+          drawLootChest(painter(ctx, csx, csy, 4, false, 0), c.open, c.rar ?? 0);
+          const near = !c.open && h.x >= c.x - 1 && h.x <= c.x + 2 && h.y >= c.y - 1 && h.y <= c.y + 2;
+          if (near) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], csx + TS, csy - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
+          continue;
+        }
         chestGlow(ctx, csx, csy, c.rar ?? 0, t, c.open);
         drawLootChest(painter(ctx, csx, csy, 2, false, 0), c.open, c.rar ?? 0);
         if (!c.open && Math.abs(c.x - h.x) + Math.abs(c.y - h.y) <= 1) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], csx + 12, csy - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
       }
       drawShrine(ctx, g, camX, camY, t);
-      if (g.trophyAt) drawTrophyCase(ctx, g.trophyAt.x * TS - camX, g.trophyAt.y * TS - camY, t, artsOf(g).length);
+      if (g.trophyAt && g.area === "camp") {
+        // 2x2 tiles: the 24px case art drawn at double scale
+        ctx.save(); ctx.translate(g.trophyAt.x * TS - camX, g.trophyAt.y * TS - camY); ctx.scale(2, 2);
+        drawTrophyCase(ctx, 0, 0, t, artsOf(g).length);
+        ctx.restore();
+      }
       for (const dr of g.drops) {
         if (!g.vis[dr.y * MW + dr.x]) continue;
         const sx = dr.x * TS - camX, sy = dr.y * TS - camY;
@@ -19745,6 +20371,7 @@ export default function App() {
       drawUltShows(ctx, camX, camY);
       ctx.globalAlpha = 1;
       drawWeather(ctx, g, t, FRAME_VDT, camX, camY);
+      drawTorchLights(ctx, g, camX, camY, t);
       for (const f of g.floats) { ctx.globalAlpha = Math.min(1, f.life * 2); text(f.txt, f.x - camX, f.y - camY, f.c, "center", 8); }
       ctx.globalAlpha = 1;
       ctx.restore();
@@ -19871,6 +20498,7 @@ export default function App() {
       }
       // HUD
       const st = calc(g.lvl, g.eq);
+      if (h.hp > st.maxHp) h.hp = st.maxHp; // never show (or keep) more HP than the max
       ctx.fillStyle = "#0c0a12"; ctx.fillRect(0, 0, VW, HUD);
       ctx.fillStyle = "#2a2438"; ctx.fillRect(0, HUD - 1, VW, 1);
       text("Lv" + g.lvl, 3, 8, GOLD, "left", 9);
@@ -19887,10 +20515,24 @@ export default function App() {
       text("XP " + g.xp + "/" + xpNeed(g.lvl), bx + bw / 2, 17, "#e0d8ff", "center", 5);
       text("D" + g.depth, VW - 3 - rightPad, 8, "#80e0ff", "right", 9);
       text("\u2665" + g.potions, VW - 3 - rightPad, 18, "#ff7090", "right", 7);
-      text("PL " + powerTotal(g.lvl, g.eq).toLocaleString("en-US"), 3, 25, GOLD, "left", 6);
-      text(g.vault ? "Treasure Vault" : themeName(g), 52, 25, g.vault ? GOLD : "#8a80a8", "left", 6);
-      text((g.gems ? (g.gems + "\u25c6 ") : "") + g.gold + "g", bx + bw, 25, GOLD, "right", 6);
-      text("BEST D" + g.best, VW - 3 - rightPad, 26, "#8a80a8", "right", 5);
+      { // bottom HUD row, laid out left to right with measured widths so nothing can overlap: PL | area name | gems+gold | BEST D
+        const wOf = (s2: string, sz: number): number => { ctx.font = "bold " + sz + "px monospace"; return ctx.measureText(s2).width; };
+        const plS = "PL " + powerTotal(g.lvl, g.eq).toLocaleString("en-US");
+        const gS = hudNum(g.gold), goldS = (g.gems ? hudNum(g.gems) + "\u25c6 " : "") + gS + (/[A-Za-z]$/.test(gS) ? " g" : "g");
+        const bestS = "BEST D" + g.best;
+        const xR = VW - 3 - rightPad, bestW = wOf(bestS, 5), goldR = xR - bestW - 5, goldW = wOf(goldS, 6);
+        const plW = wOf(plS, 6);
+        text(plS, 3, 25, GOLD, "left", 6);
+        text(goldS, goldR, 25, GOLD, "right", 6);
+        text(bestS, xR, 25, "#8a80a8", "right", 5);
+        HUD_ROW = { pl: [3, 3 + plW], gold: [goldR - goldW, goldR], best: [xR - bestW, xR], area: [0, 0] };
+        let area = g.vault ? "Treasure Vault" : themeName(g);
+        const ax = Math.max(52, 3 + plW + 5), room = goldR - goldW - 5 - ax;
+        if (room > 12) {
+          while (area.length > 3 && wOf(area, 6) > room) area = area.slice(0, -2) + "\u2026";
+          if (wOf(area, 6) <= room) { text(area, ax, 25, g.vault ? GOLD : "#8a80a8", "left", 6); HUD_ROW.area = [ax, ax + wOf(area, 6)]; }
+        }
+      }
       // messages
       ctx.fillStyle = "#0c0a12"; ctx.fillRect(0, VH - MSGH, VW, MSGH);
       const ms = g.msgs.slice(-2);
@@ -20087,6 +20729,7 @@ export default function App() {
     const onVis = (): void => { if (document.visibilityState === "hidden") saveNow(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("pagehide", saveNow);
+    document.addEventListener("freeze", saveNow);
     // Leaving the page: save, and ask the browser for its generic "leave this page?" warning while a run is in progress (where allowed).
     const onBeforeUnload = (ev: BeforeUnloadEvent): void => {
       try {
@@ -20126,6 +20769,7 @@ export default function App() {
       window.removeEventListener("pointerdown", onAnyDown);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", saveNow);
+      document.removeEventListener("freeze", saveNow);
       window.removeEventListener("beforeunload", onBeforeUnload);
       saveNow();
       if (ac) { void ac.close(); }
@@ -20292,6 +20936,12 @@ export default function App() {
               </div>
             </div>
           )}
+          {saveNote && (
+            <div className={"dc-savenote " + saveNote.kind} role="status" aria-live="polite" onPointerDown={() => setSaveNote(null)}>
+              <div className="dc-savenote-t">{saveNote.txt}</div>
+              <div className="dc-savenote-s">{saveNote.sub}</div>
+            </div>
+          )}
           {g && g.mode === "title" && (
             <div className="dc-title">
               {titleNote && <div className="dc-tn">{titleNote}</div>}
@@ -20308,7 +20958,7 @@ export default function App() {
                   {hasSave() && <button className="dc-b go" style={btn} onClick={continueRun}>{"\u25b6 Continue"}</button>}
                   <button className="dc-b" style={btn} onClick={newClick}>{"\u2726 New Game"}</button>
                   <button className="dc-b" style={btn} onClick={openProfiles}>Profiles</button>
-                  <button className={"dc-b" + (!hasSave() ? " go" : "")} style={btn} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
+                  <button className={"dc-b" + (!hasSave() ? " go" : "")} style={!hasSave() ? { ...btn, order: -1 } : btn} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
                   {!hasSave() && <div className="dc-sm" style={{ width: "100%", textAlign: "center", marginTop: 6 }}>{"No save on this profile yet. Paste a Save Code with LOAD, or start a New Game."}</div>}
                   <div className={"dc-st " + stor} style={{ width: "100%" }}>{storLine}</div>
                 </div>
@@ -20584,7 +21234,7 @@ export default function App() {
                 <span className="dc-chip">Dmg taken -{dr}%</span>
                 <span className="dc-chip">Crit {cur.crit}%</span>
                 <span className="dc-chip">Dbl {cur.spd}%</span>
-                {cur.mv > 0 && <span className="dc-chip" style={{ color: "#80ffc0" }}>Move +{cur.mv}%</span>}
+                <span className="dc-chip" style={{ color: "#80ffc0" }} data-mv={cur.mv}>Move speed +{cur.mv}% (cap {MV_CAP}%){(cur.mvRaw ?? 0) > MV_CAP ? " \u00b7 gear " + cur.mvRaw + "%" : ""}</span>
                 {cur.block > 0 && <span className="dc-chip">Block {cur.block}%</span>}
                 {cur.regen > 0 && <span className="dc-chip" style={{ color: "#60ff80" }}>Regen {cur.regen}/turn</span>}
                 {cur.ward > 0 && <span className="dc-chip" style={{ color: "#9ae8ff" }}>Ward {Math.round(g.ward)}/{cur.ward}</span>}
@@ -20668,7 +21318,7 @@ export default function App() {
               <div className="dc-row" style={{ margin: "8px 0 4px" }}>
                 <button className="dc-b go" style={{ ...btn, minHeight: 38, fontSize: 12, fontWeight: 800 }} disabled={locked} onClick={saveToProfile}>{SAVE_GAME_LBL}</button>
                 <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} disabled={locked} onClick={showSaveCode}>{SAVE_CODE_LBL}</button>
-                <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} disabled={locked} onClick={openLoad}>{(locked ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
+                <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
                 <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} onClick={openProfiles}>Profiles</button>
               </div>
               <div className={"dc-st " + stor} style={{ margin: "2px 0 4px" }}>{storLine}</div>
@@ -20753,7 +21403,7 @@ export default function App() {
           <div className="dc-saveload">
             <button className={"dc-b dc-savegame" + (locked ? "" : " go")} style={btn} disabled={locked || !g || g.mode === "title"} onClick={saveToProfile} aria-label={SAVE_GAME_LBL}>{SAVE_GAME_LBL}</button>
             <button className="dc-b" style={btn} disabled={locked} onClick={showSaveCode} aria-label={SAVE_CODE_LBL}>{SAVE_CODE_LBL}</button>
-            <button className="dc-b" style={btn} disabled={locked} onClick={openLoad} aria-label={locked ? "Load (locked)" : "Load"}>{locked ? "\ud83d\udd12 LOAD" : "\ud83d\udcc2 LOAD"}</button>
+            <button className="dc-b" style={btn} disabled={locked && hasSave()} onClick={openLoad} aria-label={locked && hasSave() ? "Load (locked)" : "Load"}>{locked && hasSave() ? "\ud83d\udd12 LOAD" : "\ud83d\udcc2 LOAD"}</button>
             <button className="dc-b" style={btn} onClick={openProfiles} aria-label="Profiles">Profiles</button>
           </div>
           </div>

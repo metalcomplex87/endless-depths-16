@@ -5,3 +5,14 @@ tests/accept-results.json
 *.log
 devflow.json
 poll.sh
+# 2026-11-18 report-only material: stays on the box, never published
+AUDIT-*.md
+BOSS-OPTIONS-*.md
+screenshots-audit/
+screenshots-bigobj/
+screenshots-hud/
+screenshots-save/
+screenshots-paramount/v4/
+screenshots-ults/eternal-reapers-26-*.png
+screenshots-ults/contact-eternal-reapers-26.png
+screenshots-ults/ult-26.json

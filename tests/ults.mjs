@@ -20,10 +20,10 @@ const ids = ONLY.length?ONLY:[...Array(50).keys()];
 for (const id of ids) {
   await H("clean"); await H("gen",41+(id%3)); await H("clean");
   await sleep(150);
-  const pat=id%10, seq = id<10; // first row (ids 0-9) also gets a frame sequence
+  const pat=id%10, seq = id<10 || id===26; // first row (ids 0-9) also gets a frame sequence
   const r=await H("ultCast",id,8);
   const t0=Date.now();
-  if (seq) { for (const ts of SEQ) { const w=ts*1000-(Date.now()-t0); if (w>0) await sleep(w); await shot(`${OUT}/seq-p${pat}-${String(id).padStart(2,"0")}-${ts.toFixed(2)}s.png`); } }
+  if (seq) { for (const ts of (id===26?[0.3,0.7,1.1,1.6,1.9,2.3]:SEQ)) { const w=ts*1000-(Date.now()-t0); if (w>0) await sleep(w); await shot(`${OUT}/seq-p${pat}-${String(id).padStart(2,"0")}-${ts.toFixed(2)}s.png`); } }
   else { const w=PEAK[pat]*1000-(Date.now()-t0); if (w>0) await sleep(w); await shot(`${OUT}/ult-${String(id).padStart(2,"0")}-${r.name.replace(/[^A-Za-z]+/g,"-")}.png`); }
   // frame-time probe during the show
   const ft=await p.evaluate(()=>new Promise(res=>{let n=0,last=performance.now(),mx=0;const f=(now)=>{mx=Math.max(mx,now-last);last=now;if(++n<20)requestAnimationFrame(f);else res(mx);};requestAnimationFrame(f);}));
@@ -31,6 +31,6 @@ for (const id of ids) {
   console.log(id, r.name, "pat", pat, r.el, "targets", r.targets, "maxFrame", Math.round(ft)+"ms");
   await sleep(Math.max(0,2700-(Date.now()-t0)));
 }
-fs.writeFileSync(OUT+"/ults.json",JSON.stringify({names,frames:fpsLog,errs},null,1));
+fs.writeFileSync(OUT+(process.env.OUTJSON||"/ults.json"),JSON.stringify({names,frames:fpsLog,errs},null,1));
 console.log("errors:",errs.length);
 await b.close();

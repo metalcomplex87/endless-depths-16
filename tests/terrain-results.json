@@ -5,25 +5,25 @@
   "detail": {
    "floors": 400,
    "eligible": 400,
-   "water": 135,
-   "lava": 92,
-   "ice": 9,
-   "any": 201,
+   "water": 132,
+   "lava": 87,
+   "ice": 11,
+   "any": 196,
    "tiles": {
-    "water": 2922,
-    "lava": 1081,
-    "ice": 280
+    "water": 2949,
+    "lava": 967,
+    "ice": 239
    },
-   "rejected": 205,
+   "rejected": 176,
    "reqFail": 0,
    "reqBad": [],
    "art": 0,
    "artChest": 0,
    "shrine": 18,
    "bySize": {
-    "44": 253,
-    "50": 120,
-    "56": 27
+    "44": 233,
+    "50": 114,
+    "56": 53
    }
   }
  },
@@ -33,26 +33,26 @@
   "detail": {
    "floors": 400,
    "eligible": 400,
-   "water": 108,
-   "lava": 78,
-   "ice": 16,
-   "any": 163,
+   "water": 120,
+   "lava": 66,
+   "ice": 24,
+   "any": 164,
    "tiles": {
-    "water": 2578,
-    "lava": 1064,
-    "ice": 351
+    "water": 2751,
+    "lava": 896,
+    "ice": 612
    },
-   "rejected": 197,
+   "rejected": 235,
    "reqFail": 0,
    "reqBad": [],
    "art": 0,
    "artChest": 0,
    "shrine": 22,
    "bySize": {
-    "44": 185,
-    "50": 84,
-    "56": 85,
-    "61": 46
+    "44": 173,
+    "50": 102,
+    "56": 78,
+    "61": 47
    }
   }
  },
@@ -62,28 +62,28 @@
   "detail": {
    "floors": 400,
    "eligible": 400,
-   "water": 126,
-   "lava": 69,
-   "ice": 27,
-   "any": 179,
+   "water": 123,
+   "lava": 59,
+   "ice": 21,
+   "any": 167,
    "tiles": {
-    "water": 3588,
-    "lava": 991,
-    "ice": 840
+    "water": 3270,
+    "lava": 956,
+    "ice": 586
    },
-   "rejected": 211,
+   "rejected": 190,
    "reqFail": 0,
    "reqBad": [],
    "art": 0,
    "artChest": 0,
-   "shrine": 19,
+   "shrine": 15,
    "bySize": {
-    "44": 124,
-    "50": 60,
-    "56": 54,
-    "61": 81,
-    "65": 54,
-    "68": 27
+    "44": 116,
+    "50": 63,
+    "56": 66,
+    "61": 67,
+    "65": 52,
+    "68": 36
    }
   }
  },
@@ -93,21 +93,21 @@
   "detail": {
    "floors": 160,
    "eligible": 160,
-   "water": 47,
-   "lava": 28,
-   "ice": 7,
-   "any": 70,
+   "water": 42,
+   "lava": 25,
+   "ice": 5,
+   "any": 60,
    "tiles": {
-    "water": 1889,
-    "lava": 614,
-    "ice": 214
+    "water": 1518,
+    "lava": 481,
+    "ice": 273
    },
-   "rejected": 154,
+   "rejected": 75,
    "reqFail": 0,
    "reqBad": [],
    "art": 0,
    "artChest": 0,
-   "shrine": 4,
+   "shrine": 10,
    "bySize": {
     "44": 20,
     "50": 20,
@@ -124,15 +124,15 @@
   "step": "lava only on clear/wind floors; cold floors freeze big pools into ice",
   "pass": true,
   "detail": {
-   "coldIce": 2165,
-   "coldWater": 503
+   "coldIce": 2411,
+   "coldWater": 437
   }
  },
  {
   "step": "water floor generated",
   "pass": true,
   "detail": {
-   "water": 22,
+   "water": 26,
    "lava": 0,
    "ice": 0,
    "obs": 0,
@@ -143,12 +143,12 @@
   "step": "lava-sealed artifact cave generated",
   "pass": true,
   "detail": {
-   "dx": 33,
-   "dy": 19,
-   "cx": 33,
-   "cy": 17,
-   "ox": 33,
-   "oy": 23,
+   "dx": 39,
+   "dy": 15,
+   "cx": 39,
+   "cy": 13,
+   "ox": 39,
+   "oy": 19,
    "sx": 0,
    "sy": -1
   }
@@ -159,20 +159,20 @@
   "detail": {
    "ok": true,
    "front": [
-    33,
-    24
-   ],
-   "landing": [
-    33,
+    39,
     20
    ],
+   "landing": [
+    39,
+    16
+   ],
    "door": [
-    33,
-    19
+    39,
+    15
    ],
    "pedestal": [
-    33,
-    17
+    39,
+    13
    ],
    "prize": "artifact",
    "noAffix": false,
@@ -194,111 +194,111 @@
     {
      "ok": true,
      "from": [
-      33,
-      24
-     ],
-     "to": [
-      33,
-      23
-     ],
-     "onHz": 2,
-     "slide": false
-    },
-    {
-     "ok": true,
-     "from": [
-      33,
-      23
-     ],
-     "to": [
-      33,
-      22
-     ],
-     "onHz": 2,
-     "slide": false
-    },
-    {
-     "ok": true,
-     "from": [
-      33,
-      22
-     ],
-     "to": [
-      33,
-      21
-     ],
-     "onHz": 2,
-     "slide": false
-    },
-    {
-     "ok": true,
-     "from": [
-      33,
-      21
-     ],
-     "to": [
-      33,
-      20
-     ],
-     "onHz": 0,
-     "slide": false
-    },
-    {
-     "ok": true,
-     "from": [
-      33,
+      39,
       20
      ],
      "to": [
-      33,
+      39,
       19
      ],
-     "onHz": 0,
+     "onHz": 2,
      "slide": false
     },
     {
      "ok": true,
      "from": [
-      33,
+      39,
       19
      ],
      "to": [
-      33,
+      39,
       18
      ],
-     "onHz": 0,
+     "onHz": 2,
      "slide": false
     },
     {
      "ok": true,
      "from": [
-      33,
+      39,
       18
      ],
      "to": [
-      33,
-      18
-     ],
-     "onHz": 0,
-     "slide": false
-    },
-    {
-     "ok": true,
-     "from": [
-      33,
-      18
-     ],
-     "to": [
-      33,
+      39,
       17
+     ],
+     "onHz": 2,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      39,
+      17
+     ],
+     "to": [
+      39,
+      16
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      39,
+      16
+     ],
+     "to": [
+      39,
+      15
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      39,
+      15
+     ],
+     "to": [
+      39,
+      14
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      39,
+      14
+     ],
+     "to": [
+      39,
+      14
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      39,
+      14
+     ],
+     "to": [
+      39,
+      13
      ],
      "onHz": 0,
      "slide": false
     }
    ],
    "hero": [
-    33,
-    20
+    39,
+    16
    ]
   }
  },
@@ -307,12 +307,12 @@
   "pass": true,
   "detail": {
    "st2": {
-    "dx": 33,
-    "dy": 19,
-    "cx": 33,
-    "cy": 17,
-    "ox": 33,
-    "oy": 23,
+    "dx": 39,
+    "dy": 15,
+    "cx": 39,
+    "cy": 13,
+    "ox": 39,
+    "oy": 19,
     "sx": 0,
     "sy": -1,
     "open": 1
@@ -320,20 +320,20 @@
    "st3": {
     "arts": 1,
     "art": {
-     "dx": 33,
-     "dy": 19,
-     "cx": 33,
-     "cy": 17,
-     "ox": 33,
-     "oy": 23,
+     "dx": 39,
+     "dy": 15,
+     "cx": 39,
+     "cy": 13,
+     "ox": 39,
+     "oy": 19,
      "sx": 0,
      "sy": -1,
      "open": 1,
      "taken": 1
     },
     "hero": [
-     33,
-     17
+     39,
+     13
     ]
    }
   }
@@ -342,22 +342,22 @@
   "step": "removing the affix inside the pocket never traps the hero (can walk back out)",
   "pass": true,
   "detail": [
-   33,
-   24
+   39,
+   20
   ]
  },
  {
   "step": "lava-sealed Resplendent Chest cave generated",
   "pass": true,
   "detail": {
-   "dx": 18,
-   "dy": 38,
-   "cx": 18,
-   "cy": 40,
-   "ox": 18,
-   "oy": 34,
+   "dx": 5,
+   "dy": 5,
+   "cx": 5,
+   "cy": 3,
+   "ox": 5,
+   "oy": 9,
    "sx": 0,
-   "sy": 1,
+   "sy": -1,
    "rc": 1
   }
  },
@@ -367,20 +367,20 @@
   "detail": {
    "ok": true,
    "front": [
-    18,
-    33
+    5,
+    10
    ],
    "landing": [
-    18,
-    37
+    5,
+    6
    ],
    "door": [
-    18,
-    38
+    5,
+    5
    ],
    "pedestal": [
-    18,
-    40
+    5,
+    3
    ],
    "prize": "chest",
    "noAffix": false,
@@ -402,7 +402,7 @@
    "idx": -1,
    "artsGained": 0,
    "chestItems": 32,
-   "gold": 37903,
+   "gold": 38485,
    "taken": true,
    "rc": true,
    "banner": "RESPLENDENT CHEST OPENED!"
@@ -412,8 +412,8 @@
   "step": "every cave holds exactly one prize (artifact XOR chest)",
   "pass": true,
   "detail": {
-   "arts": 39,
-   "chests": 20,
+   "arts": 24,
+   "chests": 33,
    "both": 0,
    "none": 0
   }
@@ -422,7 +422,7 @@
   "step": "after 50/50 artifacts: caves keep spawning but always hold the chest",
   "pass": true,
   "detail": {
-   "n50": 13
+   "n50": 15
   }
  },
  {
@@ -432,26 +432,26 @@
    "near": {
     "ok": true,
     "hero": [
-     6,
-     29
+     23,
+     6
     ],
     "hz": [
-     8,
-     29
+     23,
+     8
     ],
-    "dens": 10
+    "dens": 16
    },
    "before": {
     "water": 2,
     "lava": 0,
-    "ice": 28,
+    "ice": 57,
     "obs": 0,
     "pit": 0
    },
    "after": {
-    "water": 12,
+    "water": 21,
     "lava": 0,
-    "ice": 18,
+    "ice": 38,
     "obs": 0,
     "pit": 0
    },
@@ -465,17 +465,17 @@
    "near": {
     "ok": true,
     "hero": [
-     37,
-     35
+     29,
+     38
     ],
     "hz": [
-     35,
-     35
+     29,
+     36
     ],
-    "dens": 5
+    "dens": 14
    },
    "before": {
-    "water": 5,
+    "water": 16,
     "lava": 0,
     "ice": 0,
     "obs": 0,
@@ -486,7 +486,7 @@
     "lava": 0,
     "ice": 0,
     "obs": 0,
-    "pit": 5
+    "pit": 16
    },
    "cast": true
   }
@@ -498,27 +498,27 @@
    "near": {
     "ok": true,
     "hero": [
-     23,
-     50
+     8,
+     19
     ],
     "hz": [
-     23,
-     48
+     6,
+     19
     ],
-    "dens": 4
+    "dens": 5
    },
    "before": {
     "water": 0,
-    "lava": 7,
+    "lava": 5,
     "ice": 0,
     "obs": 0,
     "pit": 0
    },
    "after": {
     "water": 0,
-    "lava": 3,
+    "lava": 0,
     "ice": 0,
-    "obs": 4,
+    "obs": 5,
     "pit": 0
    },
    "cast": true
@@ -528,20 +528,23 @@
   "step": "gib pieces react on water",
   "pass": true,
   "detail": {
-   "n": 12,
+   "n": 15,
    "states": [
     0,
     0,
     0,
     0,
     1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
     1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1
+    0
    ]
   }
  },
@@ -549,30 +552,29 @@
   "step": "gib pieces react on lava",
   "pass": true,
   "detail": {
-   "n": 1,
-   "states": [
-    0
-   ]
+   "n": 0,
+   "states": []
   }
  },
  {
   "step": "gib pieces react on ice",
   "pass": true,
   "detail": {
-   "n": 12,
+   "n": 13,
    "states": [
     4,
-    0,
-    0,
-    0,
-    0,
-    4,
-    4,
-    0,
-    0,
+    3,
     3,
     4,
-    3
+    0,
+    0,
+    4,
+    1,
+    0,
+    0,
+    0,
+    4,
+    4
    ]
   }
  },
@@ -580,17 +582,18 @@
   "step": "shrine spawns near the centre on a reachable tile",
   "pass": true,
   "detail": {
-   "x": 20,
-   "y": 22
+   "x": 24,
+   "y": 20,
+   "f": 1
   }
  },
  {
   "step": "bumping the shrine starts the 60s swarm (shrine used at once)",
   "pass": true,
   "detail": {
-   "t": 58.50009999999991,
+   "t": 58.466799999999914,
    "kills": 0,
-   "live": 26
+   "live": 27
   }
  },
  {
@@ -602,12 +605,12 @@
    "tier": 2,
    "items": 4,
    "rars": [
+    6,
     4,
-    4,
-    4,
+    3,
     3
    ],
-   "gold": 19703,
+   "gold": 23260,
    "banner": "SWARM TIER: GOLD!"
   }
  },

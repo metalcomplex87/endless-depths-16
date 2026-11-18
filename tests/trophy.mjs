@@ -1,0 +1,22 @@
+import puppeteer from "puppeteer-core";
+import fs from "fs";
+const BASE = process.env.ED16_URL || "http://127.0.0.1:50199/";
+const OUT = "/workspace/ed16-web/screenshots-bigobj";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome-stable", headless: "new", userDataDir: "/tmp/ed16-profiles/troph-" + Date.now(), args: ["--no-sandbox", "--disable-gpu", "--mute-audio"] });
+const page = await b.newPage(); page.on("pageerror", (e) => console.log("PAGEERROR", e.message));
+await page.setViewport({ width: 412, height: 780, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await page.goto(BASE + "?t=" + Date.now(), { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => !!(window.__ED16_PRIS && window.__ED16_HZ));
+await page.evaluate(() => window.__ED16_PRIS.begin({ depth: 205, lvl: 204 })); await sleep(300);
+const r = await page.evaluate(() => window.__ED16_HZ.trophyTest());
+const pass = r.spots.every((s) => s === r.spots[0]) && r.footFloor && r.clash.length === 0 && Object.values(r.reach).every(Boolean) && r.bumps.every((x) => x.endsWith(":open")) && r.afterLeave.trophyAt === null && r.cutOffByCase === 0 && !r.staleHit && !r.staleOpened;
+console.log((pass ? "PASS" : "FAIL") + "  trophy case: " + JSON.stringify(r));
+// dungeon floor right after camp: no trophy
+await page.evaluate(() => window.__ED16_HZ.gen(206)); await sleep(300);
+const live = await page.evaluate(() => window.__ED16_HZ.peek());
+const cv = await page.evaluate(() => window.__ED16_HZ.campView()); await sleep(800);
+const el = await page.$("canvas"); await el.screenshot({ path: OUT + "/camp-trophy-2x2.png" });
+console.log("campView", JSON.stringify(cv));
+fs.writeFileSync(OUT + "/trophy-results.json", JSON.stringify({ pass, r, cv }, null, 1));
+await b.close(); process.exit(pass ? 0 : 1);
