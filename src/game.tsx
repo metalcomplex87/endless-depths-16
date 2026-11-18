@@ -4983,7 +4983,7 @@ function efTurn(g: Game, st: Stats): void {
 function efFloor(g: Game): void { const es = esOf(g); es.wind = false; es.last = false; es.iron = false; es.q = []; es.combo = 0; es.cid = -1; es.free = 0; }
 function efFloorEnd(g: Game): void { const p = efP(g, 90); if (p > 0 && R() < efc(0.3, p)) revealStairs(g); }
 // ======================= pets / companions =======================
-const PET_CH = 0.05; // share of random drops that are pets
+let PET_CH = 0.10; // share of random (non-chosen-kind) drops that are pets; was 0.05
 const PET_RANGE = 6;
 // each shot = this share of your Attack (before armor); tuned so a pet adds ~10-25% of your damage by rarity
 const PSH = [0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.23, 0.28]; // share of your own damage per turn
@@ -9872,7 +9872,9 @@ function markGolden(it: Item): void {
   if (it.name.indexOf("Golden ") !== 0) it.name = "Golden " + it.name.replace(/^Prismatic /i, "").replace(/^Golden /i, "");
 }
 function combineTrack(it: Item): string | null {
-  if (it.set !== undefined || it.golden) return null;
+  if (it.golden) return null;
+  // Set pieces combine only with set pieces of the same armor kind (any set); never with non-set items.
+  if (it.set !== undefined) return isArmor(it.kind) ? "set:" + it.kind : null;
   if (it.kind === "gem") return it.gt === undefined ? null : "gem:" + it.gt;
   if (it.kind === "pet") return "pet";
   if (isArmor(it.kind)) return "armor:" + it.kind;
@@ -9885,6 +9887,8 @@ function combineKey(it: Item): string | null {
   if (!t) return null;
   if (it.kind === "gem") return t + "|r" + it.rar;
   const stars = it.st ? it.st.length : 0;
+  // Set pieces: same kind, same rarity tier, same stars; stop at the set star cap (4).
+  if (t.indexOf("set:") === 0) return stars >= combineStarMax(it.rar, true) ? null : t + "|r" + it.rar + "|s" + stars;
   if (it.rar >= 7 && stars >= 10) return null;
   // 1H (incl. shields) and 2H tracks: below Legendary, rarity only; Legendary+ also requires matching stars.
   if ((t === "1h" || t === "2h") && it.rar < 3) return t + "|r" + it.rar;
@@ -9936,6 +9940,8 @@ function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | nul
     if (a.gt === undefined || !inputs.every((it: Item) => isGem(it) && it.gt === a.gt && it.rar === a.rar)) return null;
     return makeGem(a.rar + 1, a.gt, ilvl); // next rarity, same gem type; gems have no stars
   }
+  if (a.set !== undefined) return makeCombinedSet(inputs, ilvl, primary);
+  if (inputs.some((it: Item) => it.set !== undefined)) return null;
   const stars = a.st ? a.st.length : 0;
   const maxC = combineStarMax(a.rar, false);
   let rar = a.rar, nxt = stars;
@@ -9967,6 +9973,22 @@ function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | nul
   if (rar >= 7 && (it.st ? it.st.length : 0) >= 10) markGolden(it);
   return it;
 }
+// Set combine: 3 set pieces of the same kind, rarity and stars.
+// All three from one set -> that set's piece one star higher; any mix of sets -> a random set's piece of that kind, one star higher.
+function makeCombinedSet(inputs: Item[], ilvl: number, primary?: Item): Item | null {
+  const a = inputs[0];
+  if (!isArmor(a.kind)) return null;
+  const stars = a.st ? a.st.length : 0;
+  if (!inputs.every((it: Item) => it.set !== undefined && !it.golden && it.kind === a.kind && it.rar === a.rar && (it.st ? it.st.length : 0) === stars)) return null;
+  const cap = combineStarMax(a.rar, true);
+  if (stars >= cap) return null;
+  const same = inputs.every((it: Item) => it.set === a.set) && a.set! >= 0 && a.set! < SETS.length;
+  const sid = same ? a.set! : ri(SETS.length);
+  const it = makeSetPiece(ilvl, a.kind as AK, sid, ilvl, a.rar);
+  forceStars(it, stars + 1);
+  carryCombineSockets(it, primary ?? a);
+  return it;
+}
 function autoCombineOn(g: Game): boolean { return g.autoCombine !== false; }
 function bagGroupsOf(bag: Item[]): Map<string, number[]> {
   const m = new Map<string, number[]>();
@@ -9983,8 +10005,9 @@ function wouldCompleteCombine(g: Game, it: Item): boolean { return wouldComplete
 function combineChime(g: Game, it: Item): void {
   g.sfx("sparkle");
   const lab = it.golden ? "GOLDEN PRISMATIC" : isGem(it) ? it.name : (it.name + (it.st && it.st.length ? " " + starBadge(it) : ""));
-  msg(g, "Combined into " + lab + "!", it.golden ? GOLDEN_COL : isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : RC[it.rar]);
-  setBanner(g, it.golden ? "GOLDEN PRISMATIC!" : "COMBINED!", lab, it.golden ? GOLDEN_COL : RC[it.rar], it.golden ? 8 : it.rar, it.golden ? 3.2 : 1.8);
+  const isSetP = it.set !== undefined;
+  msg(g, "Combined into " + (isSetP ? "Set Relic " : "") + lab + "!", it.golden ? GOLDEN_COL : isSetP ? SET_COL : isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : RC[it.rar]);
+  setBanner(g, it.golden ? "GOLDEN PRISMATIC!" : isSetP ? "SET RELIC COMBINED!" : "COMBINED!", lab, it.golden ? GOLDEN_COL : isSetP ? SET_COL : RC[it.rar], it.golden ? 8 : it.rar, it.golden ? 3.2 : 1.8);
   if (it.golden) { g.flash = 0.85; g.flashC = GOLDEN_COL; g.shake = 8; g.sfx("loot", 32); }
   else g.toast = Math.max(g.toast, 1.1);
 }
@@ -10187,13 +10210,14 @@ function runAutoCombine(g: Game): number {
 }
 
 const SET_CH = (ilvl: number): number => Math.min(0.005, 0.002 + ilvl * 0.00008);
-function makeSetPiece(ilvl: number, kind: AK, sid?: number, depth?: number): Item {
+function makeSetPiece(ilvl: number, kind: AK, sid?: number, depth?: number, rarIn?: number): Item {
   const dlt = depth ?? ilvl;
   const id = sid ?? ri(SETS.length);
-  const it = makeItem(ilvl, 6, kind, dlt);
-  it.set = id; it.rar = 6; it.name = SETS[id].parts[kind];
-  if (it.bonus.mv !== undefined) it.bonus.mv = mvRoll(ilvl, 6, true);
-  it.st = rollStars(kind, 6, true, dlt);
+  const r0 = rarIn ?? 6;
+  const it = makeItem(ilvl, r0, kind, dlt);
+  it.set = id; it.rar = r0; it.name = SETS[id].parts[kind];
+  if (it.bonus.mv !== undefined) it.bonus.mv = mvRoll(ilvl, r0, true);
+  it.st = rollStars(kind, r0, true, dlt);
   return it;
 }
 function maybeSet(it: Item): Item {
@@ -13108,6 +13132,81 @@ try {
   };
 } catch { /* ignore */ }
 
+// ---------- test hooks: set combining + pet drop rates ----------
+function loottestSet(): Record<string, unknown> {
+  const mk = (kind: AK, sid: number, stars: number): Item => { const it = makeSetPiece(10, kind, sid, 10); forceStars(it, stars); return it; };
+  const res: Record<string, unknown> = {};
+  const one = (inputs: Item[]): Record<string, unknown> => {
+    const keys = inputs.map(combineKey);
+    const same = !!keys[0] && keys.every((k: string | null) => k === keys[0]);
+    const out = same ? makeCombined(inputs, 5, inputs[0]) : null;
+    return { keys, grouped: same, out: out ? { kind: out.kind, set: out.set, name: out.name, rar: out.rar, stars: out.st ? out.st.length : 0, uniq: out.st ? new Set(out.st.map((e: number[]) => e[0])).size : 0, ilvl: out.ilvl, sk: out.sk ? out.sk.length : 0 } : null };
+  };
+  res.a = one([mk("legs", 2, 0), mk("legs", 2, 0), mk("legs", 2, 0)]);
+  const mixSets: number[] = [], diffSets: number[] = [];
+  for (let i = 0; i < 400; i++) {
+    const o1 = makeCombined([mk("legs", 1, 0), mk("legs", 1, 0), mk("legs", 4, 0)], 5);
+    if (o1 && o1.kind === "legs" && o1.set !== undefined && (o1.st ? o1.st.length : 0) === 1) mixSets.push(o1.set);
+    const o2 = makeCombined([mk("legs", 0, 0), mk("legs", 3, 0), mk("legs", 7, 0)], 5);
+    if (o2 && o2.kind === "legs" && o2.set !== undefined && (o2.st ? o2.st.length : 0) === 1) diffSets.push(o2.set);
+  }
+  res.b = { ...one([mk("legs", 1, 0), mk("legs", 1, 0), mk("legs", 4, 0)]), ok: mixSets.length, distinctSets: new Set(mixSets).size };
+  res.c = { ...one([mk("legs", 0, 0), mk("legs", 3, 0), mk("legs", 7, 0)]), ok: diffSets.length, distinctSets: new Set(diffSets).size };
+  const plain = makeItem(10, 6, "legs"); delete plain.set; delete plain.st;
+  res.d = { setKey: combineKey(mk("legs", 2, 0)), plainKey: combineKey(plain), direct: makeCombined([mk("legs", 2, 0), mk("legs", 2, 0), plain], 5) !== null };
+  res.e = { kindKeys: [combineKey(mk("legs", 2, 0)), combineKey(mk("head", 2, 0))], starKeys: [combineKey(mk("legs", 2, 0)), combineKey(mk("legs", 2, 1))], directKind: makeCombined([mk("legs", 2, 0), mk("legs", 2, 0), mk("head", 2, 0)], 5) !== null, directStars: makeCombined([mk("legs", 2, 0), mk("legs", 2, 0), mk("legs", 2, 1)], 5) !== null };
+  res.f = { head: one([mk("head", 5, 1), mk("head", 5, 1), mk("head", 5, 1)]), chest: one([mk("chest", 0, 2), mk("chest", 6, 2), mk("chest", 6, 2)]), arms: one([mk("arms", 9, 3), mk("arms", 9, 3), mk("arms", 9, 3)]) };
+  res.cap = { key4: combineKey(mk("legs", 2, 4)), direct: makeCombined([mk("legs", 2, 4), mk("legs", 2, 4), mk("legs", 2, 4)], 5) !== null };
+  // In-game paths: bag auto-combine and equipped+bag.
+  const g = newGame(null);
+  g.mode = "play"; g.depth = 10; g.lvl = 20; g.autoEq = false;
+  g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+  const b1 = mk("legs", 2, 0); b1.sk = [{ c: 1, g: { typ: 1, rar: 2 } }, { c: 3 }];
+  const b2 = mk("legs", 2, 0); b2.sk = [{ c: 2, g: { typ: 4, rar: 1 } }];
+  g.bag = [b1, b2, mk("legs", 2, 0), plain];
+  const nBag = runAutoCombineIn(g, g.bag);
+  res.bagPath = { n: nBag, bag: g.bag.map((x: Item) => ({ name: x.name, set: x.set, stars: x.st ? x.st.length : 0 })), gemBag: (g.gemBag || []).length };
+  const g2 = newGame(null);
+  g2.mode = "play"; g2.depth = 10; g2.lvl = 20; g2.autoEq = false;
+  const eqB = mk("legs", 3, 1); eqB.sk = [{ c: 5, g: { typ: 2, rar: 3 } }];
+  g2.eq = { head: null, chest: null, arms: null, legs: eqB, rh: null, lh: null, pet: null };
+  g2.bag = [mk("legs", 3, 1), mk("legs", 3, 1)];
+  const nEq = runEquippedCombine(g2);
+  const le = g2.eq.legs;
+  res.eqPath = { n: nEq, legs: le ? { name: le.name, set: le.set, stars: le.st ? le.st.length : 0, sk0: le.sk && le.sk[0] ? le.sk[0] : null } : null, bag: g2.bag.length };
+  res.wouldComplete = wouldCompleteCombineBag([mk("legs", 2, 0), mk("legs", 6, 0)], mk("legs", 8, 0));
+  const gp = makeItem(20, 7, "sword"); forceStars(gp, 10); markGolden(gp);
+  res.golden = { key: combineKey(gp), prisKey: combineKey((() => { const x = makeItem(20, 7, "sword"); forceStars(x, 3); return x; })()) };
+  return res;
+}
+function loottestPets(n = 20000, d = 12, petCh?: number): Record<string, unknown> {
+  const old = PET_CH;
+  if (petCh !== undefined) PET_CH = petCh;
+  const out: Record<string, { items: number; pets: number; rolls: number }> = {};
+  const rec = (src: string, items: Item[], rolls = 1): void => {
+    const o = out[src] || (out[src] = { items: 0, pets: 0, rolls: 0 });
+    o.rolls += rolls; o.items += items.length; for (const it of items) if (it.kind === "pet") o.pets++;
+  };
+  try {
+    for (let i = 0; i < n; i++) {
+      rec("normalKill", R() < 0.12 ? [maybeSet(makeItem(d, rollRar(1, 0, d)))] : []);
+      rec("rareKill", R() < 0.32 ? [maybeSet(makeItem(d, rollRar(1.12, 0, d)))] : []);
+      const el: Item[] = []; if (R() < 0.6) el.push(maybeSet(makeItem(d, rollRar(1.22, 0, d)))); rec("eliteKill", el);
+      const se: Item[] = []; const nSe = 1 + (R() < 0.45 ? 1 : 0); for (let k = 0; k < nSe; k++) se.push(seLootItem(d)); rec("superElite", se);
+      const bo: Item[] = []; const nb = 1 + ri(3); for (let k = 0; k < nb; k++) bo.push(maybeSet(makeItem(d + 1, rollRar(1.35, 0, d)))); rec("boss", bo);
+      const act = Math.max(1, Math.floor(d / 5)); const ab: Item[] = []; const na = actLootCount(act, d); for (let k = 0; k < na; k++) ab.push(actLootItem(act, d)); rec("actBoss", ab);
+      const cr = rollChestRar(d, false); const plan = chestLoot(cr, false, d); const ch: Item[] = [];
+      for (let k = 0; k < plan.n; k++) { let it = makeItem(plan.ilvl, rollRar(plan.f, plan.min, d)); if (cr >= 4 && isArmor(it.kind) && it.rar < 7 && R() < CHEST_SET_CH) it = makeSetPiece(plan.ilvl, it.kind as AK); ch.push(maybeSet(it)); }
+      rec("chest", ch);
+      const gb: Item[] = []; const ng = 3 + ri(3); for (let k = 0; k < ng; k++) gb.push(maybeSet(makeItem(d + 1, jackpotRar(d)))); rec("lootGoblin", gb);
+      const mp = makeItem(d, 3, "pet"); rec("campPetChestKind", [mp]);
+    }
+  } finally { PET_CH = old; }
+  const res: Record<string, unknown> = { petCh: petCh ?? old, n, d };
+  for (const k of Object.keys(out)) { const o = out[k]; res[k] = { perRoll: +(o.pets / o.rolls).toFixed(5), perItem: o.items ? +(o.pets / o.items).toFixed(4) : 0 }; }
+  return res;
+}
+try { (window as unknown as { __ED16_LOOTTEST?: object }).__ED16_LOOTTEST = { set: loottestSet, pets: loottestPets }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
 function withPetsTest<T>(fn: () => T): T {
   const prev = GIB_SKIP_SAVE;
