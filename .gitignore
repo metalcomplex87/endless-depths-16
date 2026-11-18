@@ -1,5 +1,6 @@
 node_modules/
 screenshots/
+audio/
 tests/accept-results.json
 *.log
 devflow.json

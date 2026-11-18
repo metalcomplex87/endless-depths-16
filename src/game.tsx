@@ -12017,14 +12017,39 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 
 // ---------- music data ----------
 interface Song {
-  name?: string; mood?: string; mode?: string;
+  name?: string; mood?: string; mode?: string; meter?: string; inspired?: string;
   root: number; sc: number[]; bpm: number; prog: number[]; arp: number[]; seed: number;
   bars?: number; pad?: OscillatorType; bass?: OscillatorType; lead?: OscillatorType; arpWave?: OscillatorType;
-  echo?: number; vol?: number; tune?: (number | null)[];
+  echo?: number; vol?: number; tune?: (number | null)[]; tune2?: (number | null)[];
+  beats?: number; steps?: number; bassPat?: number[]; bass5?: number; hatPat?: number[];
+  bassWalk?: number[]; arpEvery?: number; swing?: number; noPad?: boolean;
 }
 const MUS_GAIN = 0.55;
+function songBeats(s: Song): number {
+  if (s.steps && s.steps > 0) return s.steps / 4;
+  return Math.max(2, Math.min(12, s.beats || 4));
+}
+function songSteps(s: Song): number {
+  if (s.steps && s.steps > 0) return Math.max(6, s.steps);
+  return Math.max(8, Math.round((s.beats || 4) * 4));
+}
+function songMeter(s: Song): string {
+  if (s.meter) return s.meter;
+  if (s.steps === 14) return "7/8";
+  const b = s.beats || 4;
+  if (b === 3) return "3/4";
+  if (b === 5) return "5/4";
+  return "4/4";
+}
 function songLoopBars(s: Song): number { return Math.max(s.prog.length, s.bars && s.bars > 0 ? s.bars : s.prog.length * 2); }
-function songLoopSec(s: Song): number { return songLoopBars(s) * 4 * (60 / s.bpm); }
+function songLoopSec(s: Song): number { return songLoopBars(s) * songSteps(s) * (60 / s.bpm / 4); }
+function songMeta(s: Song, i: number = -1): Record<string, unknown> {
+  return {
+    i, name: s.name || ("Song " + (i + 1)), mood: s.mood || "", mode: s.mode || "", meter: songMeter(s),
+    inspired: s.inspired || null, bpm: s.bpm, root: s.root, beats: songBeats(s), steps: songSteps(s),
+    bars: songLoopBars(s), loopSec: songLoopSec(s), vol: s.vol ?? 1, echo: s.echo ?? 0.16, seed: s.seed,
+  };
+}
 function pickNextSong(cur: number, n: number, r: number): number {
   if (n <= 1) return 0;
   const i = ((cur | 0) % n + n) % n;
@@ -12043,6 +12068,16 @@ const SONGS: Song[] = [
   { name: "Quiet Stones", mood: "A very slow C aeolian hymn: distant triangle organ, sparse melody, and a long gentle echo.", mode: "aeolian", root: 48, sc: [0, 2, 3, 5, 7, 8, 10], bpm: 56, prog: [0, 3, 5, 4, 0, 6, 3, 0], arp: [0, 1, 0, 2, 1, 0, 3, 1], seed: 41, bars: 20, pad: "triangle", bass: "sine", lead: "sine", arpWave: "triangle", echo: 0.26, vol: 0.95, tune: [0, null, 2, null, 0, null, null, 3, 2, null, 0, null, 5, null, 4, null, 0, null, 3, null, 2, null, 0, null, 4, null, 2, null, 0, null, null, null, 3, null, 2, 0, null, 5, 4, null, 0, null, 2, null, 3, null, 0, 2, 0, null, null, 4, 2, null, 0, null, 5, null, 3, 2, 0, null, 2, null] },
   { name: "Cinder Veil", mood: "Dusky E phrygian, muted pulse arpeggios and airy noise over a low triangle drone.", mode: "phrygian", root: 52, sc: [0, 1, 3, 5, 7, 8, 10], bpm: 64, prog: [0, 1, 5, 0, 3, 1, 4, 0], arp: [0, 1, 3, 1, 0, 2, 1, 3], seed: 53, bars: 24, pad: "triangle", bass: "triangle", lead: "triangle", arpWave: "square", echo: 0.18, vol: 0.96, tune: [0, 1, 0, 3, 1, 0, null, 2, 3, 1, 0, 1, 5, 3, 1, 0, 0, 1, 3, 5, 3, 1, 0, null, 1, 0, 3, 1, 0, null, 1, 0, 3, 1, 5, 3, 1, 0, 2, 1, 0, 1, 0, null, 3, 1, 0, 1, 5, 3, 1, 0, 3, 1, null, 0, 1, 0, 3, 5, 3, 1, 0, null] },
   { name: "Moonlit Hollow", mood: "A lamplit F harmonic-minor air: soft triangle lead, sine pedal, and a hush of echo.", mode: "harmonic minor", root: 53, sc: [0, 2, 3, 5, 7, 8, 11], bpm: 60, prog: [0, 5, 3, 6, 0, 4, 5, 0], arp: [0, 2, 3, 2, 0, 1, 3, 2], seed: 67, bars: 22, pad: "sine", bass: "triangle", lead: "triangle", arpWave: "triangle", echo: 0.22, vol: 1, tune: [0, 2, 3, 5, 4, 3, 2, null, 5, 7, 5, 3, 2, 0, 2, 3, 0, 3, 5, 3, 4, 2, 0, null, 7, 5, 3, 2, 0, 2, 3, 0, 2, 4, 5, 4, 3, 2, 0, 2, 5, 3, 2, 0, 3, 5, 7, 5, 0, 2, 3, null, 4, 3, 2, 0, 5, 3, 2, 0, 2, null, 0, 3] },
+  { name: "Iron Keep", mood: "A driving 4/4 keep: original chromatic-tinged ostinato, square lead and tense harp — evoking Super Mario World castle tension without quoting its melody.", mode: "phrygian", meter: "4/4", inspired: "SMW castle", root: 52, sc: [0, 1, 3, 5, 7, 8, 10], bpm: 110, prog: [0, 0, 3, 0, 1, 0, 4, 1], arp: [0, 1, 3, 0, 2, 1, 3, 1], seed: 101, bars: 16, pad: "triangle", bass: "square", lead: "square", arpWave: "square", echo: 0.12, vol: 0.94, beats: 4, bassPat: [0, 2, 4, 6, 8, 10, 12, 14], bass5: -1, hatPat: [4, 8, 12, 14], bassWalk: [0, 1, 0, 3, 1, 0, -2, 1], tune: [0, 4, 3, 0, 2, 1, 0, null, 4, 3, 1, 0, 5, 4, 3, 1, 0, 2, 4, 3, 1, 0, null, 3, 4, 1, 0, 3, 2, 1, 0, null, 5, 3, 4, 1, 0, 1, 3, 0, 2, 0, 4, 3, 1, null, 0, 1] },
+  { name: "Labyrinth Keys", mood: "A circling 4/4 dungeon ostinato in D harmonic minor, original five-note hook over a walking pedal — evoking Zelda NES dungeon unease, not its tune.", mode: "harmonic minor", meter: "4/4", inspired: "Zelda NES dungeon", root: 50, sc: [0, 2, 3, 5, 7, 8, 11], bpm: 90, prog: [0, 0, 4, 0, 5, 3, 0, 4], arp: [0, 2, 0, 3, 0, 2, 4, 2], seed: 113, bars: 16, pad: "triangle", bass: "triangle", lead: "square", arpWave: "triangle", echo: 0.17, vol: 0.95, beats: 4, bassPat: [0, 8], hatPat: [6, 14], bassWalk: [0, 0, 0, 0, -5, -5, -7, -5], tune: [0, 4, 5, 4, 0, 3, 2, 4, 0, 4, 5, 7, 5, 4, 3, 2, 0, 2, 4, 5, 4, 0, 2, null, 5, 4, 2, 4, 0, 3, 2, 0, 4, 5, 4, 2, 0, 2, 3, 4, 0, null, 4, 5, 3, 2, 0, 4] },
+  { name: "Candlelight Descent", mood: "A slow 4/4 crypt processional: lamenting original lead over a sinking chromatic bass, dim triangle organ — a castle-crypt cousin, not a copy.", mode: "harmonic minor", meter: "4/4", inspired: "SMW castle crypt", root: 53, sc: [0, 2, 3, 5, 7, 8, 11], bpm: 70, prog: [0, 5, 3, 4, 0, 6, 3, 0], arp: [0, 2, 3, 2], seed: 127, bars: 16, pad: "triangle", bass: "sine", lead: "triangle", arpWave: "sine", echo: 0.24, vol: 0.92, beats: 4, bassPat: [0, 4, 8, 12], hatPat: [12], bassWalk: [0, -1, -2, -3, 0, 1, 0, -2], arpEvery: 4, tune: [0, null, 2, 3, 5, null, 4, 3, 2, null, 0, 2, 3, null, 2, 0, 5, null, 4, 3, 2, 0, null, 2, 3, 5, 7, 5, 4, 3, 2, null, 0, 2, 3, null, 4, 2, 0, null, 5, 3, 2, 0, 3, 2, 0, null] },
+  { name: "Waltz of Rust", mood: "A creaking 3/4 waltz in A aeolian: bass on the downbeat, two soft ticks, and a spare turning melody.", mode: "aeolian", meter: "3/4", root: 57, sc: [0, 2, 3, 5, 7, 8, 10], bpm: 68, prog: [0, 3, 4, 0, 5, 3, 0, 4], arp: [0, 2, 4, 2], seed: 131, bars: 16, pad: "sine", bass: "sine", lead: "triangle", arpWave: "triangle", echo: 0.22, vol: 0.93, beats: 3, bassPat: [0], bass5: 8, hatPat: [4, 8], arpEvery: 4, tune: [0, null, 2, 4, 2, null, 4, null, 5, 4, 2, 0, 2, null, 0, null, null, null, 5, 4, 2, 4, 3, 2, 0, null, 2, 0, 3, 2, 4, null, 5, 4, 2, 0, 3, null, 2, null, 0, 2, 0, null, null, null, 4, 2] },
+  { name: "Lantern 6", mood: "A 6/8 lantern-sway in G dorian: compound heartbeat bass, rolling harp, and a lilting original air.", mode: "dorian", meter: "6/8", root: 55, sc: [0, 2, 3, 5, 7, 9, 10], bpm: 96, prog: [0, 4, 0, 5, 3, 4, 1, 0], arp: [0, 2, 4, 2, 3, 1, 4, 2], seed: 149, bars: 16, pad: "triangle", bass: "triangle", lead: "sine", arpWave: "square", echo: 0.16, vol: 0.95, beats: 3, bassPat: [0, 6], hatPat: [4, 10], arpEvery: 2, tune: [0, 2, 4, 5, 4, 2, 4, 2, 0, 2, 4, null, 5, 4, 2, 4, 3, 2, 0, 2, 4, 5, 7, 5, 4, 2, 0, 2, 3, 2, 0, null, 4, 5, 4, 2, 0, 2, 4, 2, 5, 4, 2, 0, 3, 2, 0, 2] },
+  { name: "Five-Stone March", mood: "A stubborn 5/4 march in C harmonic minor, 3+2 bass (beats 1 and 4) and a five-beat iron motif.", mode: "harmonic minor", meter: "5/4", root: 48, sc: [0, 2, 3, 5, 7, 8, 11], bpm: 102, prog: [0, 0, 4, 0, 5, 3, 0, 6], arp: [0, 2, 3, 0, 4, 2, 0, 3], seed: 157, bars: 16, pad: "triangle", bass: "square", lead: "triangle", arpWave: "square", echo: 0.11, vol: 0.94, beats: 5, bassPat: [0, 12], hatPat: [4, 8, 16], arpEvery: 2, tune: [0, 2, 3, 2, 0, 4, 3, 2, 0, null, 0, 2, 4, 5, 4, 3, 2, 0, 2, 3, 5, 4, 3, 2, 0, 2, 3, 2, 0, null, 4, 3, 2, 0, 5, 4, 3, 2, 0, 2, 0, 3, 5, 4, 2, 0, 3, null, 2, 0] },
+  { name: "Hollow Pulse", mood: "Almost empty: a very slow B phrygian drone, long silences, and a single falling sigh of a melody.", mode: "phrygian", meter: "4/4", root: 47, sc: [0, 1, 3, 5, 7, 8, 10], bpm: 54, prog: [0, 0, 0, 1, 0, 0, 3, 0], arp: [0], seed: 163, bars: 16, pad: "sine", bass: "sine", lead: "sine", arpWave: "sine", echo: 0.32, vol: 0.88, beats: 4, bassPat: [0], bass5: -1, hatPat: [], arpEvery: 0, noPad: true, tune: [0, null, null, null, null, null, null, null, 1, 0, null, null, null, null, null, null, null, null, null, null, 3, 1, 0, null, null, null, null, null, null, null, null, null, 0, null, null, 1, 0, null, null, null, null, null, null, null, 3, 0, null, null] },
+  { name: "Night Gear", mood: "A fast syncopated 4/4 machine-groove in low A aeolian: off-beat bass, tight hats, and a clipped square hook.", mode: "aeolian", meter: "4/4", root: 45, sc: [0, 2, 3, 5, 7, 8, 10], bpm: 126, prog: [0, 0, 3, 0, 4, 0, 5, 3], arp: [0, 3, 2, 0, 4, 2, 3, 1], seed: 173, bars: 16, pad: "triangle", bass: "square", lead: "square", arpWave: "square", echo: 0.08, vol: 0.9, beats: 4, bassPat: [0, 6, 8, 14], hatPat: [4, 7, 12, 15], arpEvery: 1, swing: 0.14, tune: [null, 0, null, 2, 0, null, 3, 2, null, 0, 2, null, 4, 3, 0, null, 2, 0, null, 3, null, 2, 0, 4, null, 0, 3, 2, 0, null, 5, 3, 0, 2, null, 0, 3, null, 2, 0, null, 4, 2, 0, 3, 2, null, 0] },
+  { name: "Moth Pavane", mood: "A lyrical 3/4 pavane in E aeolian: soft sine choir, no percussion, a high answering voice over a turning lead.", mode: "aeolian", meter: "3/4", root: 52, sc: [0, 2, 3, 5, 7, 8, 10], bpm: 62, prog: [0, 4, 5, 3, 0, 3, 4, 0], arp: [0, 2, 4, 3], seed: 181, bars: 16, pad: "sine", bass: "sine", lead: "sine", arpWave: "sine", echo: 0.28, vol: 0.9, beats: 3, bassPat: [0, 8], bass5: -1, hatPat: [], arpEvery: 6, tune: [4, 5, 7, 5, 4, 2, 4, 3, 2, 0, 2, 4, 5, 4, 2, 4, 3, 2, 0, 2, 4, 5, 7, 5, 4, 2, 0, 2, 3, 2, 4, null, 5, 4, 2, 0, 2, 3, 5, 4, 2, 0, 4, 2, 0, 2, 3, 2], tune2: [2, 4, 5, 4, 2, 0, 2, 0, 3, 2, 0, 2, 4, 2, 0, 2, 0, 3, 2, 0, 2, 4, 5, 4, 2, 0, 2, 0, 3, 0, 2, null, 4, 2, 0, 2, 0, 3, 4, 2, 0, 2, 2, 0, 3, 0, 2, 0] },
+  { name: "Seven Bells", mood: "A restless 7/8 (2+2+3) rite in D phrygian: irregular bass accents and a seven-beat hook that never sits in 4.", mode: "phrygian", meter: "7/8", root: 50, sc: [0, 1, 3, 5, 7, 8, 10], bpm: 112, prog: [0, 0, 3, 0, 1, 4, 0, 3], arp: [0, 1, 3, 0, 2, 1, 4, 3], seed: 191, bars: 16, pad: "triangle", bass: "square", lead: "triangle", arpWave: "square", echo: 0.1, vol: 0.93, steps: 14, bassPat: [0, 4, 8], hatPat: [2, 6, 12], arpEvery: 2, tune: [0, 2, 0, 3, 2, 4, 3, 0, 1, 0, 2, 0, 4, 3, 0, 2, 3, 1, 0, 2, 4, 0, 1, 3, 2, 0, 1, 0, 4, 2, 0, 3, 2, 1, 0, 2, 0, 3, 4, 2, 0, 1] },
 ];
 const CAMP_SONG_I = 2;
 const BOSS_SONG: Song = { name: "Act Clash", mood: "The existing tense act-boss theme: faster phrygian-flavored drive, left unchanged.", mode: "phrygian", root: 45, sc: [0, 1, 3, 5, 7, 8, 11], bpm: 118, prog: [0, 0, 5, 5, 3, 3, 4, 1], arp: [0, 1, 2, 3, 2, 1, 2, 3], seed: 77 };
@@ -14233,15 +14268,17 @@ export default function App() {
       const d = gRef.current ? gRef.current.depth : lastMusDepth;
       return dreadSong(SONGS[songI], dreadT(d));
     };
-    const melody = (s: Song, bar: number, step: number): number | null => {
-      if (s.tune && s.tune.length) {
+    const melody = (s: Song, bar: number, step: number, tune?: (number | null)[]): number | null => {
+      const line = (tune && tune.length) ? tune : s.tune;
+      const eights = Math.max(1, Math.floor(songSteps(s) / 2));
+      if (line && line.length) {
         if (step % 2 === 1) return null;
-        const deg = s.tune[(bar * 8 + ((step / 2) | 0)) % s.tune.length];
+        const deg = line[(bar * eights + ((step / 2) | 0)) % line.length];
         if (deg === null || deg === undefined) return null;
         return sdeg(s, s.prog[bar % s.prog.length] + deg) + 12;
       }
       if (step % 2 === 1) return null;
-      const r = rng32(s.seed * 1000 + (bar % 8) * 16 + step)();
+      const r = rng32(s.seed * 1000 + (bar % 8) * songSteps(s) + step)();
       if (step % 4 !== 0 && r < 0.75) return null;
       if (r < 0.3) return null;
       const ch = s.prog[bar % s.prog.length];
@@ -14252,8 +14289,10 @@ export default function App() {
       if (!ac || !musGain) return;
       const out: GainNode = musGain;
       const s = curDungeonSong();
-      const step = musStep % 16, bar = songBar;
+      const spb = songSteps(s);
+      const step = musStep % spb, bar = songBar;
       const sd = 60 / s.bpm / 4;
+      const swingT = t + ((s.swing || 0) > 0 && step % 2 === 1 && !inBoss ? sd * Math.min(0.4, s.swing || 0) : 0);
       const ch = s.prog[bar % s.prog.length];
       const ct = [ch, ch + 2, ch + 4, ch + 7].map((d: number) => sdeg(s, d));
       const vs = Math.min(1, s.vol ?? 1);
@@ -14261,32 +14300,47 @@ export default function App() {
       const bassW: OscillatorType = inBoss ? "triangle" : (s.bass || "triangle");
       const leadW: OscillatorType = inBoss ? "sawtooth" : (s.lead || "triangle");
       const arpW: OscillatorType = inBoss ? "square" : (s.arpWave || "square");
-      if (step === 0) for (let i = 0; i < 3; i++) osc(out, mtof(ct[i]), mtof(ct[i]), t, sd * 16, padW, (inBoss ? 0.012 : 0.017) * vs, sd * 4);
-      if (step % (inBoss ? 2 : 8) === 0) osc(out, mtof(ct[0] - 12), mtof(ct[0] - 12), t, sd * (inBoss ? 1.8 : 6), bassW, 0.06 * vs);
-      if (!inBoss && step === 12) osc(out, mtof(ct[2] - 12), mtof(ct[2] - 12), t, sd * 3, bassW, 0.04 * vs);
-      const ae = inBoss ? 1 : 2;
-      if (step % ae === 0) { const ai = s.arp[(step / ae) % s.arp.length]; const n = ct[ai % 4] + 12 + (bar % 2 === 1 && !inBoss ? 12 : 0); osc(out, mtof(n), mtof(n), t, sd * 1.5, arpW, (inBoss ? 0.011 : 0.008) * vs); }
+      if (step === 0 && !s.noPad) for (let i = 0; i < 3; i++) osc(out, mtof(ct[i]), mtof(ct[i]), swingT, sd * spb, padW, (inBoss ? 0.012 : 0.017) * vs, sd * Math.min(4, spb / 3));
+      const bassHits = (!inBoss && s.bassPat && s.bassPat.length) ? s.bassPat : null;
+      if (bassHits) {
+        if (bassHits.indexOf(step) >= 0) {
+          const hi = bassHits.indexOf(step) + (bar * bassHits.length);
+          const walk = (s.bassWalk && s.bassWalk.length) ? s.bassWalk[hi % s.bassWalk.length] : 0;
+          osc(out, mtof(ct[0] - 12 + walk), mtof(ct[0] - 12 + walk), swingT, sd * 5, bassW, 0.06 * vs);
+        }
+      } else {
+        if (step % (inBoss ? 2 : 8) === 0) osc(out, mtof(ct[0] - 12), mtof(ct[0] - 12), swingT, sd * (inBoss ? 1.8 : 6), bassW, 0.06 * vs);
+        const fifth = (s.bass5 === undefined) ? 12 : s.bass5;
+        if (!inBoss && fifth >= 0 && step === fifth) osc(out, mtof(ct[2] - 12), mtof(ct[2] - 12), swingT, sd * 3, bassW, 0.04 * vs);
+      }
+      const ae = inBoss ? 1 : (s.arpEvery === undefined ? 2 : s.arpEvery);
+      if (ae > 0 && s.arp.length && step % ae === 0) { const ai = s.arp[((step / ae) | 0) % s.arp.length]; const n = ct[ai % 4] + 12 + (bar % 2 === 1 && !inBoss ? 12 : 0); osc(out, mtof(n), mtof(n), swingT, sd * 1.5, arpW, (inBoss ? 0.011 : 0.008) * vs); }
       const m = melody(s, bar, step);
-      if (m !== null) osc(out, mtof(m), mtof(m), t, sd * (inBoss ? 2 : 3.5), leadW, (inBoss ? 0.014 : 0.022) * vs, 0.02);
+      if (m !== null) osc(out, mtof(m), mtof(m), swingT, sd * (inBoss ? 2 : 3.5), leadW, (inBoss ? 0.014 : 0.022) * vs, 0.02);
+      const m2 = (!inBoss && s.tune2 && s.tune2.length) ? melody(s, bar, step, s.tune2) : null;
+      if (m2 !== null) osc(out, mtof(m2 + 12), mtof(m2 + 12), swingT, sd * 3, leadW, 0.012 * vs, 0.02);
+      const hats = (!inBoss && s.hatPat) ? s.hatPat : null;
       if (inBoss) {
         if (step % 4 === 0) osc(out, 130, 40, t, 0.18, "sine", 0.12);
         if (step % 2 === 1) noise(out, t, 0.04, 0.025, "highpass", 6000, 5000);
         if (step === 4 || step === 12) noise(out, t, 0.12, 0.05, "bandpass", 1800, 900);
+      } else if (hats) {
+        if (hats.indexOf(step) >= 0) noise(out, swingT, 0.03, (s.mode === "phrygian" ? 0.01 : 0.008) * vs, "highpass", 7000, 6000);
       } else if (step === 4 || step === 12) noise(out, t, 0.03, (s.mode === "phrygian" ? 0.01 : 0.008) * vs, "highpass", 7000, 6000);
       const dt = (!inBoss && !inCamp) ? dreadT(gRef.current ? gRef.current.depth : lastMusDepth) : 0;
       if (dt > 0.05) {
-        if (step === 0) osc(out, mtof(ct[0] - 24), mtof(ct[0] - 24), t, sd * 16, "sine", 0.035 * dt * vs);
-        if (dt > 0.4 && step === 0) noise(out, t, 0.22, 0.02 * dt * vs, "lowpass", 400, 200);
-        if (dt > 0.55 && step % 8 === 0) osc(out, mtof(ct[0] + 6), mtof(ct[0] + 6.07), t, sd * 4, "sawtooth", 0.012 * dt * vs);
-        if (dt > 0.25 && step % 4 === 0) noise(out, t, sd * 4, 0.01 * dt * vs, "bandpass", 800, 400);
+        if (step === 0) osc(out, mtof(ct[0] - 24), mtof(ct[0] - 24), swingT, sd * spb, "sine", 0.035 * dt * vs);
+        if (dt > 0.4 && step === 0) noise(out, swingT, 0.22, 0.02 * dt * vs, "lowpass", 400, 200);
+        if (dt > 0.55 && step % 8 === 0) osc(out, mtof(ct[0] + 6), mtof(ct[0] + 6.07), swingT, sd * 4, "sawtooth", 0.012 * dt * vs);
+        if (dt > 0.25 && step % 4 === 0) noise(out, swingT, sd * 4, 0.01 * dt * vs, "bandpass", 800, 400);
       }
       musStep++;
-      if (musStep % 16 === 0) {
+      if (musStep % spb === 0) {
         songBar++;
-        if (bossNow !== inBoss) { inBoss = bossNow; songBar = 0; if (!inBoss) songI = pickNextSong(songI, SONGS.length, Math.random()); }
-        else if (campNow !== inCamp) { inCamp = campNow; songBar = 0; }
-        else if (!inBoss && !inCamp && songBar >= songLoopBars(s)) { songBar = 0; songI = pickNextSong(songI, SONGS.length, Math.random()); }
-        else if (inCamp && songBar >= songLoopBars(s)) songBar = 0;
+        if (bossNow !== inBoss) { inBoss = bossNow; songBar = 0; musStep = 0; if (!inBoss) songI = pickNextSong(songI, SONGS.length, Math.random()); }
+        else if (campNow !== inCamp) { inCamp = campNow; songBar = 0; musStep = 0; }
+        else if (!inBoss && !inCamp && songBar >= songLoopBars(s)) { songBar = 0; musStep = 0; songI = pickNextSong(songI, SONGS.length, Math.random()); }
+        else if (inCamp && songBar >= songLoopBars(s)) { songBar = 0; musStep = 0; }
       }
     };
     const musicTick = (): void => {
@@ -14300,6 +14354,104 @@ export default function App() {
         let guard = 0;
         while (musT < now + 0.3 && guard < 16) { schedStep(musT); musT += 60 / curDungeonSong().bpm / 4; guard++; }
       } else if (musOn) { musOn = false; musGain.gain.cancelScheduledValues(now); musGain.gain.setTargetAtTime(0, now, 0.08); if (musEcho) { musEcho.gain.cancelScheduledValues(now); musEcho.gain.setTargetAtTime(0, now, 0.08); } }
+    };
+
+    const pcmToWavB64 = (pcm: Float32Array, rate: number): string => {
+      const n = pcm.length;
+      const bytes = new Uint8Array(44 + n * 2);
+      const view = new DataView(bytes.buffer);
+      const wr = (off: number, txt: string): void => { for (let i = 0; i < txt.length; i++) bytes[off + i] = txt.charCodeAt(i); };
+      wr(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); wr(8, "WAVE"); wr(12, "fmt "); view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+      view.setUint16(32, 2, true); view.setUint16(34, 16, true); wr(36, "data"); view.setUint32(40, n * 2, true);
+      for (let i = 0; i < n; i++) {
+        const x = Math.max(-1, Math.min(1, pcm[i]));
+        view.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+      }
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    };
+    (window as unknown as { __ED16_MUSIC?: object }).__ED16_MUSIC = {
+      songs: (): Record<string, unknown>[] => SONGS.map((s: Song, i: number) => songMeta(s, i)),
+      boss: (): Record<string, unknown> => songMeta(BOSS_SONG, -1),
+      campIndex: CAMP_SONG_I,
+      camp: (): Record<string, unknown> => songMeta(SONGS[CAMP_SONG_I], CAMP_SONG_I),
+      count: (): number => SONGS.length,
+      pickNext: (cur: number, r: number) => pickNextSong(cur, SONGS.length, r),
+      state: (): Record<string, unknown> => ({ songI, songBar, musStep, inBoss, inCamp, musOn, name: curDungeonSong().name, steps: songSteps(curDungeonSong()) }),
+      play: (i: number): Record<string, unknown> => {
+        ensureAudio();
+        songI = ((i | 0) % SONGS.length + SONGS.length) % SONGS.length;
+        songBar = 0; musStep = 0; inBoss = false; campNow = false; inCamp = false; bossNow = false; lastMusDepth = 1;
+        musicRef.current = true;
+        return { ok: true, songI, name: SONGS[songI].name, steps: songSteps(SONGS[songI]), bars: songLoopBars(SONGS[songI]), loopSec: songLoopSec(SONGS[songI]) };
+      },
+      tick: (sec: number): Record<string, unknown> => {
+        if (!ac || !musGain) return { ok: false, error: "no audio" };
+        const s0 = songI;
+        let t = ac.currentTime + 0.02;
+        const until = t + Math.max(0.05, sec);
+        let n = 0;
+        while (t < until && n < 800) { schedStep(t); t += 60 / curDungeonSong().bpm / 4; n++; }
+        return { ok: true, scheduled: n, songI, changed: songI !== s0, name: curDungeonSong().name, songBar, musStep };
+      },
+      loopOnce: (i: number): Record<string, unknown> => {
+        ensureAudio();
+        if (!ac || !musGain) return { ok: false, error: "no audio" };
+        songI = ((i | 0) % SONGS.length + SONGS.length) % SONGS.length;
+        songBar = 0; musStep = 0; inBoss = false; inCamp = false; bossNow = false; campNow = false; lastMusDepth = 1;
+        const s = SONGS[songI];
+        const need = songLoopBars(s) * songSteps(s);
+        const start = songI;
+        let t = ac.currentTime + 0.02, n = 0;
+        while (n < need + 2 && n < 4000) { schedStep(t); t += 60 / (SONGS[songI] || s).bpm / 4; n++; }
+        return { ok: true, scheduled: n, need, start, songI, looped: songI !== start, bars: songLoopBars(s), spb: songSteps(s), name: s.name };
+      },
+      render: async (i: number, sec: number = 2.4): Promise<Record<string, unknown>> => {
+        const song = SONGS[((i | 0) % SONGS.length + SONGS.length) % SONGS.length];
+        if (!song) return { ok: false, error: "bad song" };
+        const w = window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext; webkitOfflineAudioContext?: typeof OfflineAudioContext };
+        const OC = w.OfflineAudioContext || w.webkitOfflineAudioContext;
+        if (!OC) return { ok: false, error: "no OfflineAudioContext" };
+        const rate = 22050;
+        const samples = Math.max(rate, Math.floor(rate * Math.max(0.5, sec)));
+        const offline = new OC(1, samples, rate);
+        const prevAc = ac, prevGain = musGain, prevDelay = musDelay, prevEcho = musEcho, prevBuf = noiseBuf;
+        const prev = { songI, songBar, musStep, inBoss, inCamp, bossNow, campNow, lastMusDepth, musOn };
+        try {
+          ac = offline as unknown as AudioContext;
+          musGain = ac.createGain(); musGain.gain.value = MUS_GAIN; musGain.connect(ac.destination);
+          musDelay = null; musEcho = null;
+          const len = Math.floor(rate * 0.5);
+          noiseBuf = ac.createBuffer(1, len, rate);
+          const dd = noiseBuf.getChannelData(0);
+          for (let k = 0; k < len; k++) dd[k] = Math.random() * 2 - 1;
+          songI = ((i | 0) % SONGS.length + SONGS.length) % SONGS.length;
+          songBar = 0; musStep = 0; inBoss = false; inCamp = false; bossNow = false; campNow = false; lastMusDepth = 1; musOn = false;
+          let t = 0, n = 0, peak = 0;
+          const until = samples / rate;
+          const stay = songI;
+          while (t < until && n < 4000) {
+            // hold the chosen track for the preview (don't rotate mid-render)
+            if (songI !== stay) { songI = stay; songBar = 0; musStep = 0; }
+            schedStep(t);
+            t += 60 / SONGS[stay].bpm / 4;
+            n++;
+          }
+          const buf = await offline.startRendering();
+          const pcm = buf.getChannelData(0);
+          for (let k = 0; k < pcm.length; k++) if (Math.abs(pcm[k]) > peak) peak = Math.abs(pcm[k]);
+          return { ok: true, name: song.name, bpm: song.bpm, meter: songMeter(song), mode: song.mode, peak, steps: n, sec, rate, wav: pcmToWavB64(pcm, rate) };
+        } catch (err) {
+          return { ok: false, error: String(err) };
+        } finally {
+          ac = prevAc; musGain = prevGain; musDelay = prevDelay; musEcho = prevEcho; noiseBuf = prevBuf;
+          songI = prev.songI; songBar = prev.songBar; musStep = prev.musStep;
+          inBoss = prev.inBoss; inCamp = prev.inCamp; bossNow = prev.bossNow; campNow = prev.campNow;
+          lastMusDepth = prev.lastMusDepth; musOn = prev.musOn;
+        }
+      },
     };
 
     const g0 = newGame(null);
