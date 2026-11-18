@@ -112,7 +112,7 @@ interface Ult { n: string; el: El; pat: number; c2: string; i: number }
 interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number } }[]; gt?: number; golden?: boolean; pab?: number; prt?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[] }
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
@@ -144,7 +144,7 @@ interface Game {
   portal: PortalSpot | null; vault: string | null; secret?: PortalSpot | null; gobPort?: PortalSpot | null; arena?: string | null; gobCave?: string | null; gobT: number; locked: boolean;
   torches: Torch[];
   area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
-  campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null;
+  campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null; bpm?: { k: string; v: number[] } | null;
   gambler?: { x: number; y: number } | null; gambPity?: number;
   mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean;
   rt?: boolean; pcd?: number; acd?: number; qd?: number[]; wt?: number; swT?: number;
@@ -1127,6 +1127,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.cracks = unpackCracks(snap.cracks, g.map); g.digAt = undefined; g.digClock = undefined;
   placeNearTile(g, nearTile);
   spawnMonstersOnMap(g);
+  rollActFloorBossPower(g);
   if (isActFloor(g.depth) && actEverCleared(g)) openCampPortal(g);
   if (needReturnStairs(g)) ensureStairTile(g, 2, true);
   expandFeaturesOnLoad(g);
@@ -1140,6 +1141,7 @@ function applyActFloorOnEnter(g: Game): void {
   used.add(g.hero.y * MW + g.hero.x);
   const c = pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
   if (c) g.en.push(mkActBoss(g, c[0], c[1]));
+  rollActFloorBossPower(g);
   if (actEverCleared(g)) openCampPortal(g);
 }
 function starPriceMul(it: Item): number {
@@ -1813,7 +1815,81 @@ function cavePortalChance(g: Game): number { return 0.04 * gemPortalMul(g); }
 function isBossFoe(e: En): boolean { return !!e.act || (e.cls === 2 && !e.hunt && !e.gob && !e.child); }
 function bossAtkMul(e: En): number {
   if (!isBossFoe(e)) return 1;
-  return 1 + OVSH_ATK * Math.max(0, Math.min(3, e.ovm ?? 0));
+  return (1 + OVSH_ATK * Math.max(0, Math.min(3, e.ovm ?? 0))) * bossPowerOf(e);
+}
+// ---------- boss power roll (5+ equipped Prismatic items) ----------
+// Counts every equipped slot whose item is Prismatic (rar 7, golden included): head, chest, arms, legs, both hands, and the pet slot.
+const BOSS_PM_MIN = 5;
+function prisEquippedCount(g: Game): number {
+  let n = 0;
+  if (!g.eq) return 0;
+  for (const k of EQK) { const it = g.eq[k]; if (it && it.kind !== "gem" && it.rar >= 7) n++; }
+  return n;
+}
+const SEV_BANNERS = new WeakSet<object>(); // boss-power banners keep their severity color (no rainbow)
+function cleanBpm(x: unknown): { k: string; v: number[] } | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as { k?: unknown; v?: unknown };
+  if (typeof o.k !== "string" || !Array.isArray(o.v)) return null;
+  return { k: o.k.slice(0, 24), v: o.v.slice(0, 8).map((n: unknown) => Math.max(1, Math.min(10, Math.floor(Number(n) || 1)))) };
+}
+function bossPowerOf(e: En): number { const m = Math.floor(Number(e.pm) || 1); return m >= 1 && m <= 10 ? m : 1; }
+function bossPowerCol(m: number): string { return m >= 9 ? "#ff40ff" : m >= 7 ? "#ff4040" : m >= 5 ? "#ff9030" : m >= 3 ? "#ffe060" : "#90ff90"; }
+// Multiplies max HP (and current HP), the act shield, and overshield HP (all derived from max HP). Damage scales via bossAtkMul.
+function applyBossPower(e: En, m: number): void {
+  e.pm = m;
+  if (m <= 1) return;
+  e.mhp = safeRound(safeMul(e.mhp, m));
+  e.hp = safeRound(safeMul(Math.max(1, e.hp), m));
+  if ((e.mshd ?? 0) > 0) { e.mshd = safeRound(safeMul(e.mshd as number, m)); e.shd = safeRound(safeMul(e.shd ?? 0, m)); }
+  if ((e.ovmhp ?? 0) > 0) { e.ovmhp = safeRound(safeMul(e.ovmhp as number, m)); e.ovhp = safeRound(safeMul(e.ovhp ?? 0, m)); }
+}
+// Rolls each listed boss independently (uniform 1..10) once per spawn. Bosses that already carry a roll (saved) keep it.
+// Rolls are also kept on the run (g.bpm, keyed by area+depth) and saved, so a reload that respawns the floor's
+// bosses reuses the same multipliers instead of rerolling. A new depth (or a new secret arena) rolls fresh.
+function rollBossPower(g: Game, list: En[], fresh = false): number[] {
+  if (prisEquippedCount(g) < BOSS_PM_MIN) return [];
+  const key = (g.area === "arena" ? "a" : "f") + g.depth;
+  if (fresh || !g.bpm || g.bpm.k !== key) g.bpm = { k: key, v: [] };
+  const out: number[] = [];
+  let i = 0;
+  for (const e of list) {
+    if (!e || e.hp <= 0 || !isBossFoe(e) || e.pm !== undefined) continue;
+    let m = g.bpm.v[i];
+    if (!(m >= 1 && m <= 10)) { m = 1 + ri(10); g.bpm.v[i] = m; }
+    i++;
+    applyBossPower(e, m);
+    out.push(m);
+  }
+  return out;
+}
+function rollActFloorBossPower(g: Game): void {
+  if (!isActFloor(g.depth) || g.area === "camp" || g.vault) return;
+  rollBossPower(g, g.en.filter((e: En) => e.hp > 0 && isBossFoe(e)));
+}
+function bossPowerLine(list: En[]): string {
+  const ms = list.filter((e: En) => e.pm !== undefined).map((e: En) => "x" + bossPowerOf(e) + (bossPowerOf(e) === 1 ? " (normal)" : ""));
+  return ms.join(" / ");
+}
+function showBossPowerBanner(g: Game, list: En[], sub: string): boolean {
+  const pw = list.filter((e: En) => e.pm !== undefined && e.hp > 0);
+  if (!pw.length) return false;
+  for (const e of pw) e.pmShown = true;
+  const top = Math.max(...pw.map(bossPowerOf));
+  const ms = pw.map((e: En) => "x" + bossPowerOf(e));
+  let title: string, sub2: string;
+  if (pw.length === 1) {
+    const m = bossPowerOf(pw[0]);
+    title = "BOSS x" + m + " STRENGTH \u2022 x" + m + " LOOT";
+    sub2 = (m === 1 ? "x1 (normal) \u00b7 " : "") + sub;
+  } else {
+    title = "BOSSES " + ms.join(" / ") + " STRENGTH";
+    sub2 = "Loot " + ms.join(" / ") + " \u00b7 " + sub;
+  }
+  setBanner(g, title, sub2, bossPowerCol(top), 9, 4.2);
+  if (g.banner && g.banner.txt === title) SEV_BANNERS.add(g.banner);
+  msg(g, title + " - " + bossPowerLine(pw) + " - " + sub2, bossPowerCol(top));
+  return true;
 }
 function rollOvershieldCount(): number {
   let r = R(), acc = 0;
@@ -2026,12 +2102,14 @@ function enterSecretArena(g: Game): void {
     used.add(y * MW + x);
   }
   for (const e of g.en) if (e.packId === packId) e.bN = n;
+  const arenaBosses = g.en.filter((e: En) => e.packId === packId);
+  rollBossPower(g, arenaBosses, true);
   if (R() < UE_BOSS_CH) {
     const c = pickWalk(g, used, g.hero.x, g.hero.y, 6, 3);
     if (c) { const u = mkUltraElite(g, c[0], c[1]); u.awake = true; g.en.push(u); }
   }
   computeVis(g); placeTorches(g);
-  setBanner(g, "SECRET ARENA", "A triple boss \u00b7 each bears three overshields", "#ff4060", 8, 3.4);
+  if (!showBossPowerBanner(g, arenaBosses, "Secret arena \u00b7 triple boss \u00b7 three overshields each")) setBanner(g, "SECRET ARENA", "A triple boss \u00b7 each bears three overshields", "#ff4060", 8, 3.4);
   msg(g, "The secret portal drops you into a sealed arena!", "#ff8080");
   g.flash = 0.5; g.flashC = "#ff4060"; g.sfx("portal");
   saveGame(g); g.notify();
@@ -6488,8 +6566,12 @@ function actBossIntro(g: Game, e: En): void {
   e.abIntro = true;
   const d = actBossDef(e.abt as number);
   const nm = actBossFullName(e.abt as number, e.abc ?? 0);
-  setBanner(g, nm.toUpperCase(), d.title, d.glow, 9, 3.8);
-  msg(g, nm + " - " + d.title + "!", d.glow);
+  const pack = g.en.filter((o: En) => o.hp > 0 && isBossFoe(o) && (o === e || (e.packId !== undefined && o.packId === e.packId) || !!o.act));
+  if (e.pm !== undefined && !e.pmShown) { for (const o of pack) o.abIntro = true; showBossPowerBanner(g, pack, nm + " · " + d.title); }
+  else if (e.pm === undefined) {
+    setBanner(g, nm.toUpperCase(), d.title, d.glow, 9, 3.8);
+    msg(g, nm + " - " + d.title + "!", d.glow);
+  }
   g.sfx("roar");
   g.shake = Math.max(g.shake, 8);
   g.flash = Math.max(g.flash, 0.35); g.flashC = d.glow;
@@ -6795,11 +6877,14 @@ function spillTiles(g: Game, x: number, y: number, n: number): { x: number; y: n
   while (out.length < n) out.push({ x, y });
   return out;
 }
-function fountainActLoot(g: Game, e: En, more = false): void {
+function fountainActLoot(g: Game, e: En, more = false, lootMul = 1): void {
   const act = e.act ?? actOf(g.depth);
   const d = g.depth;
-  const n = actLootCount(act, d) + extraBossLootN(e);
-  const tiles = spillTiles(g, e.x, e.y, n + 1 + POT_ACT_N);
+  const lm = Math.max(1, Math.min(10, Math.floor(lootMul)));
+  let n = 0;
+  for (let i = 0; i < lm; i++) n += actLootCount(act, d) + extraBossLootN(e);
+  const nPot = POT_ACT_N * lm;
+  const tiles = spillTiles(g, e.x, e.y, n + 1 + nPot);
   const mf = efP(g, 54);
   for (let i = 0; i < n; i++) {
     let it = actLootItem(act, d);
@@ -6810,14 +6895,16 @@ function fountainActLoot(g: Game, e: En, more = false): void {
   }
   const gm = efGoldMul(g, e);
   const extra = actExtraLoot(act);
-  const gg = Math.max(800, safeRound((3000 + 900 * act + d * 160) * (0.85 + R() * 0.35) * gm * extra.goldMul));
-  if (extra.gems > 0) g.gems = (g.gems ?? 0) + extra.gems;
+  let gg = 0;
+  for (let i = 0; i < lm; i++) gg += Math.max(800, safeRound((3000 + 900 * act + d * 160) * (0.85 + R() * 0.35) * gm * extra.goldMul));
+  if (extra.gems > 0) g.gems = (g.gems ?? 0) + extra.gems * lm;
   g.gold += gg;
   floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
   const gp = tiles[n] ?? { x: e.x, y: e.y };
   g.drops.push({ x: gp.x, y: gp.y, item: null, pot: false, gold: Math.round(gg * 0.15) });
-  for (let i = 0; i < POT_ACT_N; i++) { const p = tiles[n + 1 + i] ?? { x: e.x, y: e.y }; g.drops.push({ x: p.x, y: p.y, item: null, pot: true, gold: 0 }); }
-  const nGems = 1 + (R() < 0.5 ? 1 : 0);
+  for (let i = 0; i < nPot; i++) { const p = tiles[n + 1 + i] ?? { x: e.x, y: e.y }; g.drops.push({ x: p.x, y: p.y, item: null, pot: true, gold: 0 }); }
+  let nGems = 0;
+  for (let i = 0; i < lm; i++) nGems += 1 + (R() < 0.5 ? 1 : 0);
   for (let i = 0; i < nGems; i++) giveDroppedGem(g, e.x, e.y, d);
   burst(g, e.ax * TS + 12, e.ay * TS + 12, 110, [GOLD, "#ffffff", "#fff0a0", "#ff60e0", "#ff8080"], 150, 40);
   g.sfx("sparkle"); g.sfx("coin");
@@ -7952,6 +8039,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     gp: packPortal(g.gobPort),
     pk: g.pk && (g.pk.s || g.pk.u || g.pk.d0) ? g.pk : null,
     pks: g.pkShow ?? null,
+    bpm: g.bpm ?? null,
   };
 }
 
@@ -7964,7 +8052,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     turn: g.turn, kills: g.kills, regenAcc: g.regenAcc, muted: g.muted,
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
-    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
+    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
     wallBreak: !!g.wallBreak, cracks: packCracks(g),
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
   };
@@ -8254,6 +8342,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.thSeen = thSeenParse(s.ts);
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
+    g.bpm = cleanBpm(s.bpm); // before the floor is restored, so respawned bosses reuse their rolls
     g.snapPrev = unpackFloorSnap(s.fp);
     g.snapCur = unpackFloorSnap(s.fc);
     dropCampLikeSnaps(g);
@@ -8289,6 +8378,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     }
     g.pk = cleanPeakTrack(s.pk) ?? {};
     g.pkShow = cleanPeakTrack(s.pks) ?? null;
+    g.bpm = cleanBpm(s.bpm);
     if (s.ar === "arena" && applySideInterior(g, s.ai)) g.area = "arena";
     else if (s.ar === "goblin" && applySideInterior(g, s.gi)) g.area = "goblin";
     g.mode = "play";
@@ -8513,7 +8603,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
       return p && typeof p === "object" && typeof p.x === "number" && typeof p.y === "number" && inb(p.x, p.y) ? { x: Math.floor(p.x), y: Math.floor(p.y) } : undefined;
     };
     g.campSpot = pt(s.campSpot); g.stashAt = pt(s.stashAt); g.restAt = pt(s.restAt); g.fireAt = pt(s.fireAt);
-    g.pk = cleanPeakTrack(s.pk) ?? {}; g.pkShow = cleanPeakTrack(s.pkShow) ?? null;
+    g.pk = cleanPeakTrack(s.pk) ?? {}; g.pkShow = cleanPeakTrack(s.pkShow) ?? null; g.bpm = cleanBpm(s.bpm);
     g.gambler = null;
     if (g.area === "camp") placeMerchant(g);
     const fromSaveItems = Array.isArray(s.stash) ? (s.stash as unknown[]).map((o: unknown) => validItem(o)).filter((x: Item | null): x is Item => x !== null) : [];
@@ -9201,17 +9291,28 @@ function kill(g: Game, e: En): void {
   else if (e.act) {
     e.hp = 0;
     const more = packRemain(g, e) > 0 || !!livingActBoss(g);
-    fountainActLoot(g, e, more);
+    fountainActLoot(g, e, more, bossPowerOf(e));
     if (!more) {
       g.actCleared = Math.max(g.actCleared ?? 0, g.depth);
       openCampPortal(g);
     }
   } else {
-    const n = 1 + ri(3);
-    for (let i = 0; i < n; i++) drop(makeItem(d + 1, rollRar(1.35, 0, d)));
-    dropExtraBossLoot(g, e, drop);
-    for (let i = 0; i < POT_BOSS_N; i++) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 });
-    gold(25);
+    // Boss power xN: the normal boss loot rolled N times (items, extra-boss loot, potions, gold), spread around the boss.
+    const lm = bossPowerOf(e);
+    const d0 = g.drops.length;
+    let n = 0;
+    for (let r = 0; r < lm; r++) {
+      const nr = 1 + ri(3); n += nr;
+      for (let i = 0; i < nr; i++) drop(makeItem(d + 1, rollRar(1.35, 0, d)));
+      dropExtraBossLoot(g, e, drop);
+      for (let i = 0; i < POT_BOSS_N; i++) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 });
+      gold(25);
+    }
+    if (lm > 1) {
+      const added = g.drops.slice(d0);
+      const tiles = spillTiles(g, e.x, e.y, added.length);
+      for (let i = 0; i < added.length; i++) { const t = tiles[i]; if (t) { added[i].x = t.x; added[i].y = t.y; } }
+    }
     const left = packRemain(g, e);
     if (e.bN && e.bN > 1 && left > 0) setBanner(g, "BOSS COPY FALLS!", left + " remain \u00b7 loot drops", "#ff6060", 5, 2.8);
     else setBanner(g, "BOSS DEFEATED!", e.name + " dropped " + n + " item" + (n > 1 ? "s" : ""), "#ff6060", 5, 3);
@@ -10203,8 +10304,10 @@ function loadCombinePass(g: Game): number {
   let n = 0;
   try { n = runAutoCombine(g); } catch { n = 0; }
   if (n > 0) {
-    msg(g, "Auto-combined " + n + " group" + (n === 1 ? "" : "s") + " of items already in your bag.", SET_COL);
-    try { saveGame(g, true, true); } catch { /* save errors are reported by the save path */ }
+    // Toast only (no log line), so an import/load notice stays the latest message.
+    showLootToast(g, "Auto-combined " + n + " group" + (n === 1 ? "" : "s") + " already in your bag");
+    // Persist through the normal autosave path on the next frame (same rules as the 60s autosave).
+    g.saveT = Math.max(g.saveT ?? 0, 60);
   }
   return n;
 }
@@ -10438,6 +10541,7 @@ function maybeSpawnPrisThreats(g: Game): void {
     }
   }
   if (deepPrisGated(g)) for (const e of g.en) if (e.hp > 0 && isBossFoe(e)) applyOvershields(g, e);
+  rollActFloorBossPower(g);
   if (!earlySafeDepth(d) && R() < seFloorChance(d)) {
     const n = 1 + (R() < 0.20 + 0.35 * rampT(d) ? 1 : 0);
     for (let i = 0; i < n; i++) {
@@ -13572,6 +13676,114 @@ function peakShot(withUlt = true): Record<string, unknown> {
   });
 }
 try { (window as unknown as { __ED16_PEAK?: object }).__ED16_PEAK = { feed: peakFeed, shot: peakShot, rect: (): object | null => PEAK_LAST_RECT, audit: auditCombine, auditCode: auditSaveCode, end: portalsEnd }; } catch { /* ignore */ }
+// ---------- test hooks: boss power roll ----------
+function bpGame(nPris: number, depth: number): Game {
+  const g = newGame(null);
+  g.mode = "play"; g.lvl = 80; g.depth = depth; g.front = depth; g.area = "dungeon"; g.vault = null;
+  const slots: [EqKey, Kind][] = [["head", "head"], ["chest", "chest"], ["arms", "arms"], ["legs", "legs"], ["rh", "sword"], ["pet", "pet"], ["lh", "shield"]];
+  g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+  for (const [k, kind] of slots) g.eq[k] = makeItem(depth, k === "pet" || k === "lh" ? 5 : 5, kind, depth);
+  for (let i = 0; i < nPris && i < slots.length; i++) { const [k, kind] = slots[i]; g.eq[k] = kind === "pet" ? makePet(depth, 7, depth) : makeItem(depth, 7, kind, depth); }
+  return g;
+}
+function bpTest(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const res: Record<string, unknown> = {};
+    // 4 vs 5 Prismatic on an act floor (depth 55: deep-gated so copies + overshields also roll)
+    const cond: Record<string, unknown> = {};
+    for (const np of [4, 5, 7]) {
+      const g = bpGame(np, 55); genFloor(g);
+      const bs = g.en.filter((e: En) => e.hp > 0 && isBossFoe(e));
+      cond["pris" + np] = { count: prisEquippedCount(g), bosses: bs.length, pms: bs.map((e: En) => e.pm ?? null), ovm: bs.map((e: En) => e.ovm ?? 0), bN: bs.map((e: En) => e.bN ?? 1) };
+    }
+    res.cond = cond;
+    // distribution
+    const g = bpGame(5, 55);
+    const hist = new Array(11).fill(0);
+    for (let i = 0; i < 20000; i++) { const e = mkEnemy(g, 5, 5, 2); rollBossPower(g, [e]); hist[e.pm ?? 0]++; }
+    res.hist = hist;
+    // HP / shield / overshield / damage scaling
+    const scal: Record<string, unknown>[] = [];
+    for (const m of [1, 3, 7, 10]) {
+      const a = mkActBoss(g, 6, 6); applyOvershields(g, a, 2);
+      const b0 = { mhp: a.mhp, hp: a.hp, mshd: a.mshd ?? 0, ovmhp: a.ovmhp ?? 0, atkMul: bossAtkMul(a) };
+      applyBossPower(a, m);
+      scal.push({ m, hpX: a.mhp / b0.mhp, curX: a.hp / b0.hp, shdX: (a.mshd ?? 0) / Math.max(1, b0.mshd), ovX: (a.ovmhp ?? 0) / Math.max(1, b0.ovmhp), atkX: bossAtkMul(a) / b0.atkMul, ovm: a.ovm, atkMul: bossAtkMul(a) });
+    }
+    res.scaling = scal;
+    // real enemy damage path uses bossAtkMul: compare hero damage taken from the same boss at x1 vs x5
+    // secret arena: three bosses, three overshields each, independent rolls + banner
+    const ga = bpGame(5, 55); genFloor(ga); ga.en = []; ga.banner = null;
+    enterSecretArena(ga);
+    const ab = ga.en.filter((e: En) => isBossFoe(e));
+    res.arena = { bosses: ab.length, pms: ab.map((e: En) => e.pm ?? null), ovm: ab.map((e: En) => e.ovm), banner: ga.banner };
+    const arenaDist = new Array(11).fill(0);
+    let distinctTriples = 0;
+    for (let i = 0; i < 300; i++) {
+      const gx = bpGame(5, 55); gx.area = "dungeon"; gx.arena = null; gx.en = [];
+      moveCarveRoom(gx, 22, 22, 12);
+      enterSecretArena(gx);
+      const pms = gx.en.filter((e: En) => isBossFoe(e)).map((e: En) => e.pm ?? 0);
+      for (const m of pms) arenaDist[m]++;
+      if (new Set(pms).size > 1) distinctTriples++;
+    }
+    { const c2 = makeCode(ga); const r2 = decodeCode(c2, null);
+      res.arenaPersist = { area: r2 ? r2.area : null, before: ga.en.filter((e: En) => isBossFoe(e)).map((e: En) => [e.pm, e.mhp]), after: r2 ? r2.en.filter((e: En) => isBossFoe(e)).map((e: En) => [e.pm, e.mhp]) : null }; }
+    res.arenaDist = arenaDist; res.arenaNotAllSame = distinctTriples;
+    const g4 = bpGame(4, 55); g4.en = []; moveCarveRoom(g4, 22, 22, 12); enterSecretArena(g4);
+    res.arena4 = { pms: g4.en.filter((e: En) => isBossFoe(e)).map((e: En) => e.pm ?? null), banner: g4.banner ? g4.banner.txt : null };
+    // banner for an act boss encounter
+    const gb = bpGame(5, 55); genFloor(gb); gb.banner = null;
+    const act = gb.en.find((e: En) => e.act && e.hp > 0);
+    if (act) actBossIntro(gb, act);
+    res.actBanner = gb.banner;
+    // persistence: Save Code round trip keeps the rolls on the current floor
+    const code = makeCode(gb);
+    const gr = decodeCode(code, null);
+    res.persistDbg = { bpmBefore: gb.bpm, bpmAfter: gr ? gr.bpm : null, depthAfter: gr ? gr.depth : null, areaAfter: gr ? gr.area : null, prisAfter: gr ? prisEquippedCount(gr) : null, enAfter: gr ? gr.en.filter((e: En) => isBossFoe(e)).map((e: En) => [e.name, e.pm, e.hp > 0, e.act]) : null };
+    res.persist = { before: gb.en.filter((e: En) => isBossFoe(e) && e.hp > 0).map((e: En) => [e.pm, e.mhp]), after: gr ? gr.en.filter((e: En) => isBossFoe(e) && e.hp > 0).map((e: En) => [e.pm, e.mhp]) : null };
+    // loot scaling: arena-style cls-2 boss and act boss at x1 vs x5 vs x10
+    const loot: Record<string, unknown>[] = [];
+    for (const m of [1, 5, 10]) {
+      let items = 0, gold = 0, pots = 0, tiles = new Set<string>();
+      const T = 60;
+      for (let t = 0; t < T; t++) {
+        const gl = bpGame(5, 55); gl.en = []; moveCarveRoom(gl, 22, 22, 10); gl.drops = [];
+        const e = mkEnemy(gl, 22, 20, 2); e.awake = true; gl.en.push(e); applyBossPower(e, m); e.hp = 0;
+        const g0 = gl.gold;
+        kill(gl, e);
+        items += gl.drops.filter((d: Drop) => !!d.item).length; pots += gl.drops.filter((d: Drop) => d.pot).length; gold += gl.gold - g0;
+        for (const d of gl.drops) tiles.add(d.x + "," + d.y);
+      }
+      loot.push({ kind: "boss", m, items: items / T, pots: pots / T, gold: Math.round(gold / T), tilesUsedLastRun: tiles.size });
+      let ai = 0, ag = 0;
+      for (let t = 0; t < 30; t++) {
+        const gl = bpGame(5, 55); gl.en = []; moveCarveRoom(gl, 22, 22, 10); gl.drops = [];
+        const e = mkActBoss(gl, 22, 20); gl.en.push(e); applyBossPower(e, m);
+        const g0 = gl.gold;
+        fountainActLoot(gl, e, false, bossPowerOf(e));
+        ai += gl.drops.filter((d: Drop) => !!d.item).length; ag += gl.gold - g0 + gl.drops.reduce((s0: number, d: Drop) => s0 + (d.gold || 0), 0);
+      }
+      loot.push({ kind: "actBoss", m, items: ai / 30, gold: Math.round(ag / 30) });
+    }
+    res.loot = loot;
+    return res;
+  });
+}
+function bpShot(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = bpGame(5, 55);
+    g.en = []; moveCarveRoom(g, 22, 22, 12);
+    g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 22;
+    enterSecretArena(g);
+    g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 22; computeVis(g);
+    LOAD_COMBINED.add(g);
+    if (installTestGame) installTestGame(g);
+    IP.camOk = false;
+    return { ok: true, area: g.area, hero: [g.hero.x, g.hero.y], en: g.en.map((e: En) => [e.name, e.x, e.y, e.hp, e.pm, e.cls]), pms: g.en.filter((e: En) => isBossFoe(e)).map((e: En) => e.pm), banner: g.banner };
+  });
+}
+try { (window as unknown as { __ED16_BPOW?: object }).__ED16_BPOW = { test: bpTest, shot: bpShot, end: portalsEnd }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
 function withPetsTest<T>(fn: () => T): T {
   const prev = GIB_SKIP_SAVE;
@@ -15558,6 +15770,7 @@ export default function App() {
         const sub = boss.act && boss.abt !== undefined ? actBossDef(boss.abt).title : "";
         ctx.fillStyle = "rgba(10,4,8,0.85)"; ctx.fillRect(4, HUD + 3, VW - 8, sub ? 22 : 17);
         text(boss.name, VW / 2, HUD + 8, bc, "center", 7);
+        if (boss.pm !== undefined) text("x" + bossPowerOf(boss), VW - 10, HUD + 9, bossPowerCol(bossPowerOf(boss)), "right", 9);
         if (sub) text(sub, VW / 2, HUD + 15, "#e8d0c0", "center", 5);
         ctx.fillStyle = "#300808"; ctx.fillRect(8, HUD + (sub ? 18 : 13), VW - 16, 4);
         if ((boss.ovn ?? 0) > 0) {
@@ -15578,6 +15791,7 @@ export default function App() {
           const bc = b.act && b.abt !== undefined ? actBossDef(b.abt).glow : "#ff7070";
           const y = HUD + 14 + i * 13;
           text(b.name, VW / 2, y, bc, "center", 5);
+          if (b.pm !== undefined) text("x" + bossPowerOf(b), VW - 10, y, bossPowerCol(bossPowerOf(b)), "right", 7);
           ctx.fillStyle = "#300808"; ctx.fillRect(8, y + 4, VW - 16, 4);
           if ((b.ovn ?? 0) > 0) {
             ctx.fillStyle = "#c0f0ff"; ctx.fillRect(8, y + 4, Math.max(1, Math.round((VW - 16) * (b.ovhp ?? 0) / Math.max(1, b.ovmhp ?? 1))), 4);
@@ -15718,7 +15932,7 @@ export default function App() {
         ctx.fillStyle = "rgba(8,6,14,0.9)"; ctx.fillRect(nb.x, nb.y, nb.w, nb.h);
         ctx.fillStyle = bn.c; ctx.fillRect(nb.x, nb.y, nb.w, 1); ctx.fillRect(nb.x, nb.y + nb.h - 1, nb.w, 1); ctx.fillRect(nb.x, nb.y, 1, nb.h); ctx.fillRect(nb.x + nb.w - 1, nb.y, 1, nb.h);
         const cx = nb.x + nb.w / 2;
-        text(bn.txt, cx, nb.y + 10, bn.rar >= 7 ? RC[7] : bn.c, "center", bn.rar >= 6 ? 10 : 9);
+        text(bn.txt, cx, nb.y + 10, bn.rar >= 7 && !SEV_BANNERS.has(bn) ? RC[7] : bn.c, "center", bn.rar >= 6 ? 10 : 9);
         text(bn.sub.length > 46 ? bn.sub.slice(0, 45) + "\u2026" : bn.sub, cx, nb.y + 23, "#ffffff", "center", 6);
         if (bn.rar >= 3) for (let i = 0; i < (bn.rar >= 6 ? 14 : 6); i++) { ctx.fillStyle = i % 2 ? "#ffffff" : bn.c; ctx.fillRect(nb.x + Math.random() * nb.w, nb.y + Math.random() * nb.h, 1, 1); }
         ctx.globalAlpha = 1;
