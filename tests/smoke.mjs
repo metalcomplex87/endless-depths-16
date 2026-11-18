@@ -33,6 +33,8 @@ async function launch() {
 
 async function open(browser) {
   const page = await browser.newPage();
+  page.on("pageerror", (e) => console.log("PAGEERROR", e && e.message));
+  page.on("framenavigated", (f) => { if (f === page.mainFrame()) console.log("NAV", f.url()); });
   await page.setViewport(VIEWPORT);
   await page.setUserAgent(UA);
   page.setDefaultTimeout(25000);
@@ -106,7 +108,13 @@ async function loadCode(page, code) {
   await page.waitForFunction(() => {
     const hook = (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || "");
     return /Imported/i.test(hook) && /press Save Game/i.test(hook) && /saves on this device/i.test(hook);
-  }, { timeout: 25000 });
+  }, { timeout: 25000 }).catch(async (err) => {
+    const last = await page.evaluate(() => (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "")).catch(() => "?");
+    console.log("loadCode: last message was:", last);
+    console.log("BODY:", (await page.evaluate(() => document.body.innerText).catch(() => "?")).slice(0, 1500));
+    await page.screenshot({ path: "/tmp/smoke-fail.png" }).catch(() => {});
+    throw err;
+  });
   await sleep(300);
 }
 

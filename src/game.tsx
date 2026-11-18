@@ -4203,7 +4203,9 @@ function computeVis(g: Game): void {
   scanScreenAlerts(g);
 }
 
+let QUIET_ANNOUNCE = 0; // >0 while decoding a background run (e.g. the Jax seed) so its messages don't replace the live one
 function announce(t: string): void {
+  if (QUIET_ANNOUNCE > 0) return;
   try {
     (window as unknown as { __ED16_LAST_MSG?: string }).__ED16_LAST_MSG = t;
     document.documentElement.dataset.ed16Msg = t;
@@ -7692,7 +7694,9 @@ function ensureJaxSeed(): boolean {
   if (!jaxSeedEnabled || jaxSeedBusy) return false;
   jaxSeedBusy = true;
   try {
-    const seedG = decodeCode(JAX_SEED_CODE, null);
+    let seedG: Game | null = null;
+    QUIET_ANNOUNCE++;
+    try { seedG = decodeCode(JAX_SEED_CODE, null); } finally { QUIET_ANNOUNCE--; }
     if (!seedG) return false;
     seedG.mode = "play";
     const seedRank = runProgressRank(seedG.lvl, seedG.depth, seedG.xp);
@@ -10302,7 +10306,9 @@ function loadCombinePass(g: Game): number {
   LOAD_COMBINED.add(g);
   if (!autoCombineOn(g)) return 0;
   let n = 0;
-  try { n = runAutoCombine(g); } catch { n = 0; }
+  // Lines still go to the in-game log; QUIET_ANNOUNCE keeps them from replacing the import/load notice.
+  QUIET_ANNOUNCE++;
+  try { n = runAutoCombine(g); } catch { n = 0; } finally { QUIET_ANNOUNCE--; }
   if (n > 0) {
     // Toast only (no log line), so an import/load notice stays the latest message.
     showLootToast(g, "Auto-combined " + n + " group" + (n === 1 ? "" : "s") + " already in your bag");
