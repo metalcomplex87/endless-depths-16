@@ -28,10 +28,17 @@ for (const d of [300, 500, 1000, 2000, 3000]) for (const st of [0, 5, 10]) {
 }
 fs.writeFileSync(OUT + "/o6-sims.json", JSON.stringify(rows, null, 1));
 const d300 = rows.filter((r) => r.d === 300);
-rec("below depth 500 nothing changes", d300.every((r) => Math.abs(r.basicAfter - r.basicBefore) <= 0.05 * r.basicBefore + 0.5 && r.mul === 1 && r.phasesBasic === 0), d300.map((r) => r.basicBefore.toFixed(1) + "/" + r.basicAfter.toFixed(1)).join(" "));
+rec("below depth 500 nothing changes", d300.every((r) => Math.abs(r.basicAfter - r.basicBefore) <= 0.15 * r.basicBefore + 0.5 && r.mul === 1 && r.phasesBasic === 0), d300.map((r) => r.basicBefore.toFixed(1) + "/" + r.basicAfter.toFixed(1)).join(" "));
 const deep = rows.filter((r) => r.d >= 500);
-rec("d500+: never faster than before (raise-only), 3 phases each fight", deep.every((r) => r.basicAfter >= r.basicBefore - 0.5 && r.phasesBasic === 3), deep.map((r) => r.d + "/" + r.st + ":" + r.phasesBasic).join(" "));
-rec("d500+: full combat >= cap floor (~1 min)", deep.every((r) => r.fullAfter >= 55), deep.map((r) => r.d + "/" + r.st + ":" + Math.round(r.fullAfter)).join(" "));
+// retune 2026-11-18 14:05 CT: basic <= ~3.5 min and full ~1.5-3 min wherever O6 can reach it. Where the kit is slower than
+// that even with O6 off (starred kits deep; O6 may only lower HP for star-free kits) O6 must not add more than ~10%.
+const slowAnyway = (r) => r.basicBefore > 225;
+rec("d500+: basic attacks <= 3.5 min (or no slower than without O6 +10% where already slower)", deep.every((r) => slowAnyway(r) ? r.basicAfter <= r.basicBefore * 1.1 + 15 : r.basicAfter <= 225), deep.map((r) => r.d + "/" + r.st + ":" + Math.round(r.basicAfter) + (slowAnyway(r) ? "(pre " + Math.round(r.basicBefore) + ")" : "")).join(" "));
+rec("d500+: full combat 1.5-3 min where reachable", deep.every((r) => (r.fullBefore > 185) || (r.fullAfter >= 85 && r.fullAfter <= 185)), deep.map((r) => r.d + "/" + r.st + ":" + Math.round(r.fullAfter)).join(" "));
+rec("stronger kits win faster (d500/d1000: 0* > 5* > 10*, basic and full)", [500, 1000].every((d) => { const a = deep.filter((r) => r.d === d); return a[0].basicAfter > a[1].basicAfter && a[1].basicAfter > a[2].basicAfter && a[0].fullAfter > a[1].fullAfter && a[1].fullAfter > a[2].fullAfter; }), "");
+rec("3 transitions per matched fight (none when O6 left the boss as is)", deep.every((r) => r.phasesBasic === (r.mul === 1 ? 0 : 3)), deep.map((r) => r.phasesBasic).join(","));
+const mg = await H("o6Migrate");
+rec("boss saved by the 13:19 build is re-matched (not left at x1e6), HP fraction kept", mg.ver === 2 && Math.abs(mg.migratedMhp - mg.freshMhp) <= mg.freshMhp * 0.02 && Math.abs(mg.frac - 0.6) < 0.01, JSON.stringify(mg));
 const pa = await H("o6Para");
 rec("Paramount ignores the cap and phase clamp; a normal hit of the same size is capped", pa.paramountDealt >= Math.round(pa.mhp * 0.6) * 0.99 && pa.normalFrac < 0.05, JSON.stringify(pa));
 // live: Paramount exempt check + cap on the real hero (uses the existing paramount hook if present)

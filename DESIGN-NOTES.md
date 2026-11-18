@@ -431,3 +431,16 @@ Design only; game code unchanged as of this note. Sits alongside the Prismatic p
 - Water: no longer blocks the player's path. The player can walk through water, with splashing sound effects while moving through it. All other existing water rules still apply, including that certain abilities can completely evaporate water.
 - Ice: a regular (non-Paramount) ultimate that hits ice melts it into water. A Paramount attack evaporates both ice and water.
 - Lava: unchanged. It still blocks the path completely. The only way past it is a Paramount attack, which turns lava into obsidian the player can walk across.
+
+## 2026-11-18 (14:05 CT): O6 retune (approved) — act-boss fights 1-3 min at d500+
+Only O6 levers changed; player side, A1/C1, Paramount and everything else untouched.
+- Root cause of the long 13:19 fights: the HP match ignored the act boss's phase shield refills (`actBossPhase`: 2 full refills from act 2 up), so pools were ~2-3x too big; and when the C1 %-strike alone was fast the HP was raised x1e6, which made the fight pace = the %-strike.
+- `o6PoolMul(e)` = (max HP + shield x (1 + refills)) / max HP, used by the HP match and the cap.
+- HP match: HP = N*Pn / max(sh/4, sh - N*pct), N = (T - transitions)/0.33 s, T = `O6_T0` - `O6_TK`*k = 206 - 75k s (0* ~189, 5* ~160, 10* ~131); was 150 - 80k.
+- Lowering: only for a star-free kit (`o6ZeroStar`: every equipped Prismatic has 0 stars) may the matched HP go BELOW the natural HP, floor `O6_MINMUL` = 1e-6 (d2000 0*: x0.0068, d3000 0*: x0.000027). Starred kits are never lowered.
+- If the match leaves the boss as is (factor 1 = kit already slower than the target), O6 adds no cap and no transitions to that boss.
+- Per-second cap: (`O6_CAP0` + `O6_CAPK`*k) of the whole pool = 0.6% + 0.44%*k per second (0* 0.70%/s, 5* 0.87%/s, 10* 1.04%/s); was 2% + 1.5%*k of max HP. Sets full-combat time ~149/122/104 s.
+- Transitions: still 3 (75/50/25%), `O6_PH_T` 3 s (was 4).
+- Saves: bosses scaled by the 13:19 build (`o6` = 1) are un-scaled by their stored factor and re-matched once (`O6_VER` = 2), keeping the HP fraction.
+- Known gap (needs a decision): starred kits that are slow even without O6 (5* at d2000/d3000 ~5.3-5.6 min, 10* at d3000 ~3.5 min) are unchanged, so deep 0* gear now finishes faster than deep 5* gear. Letting the lowering apply to all kits would put 5* at ~2.7/2.0 min and 10* at ~2.2/1.7 min everywhere.
+- Test: tests/o6.mjs (8 checks), hooks o6Tune (test-only), o6Migrate.

@@ -11972,49 +11972,72 @@ function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY
 //    %-strike included, Paramount exempt). Excess is wasted ("RESIST").
 // O5 light phases: at 75/50/25% HP a 4 s invulnerable transition (the boss still acts), no extra shield. Paramount ignores it.
 const O6_D0 = 500;
-const O6_T0 = 150, O6_TK = 80;           // target seconds = 150 - 80k
-const O6_MAXMUL = 1e6;                   // raise factor when the %-strike alone would finish inside T
-const O6_CAP0 = 0.02, O6_CAPK = 0.015;   // per-second HP-loss cap = 2% + 1.5%*k of max HP
-const O6_PH = [0.75, 0.5, 0.25], O6_PH_T = 4;
+let O6_T0 = 206, O6_TK = 75;           // basic-attack target seconds = 206 - 75k (incl. transitions): 0* ~189, 5* ~160, 10* ~131 (retuned 14:05 CT; was 150 - 80k)
+let O6_MAXMUL = 1e6;                   // ceiling on the raise factor
+let O6_MINMUL = 1e-6;                  // floor when lowering (star-free kits only)
+let O6_CAP0 = 0.006, O6_CAPK = 0.0044; // per-second loss cap = 0.6% + 0.44%*k of the whole pool (HP + shields + refills); was 2% + 1.5%*k of max HP
+let O6_PH = [0.75, 0.5, 0.25], O6_PH_T = 3; // was 4 s
+let O6_TUNE: Record<string, number> = {}; // test-only tuning overrides
 const O6_LOG = { raised: 0, capped: 0, wasted: 0, phases: 0, blocked: 0 };
 let O6_OFF = false; // test-only before/after switch
 function o6On(g: Game, e: En): boolean { return !O6_OFF && (g.depth || 0) >= O6_D0 && g.area !== "camp" && isBossFoe(e); }
 function o6K(g: Game): number { const bw = bulwarkOf(g.eq, g.depth); return bw ? bw.k : 0; }
 function o6Clock(g: Game): number { return g.petAbiT ?? 0; }
 function scaleBossPools(e: En, m: number): void {
-  if (!(m > 1)) return;
+  if (!(m > 0) || m === 1) return;
   e.mhp = safeRound(safeMul(e.mhp, m));
   e.hp = safeRound(safeMul(Math.max(1, e.hp), m));
   if ((e.mshd ?? 0) > 0) { e.mshd = safeRound(safeMul(e.mshd as number, m)); e.shd = safeRound(safeMul(e.shd ?? 0, m)); }
   if ((e.ovmhp ?? 0) > 0) { e.ovmhp = safeRound(safeMul(e.ovmhp as number, m)); e.ovhp = safeRound(safeMul(e.ovhp ?? 0, m)); }
 }
+// effective HP pool in units of max HP: HP + shield + the act boss's phase shield refills (actBossPhase: act 1 refills once,
+// later acts twice, each min(1, 0.35 + 0.04*act) of the max shield). The 13:19 build ignored the refills and overshot.
+function o6PoolMul(e: En): number {
+  const ms = Math.max(0, e.mshd ?? 0), mh = Math.max(1, e.mhp);
+  const refills = e.act ? (e.act === 1 ? 1 : 2) * Math.min(1, 0.35 + 0.04 * e.act) : 0;
+  return (mh + ms * (1 + refills)) / mh;
+}
+// star-free kit: every equipped Prismatic item has 0 stars (the only case where O6 may LOWER boss HP)
+function o6ZeroStar(eq: Eq): boolean {
+  let n = 0;
+  for (const k of EQK) { const it = eq[k]; if (!it || it.rar < 7 || it.kind === "gem") continue; n++; if (it.st && it.st.length > 0) return false; }
+  return n > 0;
+}
 function o6TargetMul(g: Game, e: En): number {
   const st = calc(g.lvl, g.eq);
   const bw = st.bw;
   const k = bw ? bw.k : 0;
-  const T = O6_T0 - O6_TK * k, N = T / RT_ATK;
+  const T = Math.max(20, O6_T0 - O6_TK * k - O6_PH.length * O6_PH_T), N = T / RT_ATK; // basic-attack seconds excluding transitions
   const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
   const ev = Math.max(1, st.atk * combatSwingMul(st, isTwo(main)));
   const Pn = Math.max(1, dmgF(ev, e.def) * (bw ? bw.bossMul : 1));
   const pct = bw ? bw.pct : 0;
-  const sh = (e.mhp + (e.mshd ?? 0)) / Math.max(1, e.mhp);
-  const need = 1 / N - pct;
-  if (need <= 0) return O6_MAXMUL;
-  const want = Pn / need / sh;
-  return Math.min(O6_MAXMUL, Math.max(1, want / Math.max(1, e.mhp)));
+  const sh = o6PoolMul(e);
+  // N swings of (Pn + pct*HP) empty HP*sh:  HP = N*Pn / (sh - N*pct). When the %-strike alone would be that fast,
+  // the per-second cap sets the pace instead, so the HP is matched as if the %-strike took 3/4 of the pool.
+  const den = Math.max(sh * 0.25, sh - N * pct);
+  const want = N * Pn / den;
+  const m = want / Math.max(1, e.mhp);
+  if (m >= 1) return Math.min(O6_MAXMUL, m);
+  return o6ZeroStar(g.eq) ? Math.max(O6_MINMUL, m) : 1; // lower only for star-free kits
 }
+const O6_VER = 2; // 2 = 14:05 CT retune; bosses saved by the 13:19 build (o6 = 1) are un-scaled and re-matched once
 function o6Apply(g: Game, e: En): void {
-  if (e.o6) return;
-  e.o6 = 1;
+  if (e.o6 === O6_VER) return;
+  if (e.o6 && e.o6m && e.o6m > 0 && e.o6m !== 1) scaleBossPools(e, 1 / e.o6m); // keeps the HP fraction
+  e.o6 = O6_VER;
   const m = o6TargetMul(g, e);
   e.o6m = m;
-  if (m > 1) { scaleBossPools(e, m); O6_LOG.raised++; }
+  if (m !== 1) { scaleBossPools(e, m); O6_LOG.raised++; }
   const f = e.hp / Math.max(1, e.mhp);
   let ph = 0; for (const t of O6_PH) if (f <= t) ph++;
-  e.o6ph = ph;
+  // a kit that is already slower than the target (HP not raised, and lowering not allowed) gets no cap and no
+  // transitions either, so O6 never makes an already-long fight longer
+  e.o6ph = m === 1 ? O6_PH.length : ph;
 }
 // returns the damage allowed through (0 = fully blocked) for a non-Paramount hit on a boss at d500+
 function o6Gate(g: Game, e: En, dmg: number): number {
+  if (e.o6m === 1) return dmg; // not matched (already slow): no cap
   const now = o6Clock(g);
   if ((e.o6inv ?? 0) - now > O6_PH_T + 0.01) e.o6inv = 0; // clock reset after a reload: never strand a boss in a transition
   if ((e.o6inv ?? 0) > now) {
@@ -12022,7 +12045,7 @@ function o6Gate(g: Game, e: En, dmg: number): number {
     if ((e.o6rt ?? -9) + 0.5 <= now) { e.o6rt = now; floatTxt(g, e.x, e.y - 0.4, "INVULNERABLE", "#ffe080"); }
     return 0;
   }
-  const c = (O6_CAP0 + O6_CAPK * o6K(g)) * e.mhp; // allowed HP loss per second
+  const c = (O6_CAP0 + O6_CAPK * o6K(g)) * e.mhp * o6PoolMul(e); // allowed loss per second, as a share of the whole pool
   if ((e.o6t ?? 0) > now + 0.01 || e.o6b === undefined) { e.o6t = now; e.o6b = c; }
   const dt = Math.max(0, now - (e.o6t ?? now));
   e.o6t = now;
@@ -17481,6 +17504,17 @@ try {
     bwSim: (depth: number, stars: number, on: boolean, nPris?: number): Record<string, unknown> => simBwFight(depth, stars, on, nPris ?? 6),
     o6Sim: (depth: number, stars: number, full: boolean, on: boolean, maxSec?: number): Record<string, unknown> => simO6Fight(depth, stars, full, on, maxSec ?? 1800),
     o6Log: (): Record<string, unknown> => ({ ...O6_LOG }),
+    o6Migrate: (): Record<string, unknown> => { // a boss saved by the 13:19 build (o6 = 1, HP x1e6) is re-matched under the retune
+      const oldG = STAT_G;
+      try {
+        const g = newGame(null); g.mode = "play"; g.depth = 1000; g.lvl = 1000; g.area = "dungeon"; g.eq = { ...fullPrisEq(1001, 5), pet: null }; g.petAbiT = 5; g.sfx = () => undefined; g.notify = () => undefined; STAT_G = g;
+        const fresh = mkActBoss(g, g.hero.x + 1, g.hero.y); o6Apply(g, fresh);
+        const old = mkActBoss(g, g.hero.x + 1, g.hero.y); const base = old.mhp; scaleBossPools(old, 1e6); old.hp = Math.round(old.mhp * 0.6); old.o6 = 1; old.o6m = 1e6;
+        o6Apply(g, old);
+        return { base, freshMhp: fresh.mhp, migratedMhp: old.mhp, frac: +(old.hp / old.mhp).toFixed(3), ver: old.o6 };
+      } finally { STAT_G = oldG; }
+    },
+    o6Tune: (o: Record<string, number>): Record<string, unknown> => { if (o.MINMUL !== undefined) O6_MINMUL = o.MINMUL; if (o.T0 !== undefined) O6_T0 = o.T0; if (o.TK !== undefined) O6_TK = o.TK; if (o.MAXMUL !== undefined) O6_MAXMUL = o.MAXMUL; if (o.CAP0 !== undefined) O6_CAP0 = o.CAP0; if (o.CAPK !== undefined) O6_CAPK = o.CAPK; if (o.PH_T !== undefined) O6_PH_T = o.PH_T; O6_TUNE = { ...O6_TUNE, ...o }; return { T0: O6_T0, TK: O6_TK, MAXMUL: O6_MAXMUL, CAP0: O6_CAP0, CAPK: O6_CAPK, PH_T: O6_PH_T, tune: O6_TUNE }; },
     o6Para: (): Record<string, unknown> => { // Paramount ignores the cap and the phase clamp; a normal hit of the same size is capped
       const mk = (): { g: Game; e: En } => { const g = newGame(null); g.mode = "play"; g.depth = 1000; g.lvl = 1000; g.area = "dungeon"; g.eq = fullPrisEq(1001, 5); g.petAbiT = 10; g.sfx = () => undefined; g.notify = () => undefined; const e = mkActBoss(g, g.hero.x + 1, g.hero.y); e.ovn = 0; e.shd = 0; e.mshd = 0; g.en = [e]; return { g, e }; };
       const oldG = STAT_G;
