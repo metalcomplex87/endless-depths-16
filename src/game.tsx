@@ -12046,9 +12046,9 @@ interface ParaFx {
   sh: number[]; // shards, 8 numbers each: x, y, vx, vy, rot, vr, size, hue (screen space, relative to the sigil)
 }
 const PARA_GEAR: EqKey[] = ["head", "chest", "arms", "legs", "rh", "lh"];
-const PARA_DET = 2.25; // detonation time (s): damage lands here
-const PARA_END = 4.9;
-const PARA_SLOW = 0.3; // game time runs at 30% until the detonation
+const PARA_DET = 4.0; // climactic explosion (s): damage lands here
+const PARA_END = 6.4;
+const PARA_SLOW = 0.3; // game time runs at 30% until the explosion
 let PARA_TEST_JIT: number | undefined; // test hook: fixed damage jitter
 let PARA_CAM = { x: 0, y: 0 };
 function paraPieces(g: Game): { slot: EqKey; it: Item }[] | null {
@@ -12094,7 +12094,7 @@ function paraDetonate(g: Game): void {
   const P = g.para;
   if (!P || P.fired) return;
   P.fired = true;
-  g.flash = 0.95; g.flashC = "#fff4c8"; g.shake = 26;
+  g.shake = 34;
   const ps = paraPieces(g);
   if (g.mode === "play" && ps) {
     const st = calc(g.lvl, g.eq);
@@ -12114,20 +12114,23 @@ function paraDetonate(g: Game): void {
     }
     endTurn(g, false);
   }
-  // glass shards burst out of the sigil
-  for (let i = 0; i < 46; i++) {
-    const a = R() * 6.2832, sp = 90 + R() * 260;
+  // debris bursts out from the hero
+  for (let i = 0; i < 40; i++) {
+    const a = R() * 6.2832, sp = 110 + R() * 300;
     P.sh.push(0, 0, Math.cos(a) * sp, Math.sin(a) * sp, R() * 6.28, (R() - 0.5) * 14, 3 + R() * 6, Math.floor(R() * 360));
   }
   g.banner = null;
-  msg(g, "PARAMOUNT: " + fmtFull(P.total) + " total damage, " + P.hit + " struck, " + P.slain + " slain.", "#fff0a0");
+  msg(g, "Six ultimates unleashed: " + fmtFull(P.total) + " total damage, " + P.hit + " struck, " + P.slain + " slain.", "#fff0a0");
   saveGame(g);
 }
 // Real-time (not slowed) timeline tick. Returns the game-time scale for this frame.
 function paraTick(g: Game, dt: number): number {
   const P = g.para;
   if (!P) return 1;
+  const t0 = P.t;
   P.t += dt;
+  if (t0 < PARA_IMPACT && P.t >= PARA_IMPACT) { g.shake = 30; g.flash = 0.25; g.flashC = "#ffffff"; }
+  else if (P.t >= PARA_IMPACT && P.t < PARA_DET) g.shake = Math.max(g.shake, 5 + 9 * (P.t - PARA_IMPACT) / (PARA_DET - PARA_IMPACT));
   if (!P.fired && P.t >= PARA_DET) paraDetonate(g);
   if (P.sh.length) for (let i = 0; i < P.sh.length; i += 8) {
     P.sh[i] += P.sh[i + 2] * dt; P.sh[i + 1] += P.sh[i + 3] * dt;
@@ -12138,148 +12141,149 @@ function paraTick(g: Game, dt: number): number {
 }
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 const easeOut = (v: number): number => 1 - Math.pow(1 - clamp01(v), 3);
+// Paramount v2 timeline (real seconds): 0-1.6 charge (glints, slowed time) -> 1.6 beam slams down on the hero
+// (hard shake, lightning) -> 1.6-4.0 beam widens until it fills the screen while the screen whites out ->
+// 4.0 climactic explosion: damage lands, white fades out over a shockwave + debris, then the combined number.
+const PARA_IMPACT = 1.6;
+let PARA_RNG = 1;
+function paraRand(): number { PARA_RNG = (PARA_RNG * 16807) % 2147483647; return PARA_RNG / 2147483647; }
+function drawBolt(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, len: number, segs: number, jag: number): void {
+  ctx.beginPath(); ctx.moveTo(x0, y0);
+  let x = x0, y = y0;
+  for (let i = 1; i <= segs; i++) {
+    const d = len * i / segs, off = (paraRand() - 0.5) * jag * 2;
+    x = x0 + Math.cos(ang) * d - Math.sin(ang) * off; y = y0 + Math.sin(ang) * d + Math.cos(ang) * off;
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
 function drawParamount(ctx: CanvasRenderingContext2D, g: Game): void {
   const P = g.para;
   if (!P) return;
   const p = P.t;
   const h = g.hero;
   const hx = h.ax * TS + 12 - PARA_CAM.x, hy = h.ay * TS + 12 - PARA_CAM.y;
-  const sx = hx, sy = Math.max(HUD + 46, hy - 62);
+  const top = HUD, bot = HUD + VIEWH;
   ctx.save();
-  // 1) the world darkens
-  const dark = p < PARA_DET ? 0.66 * easeOut(p / 0.45) : 0.66 * (1 - clamp01((p - PARA_DET) / 0.9));
-  if (dark > 0.01) { ctx.globalAlpha = dark; ctx.fillStyle = "#05030c"; ctx.fillRect(0, HUD, VW, VIEWH); ctx.globalAlpha = 1; }
+  // darkening while charging and beaming
+  const dark = p < PARA_DET ? 0.7 * easeOut(p / 0.5) : 0;
+  if (dark > 0.01) { ctx.globalAlpha = dark; ctx.fillStyle = "#04020a"; ctx.fillRect(0, top, VW, VIEWH); }
   ctx.globalCompositeOperation = "lighter";
-  const rot = p * 2.6;
-  const R0 = 36;
-  // 2) six beams rise from the hero to the sigil's vertices
-  const beamA = p < 1.9 ? 1 : 1 - clamp01((p - 1.9) / 0.35);
-  if (p > 0.3 && beamA > 0) {
-    for (let i = 0; i < 6; i++) {
-      const k = easeOut((p - 0.35 - i * 0.07) / 0.45);
-      if (k <= 0) continue;
-      const a = rot + i * 1.0472 - 1.5708;
-      const sc = p > 1.75 ? 1 - clamp01((p - 1.75) / 0.5) : 1;
-      const tx = sx + Math.cos(a) * R0 * sc, ty = sy + Math.sin(a) * R0 * sc;
-      const ox = hx + (i - 2.5) * 2.2, oy = hy;
-      const ex = ox + (tx - ox) * k, ey = oy + (ty - oy) * k;
-      ctx.globalAlpha = 0.35 * beamA; ctx.strokeStyle = P.cols[i]; ctx.lineWidth = 7;
-      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.globalAlpha = 0.95 * beamA; ctx.lineWidth = 2.4;
-      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.9;
-      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.globalAlpha = beamA; ctx.fillStyle = "#ffffff";
-      ctx.beginPath(); ctx.arc(ex, ey, 2.4, 0, 6.2832); ctx.fill();
+  // 1) charge: glints of light sparkle and drift in toward the hero, a core glow swells
+  if (p < PARA_IMPACT + 0.1) {
+    const q = clamp01(p / PARA_IMPACT);
+    const n = 10 + Math.floor(q * 34);
+    for (let i = 0; i < n; i++) {
+      const seed = i * 7.31;
+      const ph = (p * (0.55 + (i % 5) * 0.12) + seed) % 1;
+      const a = seed * 2.4 + p * 0.6;
+      const d = (1 - ph) * (40 + (i % 7) * 14);
+      const x = hx + Math.cos(a) * d, y = hy + Math.sin(a) * d * 0.8 - 6;
+      const tw = Math.max(0, Math.sin(ph * Math.PI)) * (0.5 + 0.5 * Math.sin(p * 30 + i));
+      const r = 1.2 + 2.6 * tw;
+      ctx.globalAlpha = 0.9 * tw;
+      ctx.fillStyle = i % 3 === 0 ? P.cols[i % 6] : "#fff8e0";
+      ctx.fillRect(x - r, y - 0.5, r * 2, 1); ctx.fillRect(x - 0.5, y - r, 1, r * 2);
     }
+    const cr = 3 + 10 * q * q + Math.sin(p * 22) * (1 + q);
+    const gr = ctx.createRadialGradient(hx, hy, 0, hx, hy, cr * 2.4);
+    gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.4, "rgba(255,240,180,0.8)"); gr.addColorStop(1, "rgba(255,200,80,0)");
+    ctx.globalAlpha = 0.5 + 0.5 * q; ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(hx, hy, cr * 2.4, 0, 6.2832); ctx.fill();
+    // faint column of light gathering overhead just before impact
+    if (q > 0.6) { ctx.globalAlpha = (q - 0.6) * 0.8; ctx.fillStyle = "#fff6d0"; ctx.fillRect(hx - 1, top, 2, hy - top); }
   }
-  // 3) the rotating rainbow sigil
-  if (p > 0.85 && p < PARA_DET + 0.05) {
-    const appear = easeOut((p - 0.85) / 0.35);
-    const sc = (p > 1.75 ? 1 - easeOut((p - 1.75) / 0.5) : 1) * appear;
-    const Rr = R0 * (0.6 + 0.4 * appear) * Math.max(0.02, sc);
-    ctx.lineWidth = 2.6;
-    for (let i = 0; i < 18; i++) {
-      ctx.strokeStyle = "hsl(" + Math.floor((i * 20 + p * 220) % 360) + ",100%,62%)";
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath(); ctx.arc(sx, sy, Rr, rot + i * 0.349, rot + (i + 1) * 0.349); ctx.stroke();
-    }
-    ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
-    ctx.strokeStyle = "#fff0a0";
-    ctx.beginPath(); ctx.arc(sx, sy, Rr * 1.22, 0, 6.2832); ctx.stroke();
-    for (let i = 0; i < 24; i++) {
-      const a = -rot * 0.6 + i * 0.2618, r1 = Rr * 1.12, r2 = Rr * (i % 2 ? 1.3 : 1.38);
-      ctx.beginPath(); ctx.moveTo(sx + Math.cos(a) * r1, sy + Math.sin(a) * r1); ctx.lineTo(sx + Math.cos(a) * r2, sy + Math.sin(a) * r2); ctx.stroke();
-    }
-    // counter-rotating hexagram
-    ctx.lineWidth = 1.6; ctx.globalAlpha = 0.95;
-    for (let t = 0; t < 2; t++) {
-      ctx.strokeStyle = t ? "hsl(" + Math.floor((p * 300 + 180) % 360) + ",100%,70%)" : "hsl(" + Math.floor((p * 300) % 360) + ",100%,70%)";
-      ctx.beginPath();
-      for (let j = 0; j <= 3; j++) { const a = -rot * 1.4 + t * 1.0472 + j * 2.0944 - 1.5708; const x = sx + Math.cos(a) * Rr * 0.86, y = sy + Math.sin(a) * Rr * 0.86; if (j) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
-      ctx.stroke();
-    }
-    for (let i = 0; i < 6; i++) {
-      const a = rot + i * 1.0472 - 1.5708;
-      ctx.fillStyle = P.cols[i]; ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(sx + Math.cos(a) * Rr, sy + Math.sin(a) * Rr, 3.2 * Math.max(0.3, sc), 0, 6.2832); ctx.fill();
-    }
-  }
-  // 4) collapse into a white-gold singularity (energy streaks pulled inward)
-  if (p > 1.6 && p < PARA_DET + 0.12) {
-    const q = clamp01((p - 1.6) / (PARA_DET - 1.6));
-    const rr = 2 + 11 * q * q + Math.sin(p * 60) * 1.2;
-    const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, rr * 2.6);
-    gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.35, "#fff2b0"); gr.addColorStop(0.7, "rgba(255,190,60,0.5)"); gr.addColorStop(1, "rgba(255,160,40,0)");
+  // 2) the beam: slams down instantly, then widens until it fills the screen
+  if (p >= PARA_IMPACT && p < PARA_DET + 0.05) {
+    const q = clamp01((p - PARA_IMPACT) / (PARA_DET - PARA_IMPACT));
+    const full = Math.max(VW, VIEWH) * 1.6;
+    const w = (30 + (full - 30) * q * q * q) * (1 + Math.sin(p * 47) * 0.05);
+    const bx = hx - w / 2;
+    const gr = ctx.createLinearGradient(bx, 0, bx + w, 0);
+    gr.addColorStop(0, "rgba(255,200,90,0)"); gr.addColorStop(0.18, "rgba(255,170,60,0.55)");
+    gr.addColorStop(0.36, "rgba(255,240,190,0.95)"); gr.addColorStop(0.5, "#ffffff");
+    gr.addColorStop(0.64, "rgba(255,240,190,0.95)"); gr.addColorStop(0.82, "rgba(255,170,60,0.55)"); gr.addColorStop(1, "rgba(255,200,90,0)");
     ctx.globalAlpha = 1; ctx.fillStyle = gr;
-    ctx.beginPath(); ctx.arc(sx, sy, rr * 2.6, 0, 6.2832); ctx.fill();
-    ctx.strokeStyle = "#fff6d0"; ctx.lineWidth = 1;
-    for (let i = 0; i < 10; i++) {
-      const a = i * 0.628 + p * 3, d = 70 * (1 - ((p * 2.4 + i * 0.1) % 1));
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath(); ctx.moveTo(sx + Math.cos(a) * d, sy + Math.sin(a) * d); ctx.lineTo(sx + Math.cos(a) * (d + 12), sy + Math.sin(a) * (d + 12)); ctx.stroke();
+    ctx.fillRect(bx, top, w, hy - top + 6);
+    // rainbow edge streaks (one per ultimate) racing down the beam
+    for (let i = 0; i < 6; i++) {
+      const ex = hx + (i < 3 ? -1 : 1) * w * (0.2 + (i % 3) * 0.1);
+      ctx.globalAlpha = 0.5; ctx.fillStyle = P.cols[i];
+      const sy = top + ((p * 900 + i * 70) % Math.max(1, hy - top));
+      ctx.fillRect(ex - 1, top, 2, hy - top); ctx.fillRect(ex - 2, sy, 4, 26);
+    }
+    // ground splash where it hits
+    const gw = w * 0.9 + 30;
+    const sg = ctx.createRadialGradient(hx, hy, 0, hx, hy, gw);
+    sg.addColorStop(0, "#ffffff"); sg.addColorStop(0.3, "rgba(255,240,180,0.85)"); sg.addColorStop(1, "rgba(255,180,60,0)");
+    ctx.fillStyle = sg; ctx.globalAlpha = 1;
+    ctx.save(); ctx.translate(hx, hy); ctx.scale(1, 0.45); ctx.beginPath(); ctx.arc(0, 0, gw, 0, 6.2832); ctx.restore(); ctx.fill();
+    // impact ring right at the slam
+    const k = clamp01((p - PARA_IMPACT) / 0.45);
+    if (k < 1) { ctx.globalAlpha = 1 - k; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3 * (1 - k) + 1; ctx.save(); ctx.translate(hx, hy); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(0, 0, 10 + k * VW * 0.7, 0, 6.2832); ctx.restore(); ctx.stroke(); }
+    // quick arcing bolts of electricity shooting outward (re-rolled every ~60 ms)
+    PARA_RNG = 1 + Math.floor(p * 16) * 977;
+    const nb = q < 0.3 ? 9 : 6;
+    for (let i = 0; i < nb; i++) {
+      const ang = paraRand() * 6.2832;
+      const len = (40 + paraRand() * 110) * (1 + q);
+      const x0 = hx + Math.cos(ang) * w * 0.35, y0 = hy + Math.sin(ang) * w * 0.12;
+      ctx.globalAlpha = 0.35; ctx.strokeStyle = i % 2 ? "#a0d8ff" : P.cols[i % 6]; ctx.lineWidth = 4;
+      const save = PARA_RNG; drawBolt(ctx, x0, y0, ang, len, 7, 9);
+      PARA_RNG = save; ctx.globalAlpha = 0.95; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.2; drawBolt(ctx, x0, y0, ang, len, 7, 9);
+      if (paraRand() < 0.5) { ctx.lineWidth = 0.8; drawBolt(ctx, x0 + Math.cos(ang) * len * 0.5, y0 + Math.sin(ang) * len * 0.5, ang + (paraRand() - 0.5) * 1.6, len * 0.45, 4, 6); }
     }
   }
-  // 5) full-screen prismatic shockwave + glass shards
-  if (P.fired && p < PARA_DET + 1.3) {
-    const q = clamp01((p - PARA_DET) / 1.1);
-    const maxR = Math.hypot(VW, VH) * 1.05;
-    const r = easeOut(q) * maxR;
-    const w = 10 * (1 - q) + 2;
-    ctx.globalAlpha = 0.9 * (1 - q);
-    for (let i = 0; i < 24; i++) {
-      ctx.strokeStyle = "hsl(" + Math.floor((i * 15 + p * 200) % 360) + ",100%,62%)";
-      ctx.lineWidth = w;
-      ctx.beginPath(); ctx.arc(sx, sy, r, i * 0.2618, (i + 1) * 0.2618 + 0.02); ctx.stroke();
-    }
-    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, w * 0.35);
-    ctx.beginPath(); ctx.arc(sx, sy, Math.max(0, r - w), 0, 6.2832); ctx.stroke();
-    ctx.globalAlpha = 0.5 * (1 - q); ctx.lineWidth = 2; ctx.strokeStyle = "#fff0a0";
-    ctx.beginPath(); ctx.arc(sx, sy, r * 0.7, 0, 6.2832); ctx.stroke();
-  }
-  if (P.sh.length && p < PARA_DET + 1.6) {
+  ctx.globalCompositeOperation = "source-over";
+  // 3) white-out: the screen slowly becomes too bright to see, peaks at the explosion, then clears
+  let white = 0;
+  if (p >= PARA_IMPACT && p < PARA_DET) white = Math.pow(clamp01((p - PARA_IMPACT - 0.4) / (PARA_DET - PARA_IMPACT - 0.4)), 1.6);
+  else if (p >= PARA_DET) white = p < PARA_DET + 0.35 ? 1 : 1 - clamp01((p - PARA_DET - 0.35) / 1.3);
+  // 4) explosion aftermath: shockwave + debris, visible as the white clears
+  if (P.fired && p < PARA_DET + 2.2) {
+    ctx.globalCompositeOperation = "lighter";
     const q = clamp01((p - PARA_DET) / 1.6);
+    const r = easeOut(q) * Math.hypot(VW, VH) * 1.1;
+    ctx.globalAlpha = 0.9 * (1 - q);
+    for (let i = 0; i < 16; i++) {
+      ctx.strokeStyle = "hsl(" + Math.floor((i * 22.5 + p * 160) % 360) + ",100%,65%)"; ctx.lineWidth = 9 * (1 - q) + 2;
+      ctx.beginPath(); ctx.arc(hx, hy, r, i * 0.3927, (i + 1) * 0.3927 + 0.02); ctx.stroke();
+    }
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(hx, hy, r * 0.75, 0, 6.2832); ctx.stroke();
+    const qs = clamp01((p - PARA_DET) / 2.2);
     for (let i = 0; i < P.sh.length; i += 8) {
-      const x = sx + P.sh[i], y = sy + P.sh[i + 1], rt = P.sh[i + 4], z = P.sh[i + 6];
-      ctx.globalAlpha = 0.95 * (1 - q);
-      ctx.fillStyle = "hsl(" + P.sh[i + 7] + ",100%,72%)";
+      const x = hx + P.sh[i], y = hy + P.sh[i + 1], rt = P.sh[i + 4], z = P.sh[i + 6];
+      ctx.globalAlpha = 0.95 * (1 - qs); ctx.fillStyle = "hsl(" + P.sh[i + 7] + ",100%,75%)";
       ctx.beginPath();
       ctx.moveTo(x + Math.cos(rt) * z, y + Math.sin(rt) * z);
       ctx.lineTo(x + Math.cos(rt + 2.3) * z * 0.6, y + Math.sin(rt + 2.3) * z * 0.6);
       ctx.lineTo(x + Math.cos(rt + 3.9) * z * 0.45, y + Math.sin(rt + 3.9) * z * 0.45);
       ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.6; ctx.stroke();
     }
+    ctx.globalCompositeOperation = "source-over";
   }
-  ctx.globalCompositeOperation = "source-over";
-  // 6) title card + the huge combined number
-  if (P.fired && p < PARA_END) {
-    const q = (p - PARA_DET);
+  if (white > 0.001) { ctx.globalAlpha = Math.min(1, white); ctx.fillStyle = "#fffdf4"; ctx.fillRect(0, 0, VW, VH); }
+  // 5) the combined damage number only (no title text)
+  if (P.fired && p > PARA_DET + 0.45 && p < PARA_END) {
+    const q = p - PARA_DET - 0.45;
     const fade = 1 - clamp01((p - (PARA_END - 0.6)) / 0.6);
-    const pop = 1 + 0.6 * (1 - easeOut(q / 0.25));
+    const pop = 1 + 0.5 * (1 - easeOut(q / 0.22));
     const cy = HUD + VIEWH * 0.3;
-    ctx.globalAlpha = 0.55 * fade; ctx.fillStyle = "#07040f";
-    ctx.fillRect(0, cy - 26, VW, 62);
+    const num = fmtFull(P.total);
     ctx.globalAlpha = fade;
-    const grd = ctx.createLinearGradient(0, 0, VW, 0);
-    for (let i = 0; i <= 6; i++) grd.addColorStop(i / 6, "hsl(" + Math.floor((i * 60 + p * 160) % 360) + ",100%,66%)");
-    ctx.save();
-    ctx.translate(VW / 2, cy - 6); ctx.scale(pop, pop);
+    ctx.save(); ctx.translate(VW / 2, cy); ctx.scale(pop, pop);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    let fs = 30; ctx.font = "900 " + fs + "px " + PEAK_FONT;
-    while (fs > 14 && ctx.measureText("PARAMOUNT").width > VW - 14) { fs--; ctx.font = "900 " + fs + "px " + PEAK_FONT; }
-    ctx.lineWidth = 3; ctx.strokeStyle = "#3a2400"; ctx.strokeText("PARAMOUNT", 0, 0);
-    ctx.fillStyle = grd; ctx.fillText("PARAMOUNT", 0, 0);
-    ctx.lineWidth = 0.8; ctx.strokeStyle = "#fff6d0"; ctx.strokeText("PARAMOUNT", 0, 0);
+    let ns = 26; ctx.font = "900 " + ns + "px " + PEAK_FONT;
+    while (ns > 10 && ctx.measureText(num).width > VW - 12) { ns--; ctx.font = "900 " + ns + "px " + PEAK_FONT; }
+    ctx.lineWidth = 4; ctx.strokeStyle = "#1a0e00"; ctx.strokeText(num, 0, 0);
+    const grd = ctx.createLinearGradient(-VW / 2, 0, VW / 2, 0);
+    for (let i = 0; i <= 6; i++) grd.addColorStop(i / 6, "hsl(" + Math.floor((i * 60 + p * 160) % 360) + ",100%,74%)");
+    ctx.fillStyle = grd; ctx.fillText(num, 0, 0);
+    ctx.lineWidth = 0.8; ctx.strokeStyle = "#ffffff"; ctx.strokeText(num, 0, 0);
     ctx.restore();
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const num = fmtFull(P.total);
-    let ns = 22; ctx.font = "900 " + ns + "px " + PEAK_FONT;
-    while (ns > 10 && ctx.measureText(num).width > VW - 12) { ns--; ctx.font = "900 " + ns + "px " + PEAK_FONT; }
-    ctx.lineWidth = 3; ctx.strokeStyle = "#000000"; ctx.strokeText(num, VW / 2, cy + 18);
-    ctx.fillStyle = "#fff0a0"; ctx.fillText(num, VW / 2, cy + 18);
-    ctx.font = "bold 6px monospace"; ctx.fillStyle = "#ffffff";
-    ctx.fillText("6 ULTIMATES x2 \u00b7 " + P.hit + " STRUCK \u00b7 " + P.slain + " SLAIN", VW / 2, cy + 31);
+    ctx.font = "bold 6px monospace"; ctx.fillStyle = "#ffffff"; ctx.globalAlpha = fade * 0.9;
+    ctx.fillText(P.hit + " STRUCK \u00b7 " + P.slain + " SLAIN", VW / 2, cy + 17);
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -15526,14 +15530,20 @@ export default function App() {
         case "pulse": tone(300, 620, 0.12, "sine", 0.03); break;
         case "mx": playMagic(v); break;
         case "para": {
-          // Paramount sting: sub drop + six rising notes (one per ultimate) + a bright chord and glassy shimmer at the detonation.
-          tone(70, 32, 2.2, "sine", 0.12); nz(2.0, 0.08, "lowpass", 400, 2400);
-          [262, 330, 392, 523, 659, 784].forEach((f: number, i: number) => tone(f, f * 1.01, 0.5, i % 2 ? "triangle" : "sine", 0.05, 0.35 + i * 0.12));
-          tone(1400, 3200, 0.9, "sine", 0.025, 1.2);
-          tone(110, 36, 1.6, "sawtooth", 0.11, 2.25); nz(1.6, 0.22, "lowpass", 5000, 60, 2.25);
-          [523, 659, 784, 1047, 1319].forEach((f: number, i: number) => tone(f, f, 1.6, i % 2 ? "triangle" : "sine", 0.045, 2.3 + i * 0.02));
-          for (let i = 0; i < 10; i++) tone(2400 + i * 260, 1800 + i * 200, 0.12, "triangle", 0.02, 2.35 + i * 0.05);
-          nz(0.7, 0.07, "highpass", 6000, 3000, 2.4);
+          // 0-1.6 s charge: rising whine + swelling hiss + sparkle ticks
+          tone(90, 620, 1.6, "sawtooth", 0.035); tone(180, 1240, 1.6, "sine", 0.025); nz(1.6, 0.05, "bandpass", 300, 3200);
+          for (let i = 0; i < 12; i++) tone(2600 + (i * 373) % 1900, 3200 + (i * 211) % 1500, 0.05, "triangle", 0.012 + i * 0.001, 0.1 + i * 0.12);
+          // 1.6 s impact: hard slam
+          tone(160, 40, 0.5, "square", 0.09, 1.6); nz(0.4, 0.28, "lowpass", 6000, 300, 1.6);
+          // 1.6-4.0 s continuous beam: deep detuned roar that builds, a rising hum, crackling electricity
+          tone(48, 66, 2.45, "sawtooth", 0.08, 1.6); tone(50, 69, 2.45, "sawtooth", 0.07, 1.6); tone(96, 132, 2.45, "square", 0.025, 1.6);
+          tone(220, 520, 2.4, "sine", 0.02, 1.62);
+          nz(2.4, 0.1, "lowpass", 500, 4200, 1.6);
+          for (let i = 0; i < 22; i++) nz(0.04 + (i % 3) * 0.02, 0.05 + (i % 4) * 0.012, "highpass", 3000 + (i * 547) % 4000, 1500, 1.65 + i * 0.105 + ((i * 37) % 10) * 0.004);
+          // 4.0 s climactic explosion
+          tone(130, 22, 2.6, "sine", 0.17, 4.0); tone(90, 18, 2.2, "sawtooth", 0.09, 4.0); tone(60, 20, 2.8, "square", 0.04, 4.02);
+          nz(2.6, 0.24, "lowpass", 7000, 40, 4.0); nz(0.9, 0.12, "highpass", 5000, 1500, 4.0);
+          [392, 523, 659, 784].forEach((f: number, i: number) => tone(f, f * 0.98, 1.8, "triangle", 0.03, 4.15 + i * 0.03));
           break;
         }
         case "ult": {

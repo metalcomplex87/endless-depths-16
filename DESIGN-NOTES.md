@@ -13,11 +13,17 @@ Status: **implemented** in src/game.tsx (deployed 2026-11-17). Implementation no
   "Paramount Ultimate". It feeds the camp peak-damage board as a Prismatic ult hit.
 - Saves: new optional fields `pa` (Save Code, ms left) and `paraAt` (full save); older saves load unchanged.
   Old 3-minute individual cooldowns are trimmed to 1 minute on load unless a Paramount lockout is active.
-- Visual (about 4.9 s, damage lands at 2.25 s): world darkens and game time runs at 30%; six beams in each
-  ultimate's color rise into a rotating rainbow sigil with a counter-rotating hexagram; it collapses into a
-  white-gold singularity, then detonates: white-gold flash, heavy screen shake, full-screen rainbow
-  shockwave, 46 prismatic glass shards, a unique layered sound sting, and a "PARAMOUNT" title card with
-  the combined damage number and struck/slain count. Canvas-only, fixed-size buffers (phone-safe).
+- Visual v2 (revised 2026-11-17 after Metal Complex's feedback; about 6.4 s; damage lands at the 4.0 s explosion):
+  - 0-1.6 s charge: world darkens, game time runs at 30%, glints of light sparkle and drift into a swelling
+    glow on the hero; rising charging whine with sparkle ticks.
+  - 1.6 s impact: a massive white-gold beam slams down onto the hero instantly - hard screen shake, impact
+    ring, quick arcing lightning bolts shooting outward (re-rolled every ~60 ms).
+  - 1.6-4.0 s: the beam slowly widens until it fills the screen while the screen whites out; sound is a
+    continuous deep roaring, crackling beam hum that builds.
+  - 4.0 s climactic explosion: damage lands, full white, then the white clears over a rainbow shockwave and
+    flying debris; deep explosion sound. Only the combined damage number (plus struck/slain) is shown -
+    no "Paramount" title text in the finisher.
+  - Canvas-only, fixed-size buffers; measured no frame-rate drop vs idle under 4x CPU throttle.
 
 ### Standing rule: individual ultimate cooldown
 - Each individual Prismatic ultimate cooldown changes from **3 minutes to 1 minute**.
