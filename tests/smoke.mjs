@@ -261,7 +261,7 @@ async function main() {
     const body = await page.evaluate(() => document.body.innerText || "");
     record("LOAD is obvious on empty Richard", /Paste a Save Code with LOAD|LOAD code/i.test(body));
     await loadCode(page, RICHARD);
-    const imported = await page.evaluate(() => (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || ""));
+    const imported = await page.evaluate(() => (document.documentElement.dataset.ed16Import || window.__ED16_IMPORT_MSG || "") + "\n" + (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || ""));
     record("import message shown", /Imported/i.test(imported) && /press Save Game/i.test(imported) && /saves on this device/i.test(imported),
       (imported.match(/Imported[^\n]{0,180}/) || [""])[0]);
     await unlockAndSave(page);
