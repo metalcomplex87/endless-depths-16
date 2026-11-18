@@ -1820,6 +1820,8 @@ function bossAtkMul(e: En): number {
 // ---------- boss power roll (5+ equipped Prismatic items) ----------
 // Counts every equipped slot whose item is Prismatic (rar 7, golden included): head, chest, arms, legs, both hands, and the pet slot.
 const BOSS_PM_MIN = 5;
+const BOSS_PM_MAX = 3; // each boss rolls x1..x3 (was x1..x10); stored rolls above this are clamped down on load
+let BOSS_PM_TEST_FORCE = 0; // test hook only: >0 forces every roll to this value
 function prisEquippedCount(g: Game): number {
   let n = 0;
   if (!g.eq) return 0;
@@ -1831,9 +1833,28 @@ function cleanBpm(x: unknown): { k: string; v: number[] } | null {
   if (!x || typeof x !== "object") return null;
   const o = x as { k?: unknown; v?: unknown };
   if (typeof o.k !== "string" || !Array.isArray(o.v)) return null;
-  return { k: o.k.slice(0, 24), v: o.v.slice(0, 8).map((n: unknown) => Math.max(1, Math.min(10, Math.floor(Number(n) || 1)))) };
+  return { k: o.k.slice(0, 24), v: o.v.slice(0, 8).map((n: unknown) => Math.max(1, Math.min(BOSS_PM_MAX, Math.floor(Number(n) || 1)))) };
 }
-function bossPowerOf(e: En): number { const m = Math.floor(Number(e.pm) || 1); return m >= 1 && m <= 10 ? m : 1; }
+function bossPowerOf(e: En): number { const m = Math.floor(Number(e.pm) || 1); return m >= 1 ? Math.min(BOSS_PM_MAX, m) : 1; }
+// A boss saved with an older, higher roll (e.g. x5/x7) is brought down to the cap: its pm becomes BOSS_PM_MAX and the
+// HP, shield and overshield pools it got from the old roll are rescaled by cap/old, so it is exactly a xCAP boss.
+function clampBossPowerEn(e: En): boolean {
+  const m = Math.floor(Number(e.pm) || 0);
+  if (!(m > BOSS_PM_MAX)) return false;
+  const f = BOSS_PM_MAX / m;
+  e.pm = BOSS_PM_MAX;
+  e.mhp = Math.max(1, safeRound(safeMul(e.mhp, f)));
+  e.hp = Math.min(e.mhp, Math.max(e.hp > 0 ? 1 : 0, safeRound(safeMul(e.hp, f))));
+  if ((e.mshd ?? 0) > 0) { e.mshd = safeRound(safeMul(e.mshd as number, f)); e.shd = Math.min(e.mshd as number, safeRound(safeMul(e.shd ?? 0, f))); }
+  if ((e.ovmhp ?? 0) > 0) { e.ovmhp = safeRound(safeMul(e.ovmhp as number, f)); e.ovhp = Math.min(e.ovmhp as number, safeRound(safeMul(e.ovhp ?? 0, f))); }
+  return true;
+}
+function clampBossPowerAll(g: Game): number {
+  let n = 0;
+  for (const e of g.en) if (e.pm !== undefined && clampBossPowerEn(e)) n++;
+  if (g.bpm) g.bpm.v = g.bpm.v.map((v: number) => Math.max(1, Math.min(BOSS_PM_MAX, Math.floor(Number(v) || 1))));
+  return n;
+}
 function bossPowerCol(m: number): string { return m >= 9 ? "#ff40ff" : m >= 7 ? "#ff4040" : m >= 5 ? "#ff9030" : m >= 3 ? "#ffe060" : "#90ff90"; }
 // Multiplies max HP (and current HP), the act shield, and overshield HP (all derived from max HP). Damage scales via bossAtkMul.
 function applyBossPower(e: En, m: number): void {
@@ -1844,7 +1865,7 @@ function applyBossPower(e: En, m: number): void {
   if ((e.mshd ?? 0) > 0) { e.mshd = safeRound(safeMul(e.mshd as number, m)); e.shd = safeRound(safeMul(e.shd ?? 0, m)); }
   if ((e.ovmhp ?? 0) > 0) { e.ovmhp = safeRound(safeMul(e.ovmhp as number, m)); e.ovhp = safeRound(safeMul(e.ovhp ?? 0, m)); }
 }
-// Rolls each listed boss independently (uniform 1..10) once per spawn. Bosses that already carry a roll (saved) keep it.
+// Rolls each listed boss independently (uniform 1..BOSS_PM_MAX) once per spawn. Bosses that already carry a roll (saved) keep it.
 // Rolls are also kept on the run (g.bpm, keyed by area+depth) and saved, so a reload that respawns the floor's
 // bosses reuses the same multipliers instead of rerolling. A new depth (or a new secret arena) rolls fresh.
 function rollBossPower(g: Game, list: En[], fresh = false): number[] {
@@ -1856,7 +1877,9 @@ function rollBossPower(g: Game, list: En[], fresh = false): number[] {
   for (const e of list) {
     if (!e || e.hp <= 0 || !isBossFoe(e) || e.pm !== undefined) continue;
     let m = g.bpm.v[i];
-    if (!(m >= 1 && m <= 10)) { m = 1 + ri(10); g.bpm.v[i] = m; }
+    if (BOSS_PM_TEST_FORCE > 0) m = BOSS_PM_TEST_FORCE;
+    else if (!(m >= 1)) { m = 1 + ri(BOSS_PM_MAX); g.bpm.v[i] = m; }
+    else if (m > BOSS_PM_MAX) { m = BOSS_PM_MAX; g.bpm.v[i] = m; }
     i++;
     applyBossPower(e, m);
     out.push(m);
@@ -13706,6 +13729,17 @@ function bpTest(): Record<string, unknown> {
       cond["pris" + np] = { count: prisEquippedCount(g), bosses: bs.length, pms: bs.map((e: En) => e.pm ?? null), ovm: bs.map((e: En) => e.ovm ?? 0), bN: bs.map((e: En) => e.bN ?? 1) };
     }
     res.cond = cond;
+    // copies (1/2/3) and overshields (0-3) with 5+ Prismatic over many act-boss floors; rolls stay within x1..x3
+    { const bNc: Record<string, number> = {}, ovc: Record<string, number> = {}, pmc: Record<string, number> = {};
+      for (let i = 0; i < 150; i++) { const gx = bpGame(5, 55 + 5 * (i % 4)); genFloor(gx);
+        const bs = gx.en.filter((e: En) => e.hp > 0 && isBossFoe(e) && e.act);
+        if (bs.length) bNc[String(bs.length)] = (bNc[String(bs.length)] ?? 0) + 1;
+        for (const e of bs) { ovc[String(e.ovm ?? 0)] = (ovc[String(e.ovm ?? 0)] ?? 0) + 1; pmc[String(e.pm)] = (pmc[String(e.pm)] ?? 0) + 1; } }
+      res.copiesOv = { bossCountPerFloor: bNc, overshieldsPerBoss: ovc, rollsPerBoss: pmc }; }
+    // clamp of an old stored x7 boss: pools rescale by 3/7, pm -> 3, damage x3
+    { const gc = bpGame(5, 55); const e = mkActBoss(gc, 6, 6); applyOvershields(gc, e, 2); const b0 = { mhp: e.mhp, mshd: e.mshd ?? 0, ovmhp: e.ovmhp ?? 0, atk: bossAtkMul(e) };
+      e.pm = undefined; applyBossPower(e, 7); const atk7 = bossAtkMul(e); clampBossPowerEn(e);
+      res.clamp7 = { pm: e.pm, hpX: e.mhp / b0.mhp, shdX: (e.mshd ?? 0) / Math.max(1, b0.mshd), ovX: (e.ovmhp ?? 0) / Math.max(1, b0.ovmhp), atkX: bossAtkMul(e) / b0.atk, atkXbeforeClampViaGetter: atk7 / b0.atk }; }
     // distribution
     const g = bpGame(5, 55);
     const hist = new Array(11).fill(0);
@@ -13792,7 +13826,24 @@ function bpShot(): Record<string, unknown> {
     return { ok: true, area: g.area, hero: [g.hero.x, g.hero.y], en: g.en.map((e: En) => [e.name, e.x, e.y, e.hp, e.pm, e.cls]), pms: g.en.filter((e: En) => isBossFoe(e)).map((e: En) => e.pm), banner: g.banner };
   });
 }
-try { (window as unknown as { __ED16_BPOW?: object }).__ED16_BPOW = { test: bpTest, shot: bpShot, end: portalsEnd }; } catch { /* ignore */ }
+function bpInspect(code: string): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const info = (g: Game | null) => g ? { depth: g.depth, area: g.area, pris: prisEquippedCount(g), bpm: g.bpm ?? null,
+      bosses: g.en.filter((e: En) => e.hp > 0 && isBossFoe(e)).map((e: En) => ({ name: e.name, pm: e.pm ?? null, shownX: bossPowerOf(e), mhp: e.mhp, hp: e.hp, mshd: e.mshd ?? 0, ovmhp: e.ovmhp ?? 0, ovm: e.ovm ?? 0, bN: e.bN ?? 1, atkMul: bossAtkMul(e), banner: bossPowerLine([e]) })) } : null;
+    // raw: as decoded (stored rolls before the first-frame clamp); loaded: after the load clamp (what the player sees)
+    const g = decodeCode(code.trim(), null);
+    const raw = info(g);
+    if (g) clampBossPowerAll(g);
+    const loaded = info(g);
+    // baseline: same save with every roll forced to x1, to measure the x3 scale against
+    BOSS_PM_TEST_FORCE = 1;
+    let base: ReturnType<typeof info> = null;
+    try { const gb = decodeCode(code.trim(), null); if (gb) { for (const e of gb.en) if (e.pm !== undefined && e.pm > 1) { const f = 1 / e.pm; e.mhp = safeRound(e.mhp * f); e.hp = safeRound(e.hp * f); if ((e.mshd ?? 0) > 0) e.mshd = safeRound((e.mshd as number) * f); if ((e.ovmhp ?? 0) > 0) e.ovmhp = safeRound((e.ovmhp as number) * f); e.pm = 1; } } base = info(gb); } finally { BOSS_PM_TEST_FORCE = 0; }
+    // the real play path: install the decoded game and let the first frame run
+    return { raw, loaded, base };
+  });
+}
+try { (window as unknown as { __ED16_BPOW?: object }).__ED16_BPOW = { test: bpTest, shot: bpShot, inspect: bpInspect, end: portalsEnd }; } catch { /* ignore */ }
 function sortTest(): Record<string, unknown> {
   const g = newGame(null);
   const bag: Item[] = [];
@@ -15487,7 +15538,7 @@ export default function App() {
     const update = (dt: number): void => {
       const g = gRef.current;
       if (!g) return;
-      if (g.mode === "play" && !LOAD_COMBINED.has(g)) loadCombinePass(g);
+      if (g.mode === "play" && !LOAD_COMBINED.has(g)) { clampBossPowerAll(g); loadCombinePass(g); }
       if (PRIS_T_FREEZE != null) g.time = PRIS_T_FREEZE;
       else g.time += dt;
       RC[7] = "hsl(" + Math.floor((g.time * 140) % 360) + ",100%,62%)";
