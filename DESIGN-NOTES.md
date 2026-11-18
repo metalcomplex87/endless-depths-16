@@ -24,6 +24,47 @@ Status: **implemented** in src/game.tsx (deployed 2026-11-17). Implementation no
     flying debris; deep explosion sound. Only the combined damage number (plus struck/slain) is shown -
     no "Paramount" title text in the finisher.
   - Canvas-only, fixed-size buffers; measured no frame-rate drop vs idle under 4x CPU throttle.
+- Visual + sound v3 (2026-11-17, "more visually intense, way more epic sound"; same structure and timings,
+  about 6.8 s, damage still at the 4.0 s explosion, no "Paramount" word in the finisher):
+  - Charge: up to 100 twinkling glints, 40 converging energy streaks, 30 spiralling motes, swelling core,
+    a light column forming above the hero, heat-shimmer lines, 12 glowing ground cracks with ground glow,
+    dark vignette, red/cyan chromatic flicker near the end of the charge.
+  - Beam: hue-shifting corona (2.1x width), gold gradient body, white-hot core, six spiral ribbons in the six
+    ult colours, impact pulse rings every 0.4 s, 16 thick three-layer branching lightning bolts re-rolled every
+    50 ms, 70 rising embers, chromatic flicker, stronger shake (44 at impact, 26-40 pulses every 0.4 s).
+  - Explosion: bloom, 28 rotating light rays, five layered shockwave rings (rainbow / white / gold),
+    rainbow afterglow arcs, coloured debris, shake 52.
+  - Performance: the whole overlay is drawn into one 1x off-screen layer (game canvas is 3x) and laid on top in
+    a single draw; lightning, rays and debris are batched into a few paths.
+  - Sound (`paraSfx`, WebAudio): own bus -> DynamicsCompressor (limiter-style) -> the SFX volume node, so
+    the SFX volume and mute apply. Synthetic 3.2 s stereo reverb, 0.29 s feedback delay, waveshaper distortion.
+    Layers: sub rumble 30-44 Hz with tremolo; 9-voice detuned rising saw stack (Shepard-like, 3 octaves,
+    sweeping lowpass, AM) plus noise riser; 26 panned glint pings; formant "choir" pad; impact (sub drop
+    160->26 Hz, noise burst, 6 inharmonic metallic partials); beam roar 1.6-4.0 s (swept, LFO-modulated
+    saws/squares, band-passed noise sweep, rising hum); 44 panned crackles synced to the lightning re-rolls;
+    explosion (two sub booms, distorted saw boom, sweeping noise burst into the reverb and delay, 46 debris
+    crackles, 6 ringing harmonic partials).
+
+## Wall damage (2026-11-17, from Metal Complex) — IMPLEMENTED
+- Decision: walls are destroyed for real (not visual-only). It reuses the Wall Breaker pickaxe's guard
+  `canBreakWall`: only plain wall tiles, never the outer map-edge ring, portals or camp objects; floor and stairs
+  tiles are never changed. Broken walls and cracks already persist in saves (floor snapshot map, `ck` cracks),
+  the minimap cache keys on `wallVer` (bumped), and visibility is recomputed. Only on normal dungeon floors
+  (not camp, vault, secret arena, goblin cave).
+- Gear power: `gp` = average over head, chest, arms, legs, right hand, left hand of
+  `min(1, 0.8*rarity/7 + 0.2*min(stars,10)/10 + 0.1 if golden)` (empty slot = 0; Prismatic rarity = 7).
+  Wall power `wp = gp^2` (starter gear ~0, Rare ~0.05, Mythic 4* ~0.29, Relic 4* ~0.59, Prismatic 10* = 1).
+- Normal attacks (chip only, never break; crack capped at 50%): per hit chance `wp * 0.05` plain /
+  `wp * 0.4` crit / `wp * 0.7` super crit to crack a wall next to the target by `wp * 0.08 / 0.18 / 0.3`,
+  with chunks flying.
+- Individual ultimates (crack only, never break; capped at 95%): walls within `2 + round(3*wp)` tiles,
+  each with chance `0.2 + 0.6*wp`, cracked by `(0.12 + 0.5*wp) * random(0.6..1.2)`, up to 40 tiles.
+- Paramount (always huge): walls are ripped away progressively during the beam and fully at the explosion
+  within radius `4 + 2*max(wp, 0.5)` (5-6 tiles), the 2-tile ring beyond is heavily cracked (50-90%),
+  chunks of the wall sprite fly outward; finisher shows "N WALLS".
+
+## Pet drop rate
+- `PET_CH` back to 5% of random drops (briefly 10%, reverted 2026-11-17). Camp pet chest unchanged.
 
 ### Standing rule: individual ultimate cooldown
 - Each individual Prismatic ultimate cooldown changes from **3 minutes to 1 minute**.
