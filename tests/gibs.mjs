@@ -94,7 +94,7 @@ async function main() {
       const faceAway = r && typeof r.face === "object" && r.face.dot < 0;
       record(
         "melee " + d.name + " follows player→enemy, not facing",
-        !!(r && r.ok && r.dead && r.n >= 8 && r.align > 0.65 && faceAway),
+        !!(r && r.ok && r.dead && r.n >= 8 && r.align > 0.65 && (r.coneFrac ?? 0) >= 0.85 && faceAway),
         JSON.stringify(r || {}),
       );
     }
@@ -103,7 +103,7 @@ async function main() {
     await end(page);
     record(
       "projectile burst follows travel direction at impact",
-      !!(proj && proj.ok && proj.dead && proj.n >= 8 && proj.align > 0.65),
+      !!(proj && proj.ok && proj.dead && proj.n >= 8 && proj.align > 0.65 && (proj.coneFrac ?? 0) >= 0.85),
       JSON.stringify(proj || {}),
     );
 
