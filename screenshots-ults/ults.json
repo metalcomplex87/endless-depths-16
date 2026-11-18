@@ -1,0 +1,307 @@
+{
+ "names": [
+  "Seraphic Starfall",
+  "Meteor Supernova",
+  "Glacial Collapse",
+  "Thunder Tempest",
+  "Hellfire Cataclysm",
+  "Void Lances",
+  "Shadow Reaping",
+  "Seraphic Judgement",
+  "Meteor Crossfire",
+  "Glacial Maelstrom",
+  "Lightning Starfall",
+  "Brimstone Supernova",
+  "Singularity Collapse",
+  "Reaper Tempest",
+  "Divine Cataclysm",
+  "Inferno Lances",
+  "Frost Reaping",
+  "Lightning Judgement",
+  "Brimstone Crossfire",
+  "Singularity Maelstrom",
+  "Umbral Starfall",
+  "Angelic Supernova",
+  "Phoenix Collapse",
+  "Blizzard Tempest",
+  "Tesla Cataclysm",
+  "Infernal Lances",
+  "Event Horizon Reaping",
+  "Umbral Judgement",
+  "Angelic Crossfire",
+  "Phoenix Maelstrom",
+  "Permafrost Starfall",
+  "Skyfire Supernova",
+  "Demonfire Collapse",
+  "Null Tempest",
+  "Nightfall Cataclysm",
+  "Radiant Lances",
+  "Solar Reaping",
+  "Permafrost Judgement",
+  "Skyfire Crossfire",
+  "Demonfire Maelstrom",
+  "Starless Starfall",
+  "Soul Supernova",
+  "Sanctified Collapse",
+  "Ember Tempest",
+  "Rime Cataclysm",
+  "Voltaic Lances",
+  "Abyssal Reaping",
+  "Starless Judgement",
+  "Soul Crossfire",
+  "Sanctified Maelstrom"
+ ],
+ "frames": [
+  [
+   0,
+   "Seraphic Starfall",
+   17
+  ],
+  [
+   1,
+   "Meteor Supernova",
+   17
+  ],
+  [
+   2,
+   "Glacial Collapse",
+   17
+  ],
+  [
+   3,
+   "Thunder Tempest",
+   17
+  ],
+  [
+   4,
+   "Hellfire Cataclysm",
+   17
+  ],
+  [
+   5,
+   "Void Lances",
+   17
+  ],
+  [
+   6,
+   "Shadow Reaping",
+   17
+  ],
+  [
+   7,
+   "Seraphic Judgement",
+   17
+  ],
+  [
+   8,
+   "Meteor Crossfire",
+   17
+  ],
+  [
+   9,
+   "Glacial Maelstrom",
+   17
+  ],
+  [
+   10,
+   "Lightning Starfall",
+   17
+  ],
+  [
+   11,
+   "Brimstone Supernova",
+   17
+  ],
+  [
+   12,
+   "Singularity Collapse",
+   33
+  ],
+  [
+   13,
+   "Reaper Tempest",
+   17
+  ],
+  [
+   14,
+   "Divine Cataclysm",
+   17
+  ],
+  [
+   15,
+   "Inferno Lances",
+   17
+  ],
+  [
+   16,
+   "Frost Reaping",
+   17
+  ],
+  [
+   17,
+   "Lightning Judgement",
+   17
+  ],
+  [
+   18,
+   "Brimstone Crossfire",
+   17
+  ],
+  [
+   19,
+   "Singularity Maelstrom",
+   17
+  ],
+  [
+   20,
+   "Umbral Starfall",
+   17
+  ],
+  [
+   21,
+   "Angelic Supernova",
+   17
+  ],
+  [
+   22,
+   "Phoenix Collapse",
+   17
+  ],
+  [
+   23,
+   "Blizzard Tempest",
+   17
+  ],
+  [
+   24,
+   "Tesla Cataclysm",
+   17
+  ],
+  [
+   25,
+   "Infernal Lances",
+   17
+  ],
+  [
+   26,
+   "Event Horizon Reaping",
+   17
+  ],
+  [
+   27,
+   "Umbral Judgement",
+   17
+  ],
+  [
+   28,
+   "Angelic Crossfire",
+   17
+  ],
+  [
+   29,
+   "Phoenix Maelstrom",
+   17
+  ],
+  [
+   30,
+   "Permafrost Starfall",
+   100
+  ],
+  [
+   31,
+   "Skyfire Supernova",
+   17
+  ],
+  [
+   32,
+   "Demonfire Collapse",
+   17
+  ],
+  [
+   33,
+   "Null Tempest",
+   17
+  ],
+  [
+   34,
+   "Nightfall Cataclysm",
+   17
+  ],
+  [
+   35,
+   "Radiant Lances",
+   133
+  ],
+  [
+   36,
+   "Solar Reaping",
+   17
+  ],
+  [
+   37,
+   "Permafrost Judgement",
+   17
+  ],
+  [
+   38,
+   "Skyfire Crossfire",
+   17
+  ],
+  [
+   39,
+   "Demonfire Maelstrom",
+   17
+  ],
+  [
+   40,
+   "Starless Starfall",
+   17
+  ],
+  [
+   41,
+   "Soul Supernova",
+   17
+  ],
+  [
+   42,
+   "Sanctified Collapse",
+   17
+  ],
+  [
+   43,
+   "Ember Tempest",
+   17
+  ],
+  [
+   44,
+   "Rime Cataclysm",
+   17
+  ],
+  [
+   45,
+   "Voltaic Lances",
+   17
+  ],
+  [
+   46,
+   "Abyssal Reaping",
+   17
+  ],
+  [
+   47,
+   "Starless Judgement",
+   17
+  ],
+  [
+   48,
+   "Soul Crossfire",
+   17
+  ],
+  [
+   49,
+   "Sanctified Maelstrom",
+   17
+  ]
+ ],
+ "errs": []
+}

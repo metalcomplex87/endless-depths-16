@@ -1,0 +1,542 @@
+{
+ "Richard": {
+  "rep": {
+   "ok": true,
+   "lvl": 197,
+   "depth": 200,
+   "pris": [
+    {
+     "where": "equipped:head",
+     "name": "Iridescent Obsidian Sallet of Might",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 6288,
+     "def": 6288,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:chest",
+     "name": "Aurora Steel Scale Mail of the Titan",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 15924,
+     "def": 15924,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:arms",
+     "name": "Prismatic Mithril Arm Wraps of Dawn",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 3964,
+     "def": 3964,
+     "sockets": 3,
+     "gems": 3
+    },
+    {
+     "where": "equipped:legs",
+     "name": "Aurora Bronze Fur Boots of the Titan",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 7404,
+     "def": 9625,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:rh",
+     "name": "Kaleidoscopic Obsidian Focus Wand of the Void",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 15592,
+     "atk": 20270,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:lh",
+     "name": "Iridescent Bronze Hatchet of Storms",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 19972,
+     "atk": 19972,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:pet",
+     "name": "Spectral Lantern Ghost",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 0,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Spectral Mithril Halberd of the Void",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 9732,
+     "atk": 12652,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Iridescent Obsidian Soulscythe of Dawn",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 33170,
+     "atk": 43121,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Chromatic Mithril Chain Leggings of Ruin",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 6913,
+     "def": 6913,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Aurora Owlbear Cub",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 0,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Aurora Bone Cuirass of Thorns",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 13120,
+     "def": 13120,
+     "sockets": 4,
+     "gems": 0
+    }
+   ],
+   "sockFixed": {
+    "n": 0,
+    "spilled": 0
+   },
+   "sk": {
+    "maxSockets": 4,
+    "over4": 0
+   },
+   "gemBag": 31,
+   "arts": 0
+  },
+  "afterReload": {
+   "ok": true,
+   "lvl": 197,
+   "depth": 200,
+   "pris": [
+    {
+     "where": "equipped:head",
+     "name": "Iridescent Obsidian Sallet of Might",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 6288,
+     "def": 6288,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:chest",
+     "name": "Aurora Steel Scale Mail of the Titan",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 15924,
+     "def": 15924,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:arms",
+     "name": "Prismatic Mithril Arm Wraps of Dawn",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 3964,
+     "def": 3964,
+     "sockets": 3,
+     "gems": 3
+    },
+    {
+     "where": "equipped:legs",
+     "name": "Aurora Bronze Fur Boots of the Titan",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 7404,
+     "def": 9625,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:rh",
+     "name": "Kaleidoscopic Obsidian Focus Wand of the Void",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 15592,
+     "atk": 20270,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:lh",
+     "name": "Iridescent Bronze Hatchet of Storms",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 19972,
+     "atk": 19972,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 4
+    },
+    {
+     "where": "equipped:pet",
+     "name": "Spectral Lantern Ghost",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 0,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Spectral Mithril Halberd of the Void",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 9732,
+     "atk": 12652,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Iridescent Obsidian Soulscythe of Dawn",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 33170,
+     "atk": 43121,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 4,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Chromatic Mithril Chain Leggings of Ruin",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 6913,
+     "def": 6913,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Aurora Owlbear Cub",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 0,
+     "gems": 0
+    },
+    {
+     "where": "bag",
+     "name": "Aurora Bone Cuirass of Thorns",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 13120,
+     "def": 13120,
+     "sockets": 4,
+     "gems": 0
+    }
+   ],
+   "sockFixed": {
+    "n": 0,
+    "spilled": 0
+   },
+   "sk": {
+    "maxSockets": 4,
+    "over4": 0
+   },
+   "gemBag": 31,
+   "arts": 0
+  }
+ },
+ "Jax": {
+  "rep": {
+   "ok": true,
+   "lvl": 150,
+   "depth": 120,
+   "pris": [
+    {
+     "where": "equipped:head",
+     "name": "Spectral Bronze Coif of Valor",
+     "stars": 3,
+     "mul": 2.197,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 958,
+     "def": 2105,
+     "sockets": 4,
+     "gems": 0
+    },
+    {
+     "where": "equipped:chest",
+     "name": "Iridescent Bone Jerkin of Eternity",
+     "stars": 5,
+     "mul": 3.713,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 1427,
+     "def": 5298,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:arms",
+     "name": "Kaleidoscopic Bronze Spiked Bracers of the Titan",
+     "stars": 7,
+     "mul": 11.371,
+     "oldMul": 3.063,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 774,
+     "def": 8801,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:legs",
+     "name": "Prismatic Bone Wrapped Boots of Dawn",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 1079,
+     "def": 1079,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:rh",
+     "name": "Golden Aurora Mithril Broadsword of Ruin",
+     "stars": 10,
+     "mul": 60.941,
+     "oldMul": 16.413,
+     "rawAtk": 2126,
+     "atk": 129560,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:lh",
+     "name": "Prismatic Steel Longsword of the Bear",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 2086,
+     "atk": 2712,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    }
+   ],
+   "sockFixed": {
+    "n": 2,
+    "spilled": 0
+   },
+   "sk": {
+    "maxSockets": 4,
+    "over4": 0
+   },
+   "gemBag": 0,
+   "arts": 0
+  },
+  "afterReload": {
+   "ok": true,
+   "lvl": 150,
+   "depth": 120,
+   "pris": [
+    {
+     "where": "equipped:head",
+     "name": "Spectral Bronze Coif of Valor",
+     "stars": 3,
+     "mul": 2.197,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 958,
+     "def": 2105,
+     "sockets": 4,
+     "gems": 2
+    },
+    {
+     "where": "equipped:chest",
+     "name": "Iridescent Bone Jerkin of Eternity",
+     "stars": 5,
+     "mul": 3.713,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 1427,
+     "def": 5298,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:arms",
+     "name": "Kaleidoscopic Bronze Spiked Bracers of the Titan",
+     "stars": 7,
+     "mul": 11.371,
+     "oldMul": 3.063,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 774,
+     "def": 8801,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:legs",
+     "name": "Prismatic Bone Wrapped Boots of Dawn",
+     "stars": 0,
+     "mul": 1,
+     "oldMul": 1,
+     "rawAtk": 0,
+     "atk": 0,
+     "rawDef": 1079,
+     "def": 1079,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:rh",
+     "name": "Golden Aurora Mithril Broadsword of Ruin",
+     "stars": 10,
+     "mul": 60.941,
+     "oldMul": 16.413,
+     "rawAtk": 2126,
+     "atk": 129560,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    },
+    {
+     "where": "equipped:lh",
+     "name": "Prismatic Steel Longsword of the Bear",
+     "stars": 1,
+     "mul": 1.3,
+     "oldMul": 1,
+     "rawAtk": 2086,
+     "atk": 2712,
+     "rawDef": 0,
+     "def": 0,
+     "sockets": 3,
+     "gems": 0
+    }
+   ],
+   "sockFixed": {
+    "n": 0,
+    "spilled": 0
+   },
+   "sk": {
+    "maxSockets": 4,
+    "over4": 0
+   },
+   "gemBag": 0,
+   "arts": 0
+  }
+ }
+}

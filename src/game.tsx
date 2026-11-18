@@ -67,8 +67,19 @@ function playScale(): number {
 }
 function hudRightPad(): number { return Math.max(22, Math.round(30 / Math.max(0.6, playScale()))); }
 function noticeLeft(): number { return Math.max(24, Math.round(34 / Math.max(0.6, playScale())) + 2); }
-const MW = 44;
-const MH = 44;
+// Map size is per floor (item 13): normal floors are 44x44, deeper floors can roll bigger square maps.
+// MW/MH always follow the map of the game being worked on (syncMapSize derives them from g.map.length).
+let MW = 44;
+let MH = 44;
+const BASE_MAP = 44;
+function setMapSize(w: number, h: number = w): void { MW = w; MH = h; }
+function syncMapSize(g: Game | null | undefined): void {
+  const n = g && g.map ? g.map.length : 0;
+  if (!n || n === MW * MH) return;
+  const s = Math.round(Math.sqrt(n));
+  if (s * s === n && s >= 20 && s <= 96) setMapSize(s, s);
+}
+function sizeFromLen(n: number): number { const s = Math.round(Math.sqrt(n)); return s * s === n && s >= 20 && s <= 96 ? s : BASE_MAP; }
 const BAG = 50;
 const GEM_BAG = 30;
 const BAG_GROW = 20;
@@ -109,20 +120,23 @@ interface ChestDeal { price: number; buys: number }
 interface Merchant { x: number; y: number }
 interface Ult { n: string; el: El; pat: number; c2: string; i: number }
 
-interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number } }[]; gt?: number; golden?: boolean; pab?: number; prt?: number }
+interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
-interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[] }
+interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean }
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean; rest?: number; drag?: number; bounces?: number; streak?: number }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean; rest?: number; drag?: number; bounces?: number; streak?: number; age?: number; hzs?: number }
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
 interface Shot { x0: number; y0: number; x1: number; y1: number; t: number; c: string; max?: number; dmg?: number; tx?: number; ty?: number; from?: number; typ?: number }
 interface Banner { txt: string; sub: string; c: string; rar: number; t: number }
-type PortalSpot = { x: number; y: number; kind?: "vault" | "camp" | "proceed" | "secret" | "goblin"; w?: number; h?: number };
+// sup: 1 = the rare "super" variant (Celestial Treasury loot cave / Royal Goblin Warren). cs: what is left inside a cave
+// the player already visited (the portal stays open for good, and the cave keeps its state so loot never refills).
+type CaveState = { ch?: number[][]; dr?: Drop[]; gb?: number[][]; clr?: number; n?: number };
+type PortalSpot = { x: number; y: number; kind?: "vault" | "camp" | "proceed" | "secret" | "goblin"; w?: number; h?: number; sup?: number; cs?: CaveState };
 interface Stats { maxHp: number; atk: number; def: number; crit: number; spd: number; block: number; regen: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; ward: number; mv: number }
 interface Hero { x: number; y: number; ax: number; ay: number; face: number; dir?: number; hp: number; bump: number; bdx: number; bdy: number; as?: number }
 interface FloorSnap {
@@ -130,9 +144,10 @@ interface FloorSnap {
   trader: Trader | null; portal: PortalSpot | null; secret?: PortalSpot | null; gobPort?: PortalSpot | null; ground: Ground[];
   theme: number; campSpot?: { x: number; y: number }; gobT: number; floorTurn: number;
   cracks?: string;
+  ws?: number; mw?: number; mh?: number; xp?: PortalSpot[]; sh?: Shrine | null; hz?: string; ac?: ArtCave | null;
 }
 interface Splat { x: number; y: number; wall: boolean; c: string; life: number; max: number; dots: { x: number; y: number; s: number; a: number }[] }
-interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number; rest?: number; drag?: number; bounces?: number; streak?: number }
+interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number; rest?: number; drag?: number; bounces?: number; streak?: number; age?: number; hzs?: number; sc?: number; ht?: number; burn?: number }
 interface Game {
   mode: Mode; depth: number; map: Uint8Array; seen: Uint8Array; vis: Uint8Array; theme: number; tiles: HTMLCanvasElement[];
   hero: Hero; lvl: number; xp: number; gold: number; gems?: number; potions: number; eq: Eq; bag: Item[];
@@ -146,7 +161,7 @@ interface Game {
   area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
   campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null; bpm?: { k: string; v: number[] } | null;
   gambler?: { x: number; y: number } | null; gambPity?: number;
-  mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean;
+  mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean; wxs?: number; mw?: number; mh?: number; xps?: PortalSpot[]; shrine?: Shrine | null; swarm?: Swarm | null; arts?: number[]; artCave?: ArtCave | null; shrUsedD?: number; trophyOpen?: boolean; hz?: Uint8Array | null; slide?: { dx: number; dy: number; t: number } | null; trophyAt?: { x: number; y: number };
   rt?: boolean; pcd?: number; acd?: number; qd?: number[]; wt?: number; swT?: number;
   autoCombine?: boolean;
   gemBag?: Item[];
@@ -361,8 +376,10 @@ function weaponSpells(eq: Eq): Spell[] {
 const ULT_CD = 60000; // each individual Prismatic ultimate: 1 minute (was 3 minutes)
 const PARA_CD = 180000; // Paramount Ultimate: shared 3-minute lockout on all six ultimates + the Paramount button
 const ULT_CD_MAX = PARA_CD; // longest cooldown a save can carry (a Paramount lockout)
-const UPAT = ["Storm", "Nova", "Collapse", "Tempest", "Cataclysm", "Rain", "Reaping", "Judgement", "Crossfire", "Maelstrom"];
-const UDESC = ["meteors crash onto every foe", "colossal novas sweep the screen", "the world implodes, then detonates", "lightning chains between every foe", "the ground splits in eight directions", "a deluge of falling bolts", "a spectral scythe reaps all", "pillars of judgement strike each foe", "searing beams cross the screen", "a spiral maelstrom of bolts"];
+// Item 23 (2026-11-18): pattern words renamed to match the new visuals: Storm -> Starfall, Nova -> Supernova, Rain -> Lances.
+// Ult ids (0-49) are unchanged, so every saved / equipped item keeps its ultimate.
+const UPAT = ["Starfall", "Supernova", "Collapse", "Tempest", "Cataclysm", "Lances", "Reaping", "Judgement", "Crossfire", "Maelstrom"];
+const UDESC = ["rainbow meteors rain across the screen, each bursting on impact", "a star swells over you, then detonates in layered rainbow shock rings", "everything is dragged into a dark core, then it detonates", "a storm front rolls in and hurls forked rainbow lightning everywhere", "the ground splits into glowing fissures that erupt in columns of light", "wide rainbow lances of light fall from the sky and rake the ground", "a giant spectral scythe sweeps around you; souls rise from the slain", "runic sigils brand the ground, then pillars of light slam down", "edge emitters fire searing beams that cross the whole field", "a towering rainbow cyclone tears through every foe"];
 const UWORD: Record<El, string[]> = {
   holy: ["Seraphic", "Divine", "Angelic", "Radiant", "Sanctified"],
   fire: ["Meteor", "Inferno", "Phoenix", "Solar", "Ember"],
@@ -586,6 +603,11 @@ const UE_COL = "#b060ff"; const UE_COL2 = "#f0e0ff";
 const UE_FLOOR_CH = 0.06; // chance of 1 ultra elite on a gated non-special floor
 const UE_BOSS_CH = 0.18; // chance of 1 ultra elite escort during a boss fight
 const SECRET_PORTAL_CH = 0.04; // same ballpark as loot-cave's 4%
+// Cave spawn rates per eligible floor (both scale with the Amethyst gemPortalMul, max x2.5).
+const LOOT_CAVE_CH = 0.04;      // normal loot cave (Treasure Vault)
+const SUPER_LOOT_CH = 0.0045;   // Celestial Treasury: ~1/9 as often as a normal loot cave
+const SUPER_GOB_CH = 0.0025;    // Royal Goblin Warren: ~1/16 as often as a normal goblin cave
+let CAVE_FORCE = ""; // test hook only: "vault" | "svault" | "goblin" | "sgoblin" | "secret" forces that spawn roll
 const LOOT_EXTRA_PER_BOSS = 2; // extra item drops per additional boss in a pack
 const LOOT_EXTRA_PER_OVSH = 1; // extra item drops per overshield the boss spawned with
 const kindLabel = (k: Kind): string => (k === "gem" ? "Gem (socket into gear)" : k === "pet" ? "Pet (companion slot)" : isArmor(k) ? ALBL[k] : WI[k as WT].n + (WI[k as WT].two ? " (2H)" : k === "shield" ? " (off hand)" : " (1H)"));
@@ -721,7 +743,19 @@ function fmtBig(n: number): string {
   const d = v >= 100 ? 0 : v >= 10 ? 1 : 2;
   return sign + v.toFixed(d) + units[i];
 }
-function prisStarMulN(stars: number): number { return safePow(PRIS_STAR_MUL, Math.max(0, (stars | 0) - PRIS_STAR_BASE)); }
+// Prismatic star progression (2026-11-18): every star multiplies the WHOLE item (base atk/def/block, all bonuses,
+// star abilities, pet power and its ultimate). Stars 1-5: x1.30 each; stars 6-10: x1.75 each (as before).
+// 0* x1, 1* x1.30, 3* x2.20, 5* x3.71, 10* x60.9. Lower rarities: stars add star abilities only (x1 stat multiplier).
+// Before 2026-11-18 stars 1-5 gave Prismatic no multiplier (10* was x16.4). Computed from the star count, so old saves recompute.
+const PRIS_STAR_LO = 1.3;
+let PRIS_STAR_LEGACY = false; // act-boss HP reference keeps the old curve so new star power is a real gain
+function prisStarMulN(stars: number): number {
+  const n = Math.max(0, Math.min(10, stars | 0));
+  const hi = safePow(PRIS_STAR_MUL, Math.max(0, n - PRIS_STAR_BASE));
+  if (PRIS_STAR_LEGACY) return hi;
+  return safeMul(safePow(PRIS_STAR_LO, Math.min(n, PRIS_STAR_BASE)), hi);
+}
+function prisStarMulOld(stars: number): number { return safePow(PRIS_STAR_MUL, Math.max(0, Math.min(10, stars | 0) - PRIS_STAR_BASE)); }
 function prisStarMul(it: Item | null | undefined): number {
   if (!it || it.rar < 7) return 1;
   return prisStarMulN(it.st ? it.st.length : 0);
@@ -792,11 +826,16 @@ function hudBossOff(n: number, act: boolean): { mm: number; notice: number } {
   const h = bossBarH(n, act);
   return { mm: 3 + h + 3, notice: 3 + h + 2 };
 }
+// Minimap scale: the small map stays 44px wide on bigger floors; the big map fits the play view.
+function mmScale(big: boolean): number {
+  if (!big) return MW <= 44 ? 1 : 44 / MW;
+  return Math.min(4, Math.floor(((Math.min(VW, VIEWH) - 16) / MW) * 4) / 4);
+}
 function mmBox(boss: boolean, actBoss: boolean, big: boolean, nBoss = 1): HudRect {
   const n = boss ? Math.max(1, nBoss) : 0;
   const off = hudBossOff(n, actBoss);
-  const ms2 = big ? 4 : 1;
-  const mw = MW * ms2, mh = MH * ms2;
+  const ms2 = mmScale(big);
+  const mw = Math.round(MW * ms2), mh = Math.round(MH * ms2);
   const mx0 = big ? Math.round((VW - mw) / 2) : VW - mw - 3;
   const my0 = big ? HUD + Math.round((VIEWH - mh) / 2) : HUD + off.mm;
   return { x: mx0 - 4, y: my0 - 4, w: mw + 8, h: mh + 8 };
@@ -841,31 +880,82 @@ function lootCavePortal(g: Game): { x: number; y: number } | null {
   if (!g.portal || g.vault) return null;
   return portalKind(g) === "vault" ? g.portal : null;
 }
-function fireScreenWarn(g: Game, gob: En | null, portal: boolean): void {
+type CaveAlert = { p: PortalSpot; key: string; txt: string; sub: string; c: string };
+function caveAlertOf(g: Game, p: PortalSpot): CaveAlert | null {
+  const key = g.depth + ":" + p.x + "," + p.y;
+  if (p.kind === "vault") return p.sup
+    ? { p, key, txt: "\u2726 SUPER LOOT CAVE!", sub: "The " + SUPER_LOOT_NAME + " is in view \u00b7 legendary riches inside!", c: SUPER_LOOT_C }
+    : { p, key, txt: "\u26A0 LOOT CAVE PORTAL!", sub: "A treasure vault entrance is in view!", c: "#c060ff" };
+  if (p.kind === "goblin") return p.sup
+    ? { p, key, txt: "\u2726 ROYAL GOBLIN WARREN!", sub: "The Goblin King's warren is in view \u00b7 tough goblins, rich drops!", c: SUPER_GOB_C }
+    : { p, key, txt: "\u26A0 GOBLIN CAVE PORTAL!", sub: "A goblin cave entrance is in view!", c: "#80ff60" };
+  if (p.kind === "secret") return { p, key, txt: "\u26A0 SECRET BOSS PORTAL!", sub: "A sealed arena of three bosses is in view!", c: "#ff3060" };
+  return null;
+}
+// Where the camera settles for the hero's current tile (same maths as camTick, without the lerp).
+function camTarget(g: Game): { x: number; y: number } {
+  const h = g.hero;
+  let tx = h.x * TS + 12 - VW / 2;
+  let ty = h.y * TS + 12 - (HUD + VIEWH / 2);
+  const maxX = Math.max(0, MW * TS - VW);
+  const minY = -HUD;
+  const maxY = Math.max(minY, MH * TS - HUD - VIEWH);
+  tx = Math.max(0, Math.min(maxX, tx));
+  ty = Math.max(minY, Math.min(maxY, ty));
+  return { x: tx, y: ty };
+}
+// A cave portal counts as "on screen" only if it is drawn (in the hero's sight) AND its centre sits inside the
+// play view (below the HUD, above the message bar). The old alert used sight alone: sight reaches 6 tiles but the
+// narrow view only shows ~5 tiles each side of the hero, so the alert could fire for a portal that was off screen.
+function portalOnScreen(g: Game, p: PortalSpot | null | undefined): boolean {
+  if (!p || !portalVisOf(p, g.vis)) return false;
+  const cam = camTarget(g);
+  const c = portalCenterPx(p);
+  const m = 8;
+  const x = c.x - cam.x, y = c.y - cam.y;
+  return x >= m && x <= VW - m && y >= HUD + m && y <= HUD + VIEWH - m;
+}
+let CAVE_ALERT_LOG: Record<string, unknown>[] | null = null;
+function fireScreenWarn(g: Game, gob: En | null, cave: CaveAlert | null): void {
   const gobTxt = "\u26A0 GOBLIN SPOTTED!";
-  const portTxt = "\u26A0 LOOT CAVE PORTAL!";
-  let txt = portTxt, sub = "A treasure vault entrance is in view!", c = "#c060ff";
-  if (gob && portal) { txt = gobTxt; sub = portTxt; c = GOLD; }
+  let txt = cave ? cave.txt : gobTxt, sub = cave ? cave.sub : "", c = cave ? cave.c : "#ffb060";
+  if (gob && cave) { txt = gobTxt; sub = cave.txt; c = cave.p.sup ? cave.c : GOLD; }
   else if (gob) { txt = gobTxt; sub = (gob.name || "A goblin") + " is in view!"; c = gob.gob === 2 ? "#40e0ff" : (gob.gob === 3 ? GOLD : "#ffb060"); }
+  if (cave && CAVE_ALERT_LOG) {
+    const p = cave.p;
+    const real = allPortals(g).some((q: PortalSpot) => q === p);
+    CAVE_ALERT_LOG.push({ kind: p.kind, sup: p.sup ? 1 : 0, txt: cave.txt, exists: real, onScreen: portalOnScreen(g, p), drawn: portalVisOf(p, g.vis), reachable: portalReachable(g, p), onFloor: portalCells(p).every((t) => g.map[t.y * MW + t.x] === 1), hx: g.hero.x, hy: g.hero.y, px: p.x, py: p.y });
+  }
   g.warn = { txt, sub, c, t: WARN_SEC, max: WARN_SEC };
   g.flash = Math.max(g.flash, 0.4);
   g.flashC = c;
-  g.shake = Math.max(g.shake, 4);
+  g.shake = Math.max(g.shake, cave && cave.p.sup ? 6 : 4);
   g.sfx(gob ? "gob" : "portal");
-  msg(g, txt + (gob && portal ? " " + portTxt : ""), c);
+  if (cave && cave.p.sup && !gob) g.sfx("sparkle");
+  msg(g, txt + (gob && cave ? " " + cave.txt : ""), c);
 }
 function scanScreenAlerts(g: Game): void {
   if (g.mode !== "play") return;
   const visGobs = g.en.filter((e: En) => e.hp > 0 && !!e.gob && !!g.vis[e.y * MW + e.x]);
   const prev = new Set(g.warnGobs ?? []);
-  const newGobs = visGobs.filter((e: En) => !prev.has(e.id));
-  const port = lootCavePortal(g);
-  const portVis = !!(port && portalVis(g, g.vis));
-  const portKey = portVis && port ? (g.depth + ":" + port.x + "," + port.y) : "";
-  const newPort = portVis && portKey !== (g.warnPort ?? "");
+  const newGobs = g.area === "goblin" ? [] : visGobs.filter((e: En) => !prev.has(e.id));
   g.warnGobs = visGobs.map((e: En) => e.id);
-  g.warnPort = portVis ? portKey : "";
-  if (newGobs.length || newPort) fireScreenWarn(g, newGobs[0] ?? null, newPort);
+  // Cave portals (loot / goblin / boss, and their super variants) on the dungeon floor only.
+  let fresh: CaveAlert | null = null;
+  if (!g.vault && (g.area ?? "dungeon") === "dungeon") {
+    const seen = new Set((g.warnPort ?? "").split("|").filter((k: string) => !!k));
+    const cands = [g.portal && g.portal.kind === "vault" ? g.portal : null, g.gobPort, g.secret, ...(g.xps || [])];
+    for (const p of cands) {
+      if (!p) continue;
+      const a = caveAlertOf(g, p);
+      if (!a || seen.has(a.key) || !portalOnScreen(g, p)) continue;
+      if (!fresh || (a.p.sup && !fresh.p.sup)) fresh = a;
+    }
+    if (fresh) seen.add(fresh.key); // one banner per scan; any other new portal is announced on the next scan
+    // Announce each portal once per floor visit (keys are kept until the next floor is generated).
+    g.warnPort = [...seen].slice(-8).join("|");
+  }
+  if (newGobs.length || fresh) fireScreenWarn(g, newGobs[0] ?? null, fresh);
 }
 const PHONE_LAYOUTS: [number, number][] = [[360, 640], [375, 667], [390, 844], [412, 915]];
 function isPauseKey(ev: { key?: string }): boolean { return (ev.key || "").toLowerCase() === "p"; }
@@ -933,6 +1023,7 @@ function packDrop(d: Drop): Drop {
   return { x: d.x, y: d.y, pot: !!d.pot, gold: typeof d.gold === "number" ? d.gold : 0, item: d.item ? d.item : null };
 }
 function captureFloor(g: Game): FloorSnap {
+  syncMapSize(g);
   const portal = g.portal && g.portal.kind === "camp" && needReturnStairs(g) === false && !actEverCleared(g)
     ? null
     : packPortal(g.portal);
@@ -952,10 +1043,22 @@ function captureFloor(g: Game): FloorSnap {
     gobT: g.gobT || 0,
     floorTurn: g.floorTurn || 0,
     cracks: packCracks(g) || undefined,
+    ws: typeof g.wxs === "number" ? g.wxs : undefined,
+    mw: MW !== BASE_MAP ? MW : undefined, mh: MH !== BASE_MAP ? MH : undefined,
+    xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p).slice(0, 12),
+    sh: packShrine(g.shrine),
+    hz: packHz(g),
+    ac: packArtCave(g.artCave),
   };
 }
 function unpackFloorSnap(raw: unknown): FloorSnap | null {
   if (!raw || typeof raw !== "object") return null;
+  const pw = MW, ph = MH;
+  const sw = (raw as Record<string, unknown>).mw;
+  setMapSize(typeof sw === "number" && sw >= 20 && sw <= 96 ? Math.floor(sw) : BASE_MAP);
+  try { return unpackFloorSnapAt(raw); } finally { setMapSize(pw, ph); }
+}
+function unpackFloorSnapAt(raw: unknown): FloorSnap | null {
   const s = raw as Record<string, unknown>;
   if (typeof s.d !== "number" || !isFinite(s.d) || s.d < 1) return null;
   if (typeof s.map !== "string" || typeof s.seen !== "string") return null;
@@ -977,6 +1080,13 @@ function unpackFloorSnap(raw: unknown): FloorSnap | null {
     gobT: typeof s.gobT === "number" && isFinite(s.gobT) ? s.gobT : 0,
     floorTurn: typeof s.floorTurn === "number" && isFinite(s.floorTurn) ? Math.floor(s.floorTurn) : 0,
     cracks: typeof s.cracks === "string" ? s.cracks : undefined,
+    ws: typeof s.ws === "number" && isFinite(s.ws) ? (s.ws as number) >>> 0 : undefined,
+    mw: typeof s.mw === "number" && s.mw >= 20 && s.mw <= 96 ? Math.floor(s.mw as number) : undefined,
+    mh: typeof s.mh === "number" && s.mh >= 20 && s.mh <= 96 ? Math.floor(s.mh as number) : undefined,
+    xp: Array.isArray(s.xp) ? (s.xp as unknown[]).map((p: unknown) => unpackPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p).slice(0, 12) : undefined,
+    sh: unpackShrine(s.sh),
+    hz: typeof s.hz === "string" ? s.hz : undefined,
+    ac: s.ac && typeof s.ac === "object" ? packArtCave(s.ac as ArtCave) : null,
   };
 }
 function ensureStairTile(g: Game, tile: number, preferFar = true): { x: number; y: number } | null {
@@ -995,7 +1105,7 @@ function placeNearTile(g: Game, tile: number): void {
   const cands: number[][] = [];
   const consider = (x: number, y: number): void => {
     if (!inb(x, y) || g.map[y * MW + x] === 0 || g.map[y * MW + x] === 2 || g.map[y * MW + x] === TILE_UP) return;
-    if (chestAt(g, x, y) || portalAt(g, x, y) || merchAt(g, x, y)) return;
+    if (chestAt(g, x, y) || portalAt(g, x, y) || merchAt(g, x, y) || hzSolid(g, x, y)) return;
     cands.push([x, y]);
   };
   if (st) {
@@ -1105,8 +1215,14 @@ function spawnMonstersOnMap(g: Game): void {
 function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.splats = [];
   g.depth = snap.d;
+  setMapSize(snap.mw || BASE_MAP, snap.mh || snap.mw || BASE_MAP);
+  g.wxs = snap.ws;
+  g.xps = (snap.xp || []).map((p: PortalSpot) => ({ ...p }));
+  g.shrine = snap.sh ? { ...snap.sh } : null; g.swarm = null;
   g.map = unpackMapBits(snap.map, 2, MW * MH);
   g.seen = unpackMapBits(snap.seen, 1, MW * MH);
+  g.hz = unpackHz(snap.hz, MW * MH); g.slide = null;
+  g.artCave = snap.ac ? { ...snap.ac } : null;
   g.vis = new Uint8Array(MW * MH);
   g.theme = snap.theme || themeOf(g.depth);
   g.thShift = themeShift(g);
@@ -1129,6 +1245,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.cracks = unpackCracks(snap.cracks, g.map); g.digAt = undefined; g.digClock = undefined;
   placeNearTile(g, nearTile);
   spawnMonstersOnMap(g);
+  hzSanitize(g); hzCleanEnemies(g);
   rollActFloorBossPower(g);
   if (isActFloor(g.depth) && actEverCleared(g)) openCampPortal(g);
   if (needReturnStairs(g)) ensureStairTile(g, 2, true);
@@ -1149,7 +1266,7 @@ function applyActFloorOnEnter(g: Game): void {
 function starPriceMul(it: Item): number {
   const n = it.st ? it.st.length : 0;
   let m = 1 + 0.35 * n;
-  if (it.rar >= 7 && n > PRIS_STAR_BASE) m = safeMul(m, prisStarMul(it));
+  if (it.rar >= 7 && n > 0) m = safeMul(m, prisStarMul(it));
   if (it.golden) m = safeMul(m, 3);
   return m;
 }
@@ -1179,6 +1296,26 @@ function packPortal(p: PortalSpot | null | undefined): PortalSpot | null {
   const o: PortalSpot = { x: Math.floor(p.x), y: Math.floor(p.y), kind };
   if (w !== 1) o.w = w;
   if (h !== 1) o.h = h;
+  if (p.sup && (kind === "vault" || kind === "goblin" || kind === undefined)) o.sup = 1;
+  const cs = packCaveState(p.cs);
+  if (cs && kind !== "camp" && kind !== "proceed") o.cs = cs;
+  return o;
+}
+const CAVE_CH_CAP = 40, CAVE_GOB_CAP = 32;
+function packCaveState(raw: unknown): CaveState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const o: CaveState = {};
+  const nums = (a: unknown, len: number, cap: number): number[][] => (Array.isArray(a) ? a : [])
+    .filter((row: unknown) => Array.isArray(row) && row.length >= len && (row as unknown[]).slice(0, len).every((v: unknown) => typeof v === "number" && isFinite(v as number)))
+    .slice(0, cap).map((row: unknown) => (row as number[]).slice(0, len).map((v: number) => Math.floor(v)));
+  if (Array.isArray(r.ch)) o.ch = nums(r.ch, 4, CAVE_CH_CAP).filter((c: number[]) => inb(c[0], c[1])).map((c: number[]) => [c[0], c[1], Math.max(0, Math.min(4, c[2])), c[3] ? 1 : 0]);
+  if (Array.isArray(r.gb)) o.gb = nums(r.gb, 5, CAVE_GOB_CAP).filter((c: number[]) => inb(c[0], c[1])).map((c: number[]) => [c[0], c[1], Math.max(0, Math.min(6, c[2])), Math.max(1, Math.min(1000, c[3])), c[4] ? 1 : 0]);
+  if (Array.isArray(r.dr)) o.dr = (r.dr as Drop[]).filter((d: Drop) => d && typeof d.x === "number" && typeof d.y === "number" && inb(d.x, d.y))
+    .map((d: Drop) => ({ ...packDrop(d), item: d.item ? validItem(d.item) : null }))
+    .filter((d: Drop) => d.pot || d.gold > 0 || d.item).slice(0, SAVE_DROP_CAP);
+  if (r.clr) o.clr = 1;
+  if (typeof r.n === "number" && isFinite(r.n)) o.n = Math.max(0, Math.min(99, Math.floor(r.n)));
   return o;
 }
 function unpackPortal(raw: unknown): PortalSpot | null {
@@ -1225,7 +1362,7 @@ function cellFeatureBlocked(g: Game, x: number, y: number, opts?: PlaceOpt): boo
   const t = g.map[y * MW + x];
   if (t === 0) return true;
   if ((t === 2 || t === TILE_UP) && !(opts && opts.allowStair === t)) return true;
-  if (chestAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y)) return true;
+  if (chestAt(g, x, y) || merchAt(g, x, y) || campBlocked(g, x, y) || hzSolid(g, x, y)) return true;
   if (!(opts && opts.ignorePortal) && portalAt(g, x, y)) return true;
   if (!(opts && opts.allowHero) && g.hero && g.hero.x === x && g.hero.y === y) return true;
   if (!(opts && opts.allowCorr) && isCorridorCell(g.map, x, y)) return true;
@@ -1552,6 +1689,42 @@ function hexRgba(c: string, a: number): string {
   const b = n.length === 3 ? parseInt(n[2] + n[2], 16) : parseInt(n.slice(4, 6), 16);
   return "rgba(" + r + "," + g + "," + b + "," + Math.max(0, Math.min(1, a)) + ")";
 }
+// Super caves get an extra crown of rotating star rays + orbiting jewels so they read as different from afar.
+function drawSuperPortalAura(ctx: CanvasRenderingContext2D, cx: number, cy: number, rad: number, t: number, gob: boolean): void {
+  const c1 = gob ? SUPER_GOB_C : SUPER_LOOT_C, c2 = gob ? "#c060ff" : "#fff2a0", c3 = gob ? "#ff4060" : "#ffd040";
+  ctx.save();
+  const R0 = rad * 2.1 * (0.92 + 0.08 * Math.sin(t * 3));
+  const glow = ctx.createRadialGradient(cx, cy, rad * 0.3, cx, cy, R0);
+  glow.addColorStop(0, hexRgba(c2, 0.55)); glow.addColorStop(0.45, hexRgba(c1, 0.35)); glow.addColorStop(1, hexRgba(c1, 0));
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, R0, 0, 6.2832); ctx.fill();
+  ctx.translate(cx, cy);
+  for (let layer = 0; layer < 2; layer++) {
+    ctx.save();
+    ctx.rotate((layer ? -1 : 1) * t * (0.6 + layer * 0.4));
+    const n = layer ? 8 : 12, L = rad * (layer ? 1.55 : 2.0);
+    ctx.fillStyle = hexRgba(layer ? c3 : c1, layer ? 0.55 : 0.4);
+    for (let i = 0; i < n; i++) {
+      ctx.rotate(6.2832 / n);
+      ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(2, 0); ctx.lineTo(0, -L); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  for (let i = 0; i < 6; i++) {
+    const an = t * 1.7 + i * 1.0472, rr = rad * 1.3;
+    const x = Math.cos(an) * rr, y = Math.sin(an) * rr * 0.8;
+    ctx.fillStyle = [c1, c2, c3][i % 3];
+    ctx.beginPath(); ctx.moveTo(x, y - 3); ctx.lineTo(x + 2.2, y); ctx.lineTo(x, y + 3); ctx.lineTo(x - 2.2, y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(Math.round(x - 0.5), Math.round(y - 1.5), 1, 1);
+  }
+  if (gob) {
+    // little gold crown over the gate
+    const y0 = -rad - 6;
+    ctx.fillStyle = "#ffd040";
+    ctx.beginPath(); ctx.moveTo(-8, y0 + 6); ctx.lineTo(-8, y0); ctx.lineTo(-4, y0 + 3); ctx.lineTo(0, y0 - 2); ctx.lineTo(4, y0 + 3); ctx.lineTo(8, y0); ctx.lineTo(8, y0 + 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ff4060"; ctx.fillRect(-1, y0 + 2, 2, 2);
+  }
+  ctx.restore();
+}
 function drawPortalGfx(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
   for (const p of allPortals(g)) drawOnePortalGfx(ctx, g, p, camX, camY, t);
 }
@@ -1567,6 +1740,7 @@ function drawOnePortalGfx(ctx: CanvasRenderingContext2D, g: Game, p: PortalSpot,
   const pc = portalHueFor(g, p);
   ctx.save();
   if (sealed) ctx.globalAlpha = 0.45;
+  if (p.sup) drawSuperPortalAura(ctx, cx, cy, rad, t, gob);
   if (loot) {
     const pulse = 0.62 + 0.38 * Math.sin(t * 4.2);
     const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad * 1.55 * pulse);
@@ -1952,7 +2126,46 @@ function allPortals(g: Game): PortalSpot[] {
   if (g.portal) out.push(g.portal);
   if (g.secret) out.push(g.secret);
   if (g.gobPort) out.push(g.gobPort);
+  if (g.xps) for (const p of g.xps) if (p) out.push(p);
   return out;
+}
+// ---- Item 14: portal odds scale with floor size ----
+// Normal floors keep their exact odds. On a bigger floor every cave type gets (scale - 1) extra rolls at its normal
+// chance, where scale = walkable tiles / average walkable tiles of a normal floor; extras go to g.xps.
+const NORMAL_WALK = 640;
+function floorPortalScale(g: Game): number {
+  if (floorTierOf(g) === 0) return 1;
+  let w = 0; for (let i = 0; i < g.map.length; i++) if (g.map[i] !== 0) w++;
+  return Math.max(1, w / NORMAL_WALK);
+}
+function placeExtraPortal(g: Game, kind: "vault" | "goblin" | "secret", sup: boolean): boolean {
+  const field: "portal" | "secret" | "gobPort" = kind === "vault" ? "portal" : kind === "secret" ? "secret" : "gobPort";
+  const keep = g[field] as PortalSpot | null;
+  if (keep && field === "portal" && keep.kind !== "vault") return false;
+  const rooms = GENINFO.rooms || [];
+  const rm = rooms.length ? rooms[ri(rooms.length)] : null;
+  const ax = rm ? rm.x + ri(Math.max(1, rm.w)) : g.hero.x, ay = rm ? rm.y + ri(Math.max(1, rm.h)) : g.hero.y;
+  if (!keep) return placeCavePortal(g, kind, field, ax, ay, sup);
+  g.xps = g.xps || [];
+  g.xps.push(keep);
+  (g as unknown as Record<string, PortalSpot | null>)[field] = null;
+  let placed: PortalSpot | null = null;
+  try { if (placeCavePortal(g, kind, field, ax, ay, sup)) placed = g[field] as PortalSpot | null; }
+  finally { (g as unknown as Record<string, PortalSpot | null>)[field] = keep; g.xps.splice(g.xps.indexOf(keep), 1); }
+  if (placed) { g.xps.push(placed); return true; }
+  return false;
+}
+function rollExtraPortals(g: Game): number {
+  const sc = floorPortalScale(g);
+  if (sc <= 1 || isActFloor(g.depth) || g.depth < 2) return 0;
+  const extra = sc - 1;
+  const rolls = (): number => Math.floor(extra) + (R() < extra - Math.floor(extra) ? 1 : 0);
+  const pm = gemPortalMul(g);
+  let n = 0;
+  for (let i = rolls(); i > 0; i--) { const lr = R(); if (lr < LOOT_CAVE_CH * pm) n += placeExtraPortal(g, "vault", false) ? 1 : 0; else if (R() < SUPER_LOOT_CH * pm) n += placeExtraPortal(g, "vault", true) ? 1 : 0; }
+  for (let i = rolls(); i > 0; i--) { if (R() < cavePortalChance(g)) n += placeExtraPortal(g, "goblin", false) ? 1 : 0; else if (R() < SUPER_GOB_CH * pm) n += placeExtraPortal(g, "goblin", true) ? 1 : 0; }
+  if (deepPrisGated(g)) for (let i = rolls(); i > 0; i--) if (R() < SECRET_PORTAL_CH) n += placeExtraPortal(g, "secret", false) ? 1 : 0;
+  return n;
 }
 function portalFootprint(p: PortalSpot): { x: number; y: number }[] { return portalCells(p); }
 function anyPortalAt(g: Game, x: number, y: number): PortalSpot | null {
@@ -1964,7 +2177,7 @@ function portalsOverlap(a: PortalSpot, b: PortalSpot): boolean {
   for (const p of A) for (const q of B) if (p.x === q.x && p.y === q.y) return true;
   return false;
 }
-function placeKindPortal(g: Game, kind: "secret" | "goblin" | "vault", px: number, py: number, field: "portal" | "secret" | "gobPort"): boolean {
+function placeKindPortal(g: Game, kind: "secret" | "goblin" | "vault", px: number, py: number, field: "portal" | "secret" | "gobPort", sup = false): boolean {
   const blocked = (x: number, y: number): boolean => {
     const trial: PortalSpot = { x, y, kind, w: PORTAL_W, h: PORTAL_H };
     for (const p of allPortals(g)) if (portalsOverlap(trial, p)) return true;
@@ -1974,6 +2187,7 @@ function placeKindPortal(g: Game, kind: "secret" | "goblin" | "vault", px: numbe
     if (blocked(x, y)) return false;
     if (!canPlaceRect(g, x, y, PORTAL_W, PORTAL_H, { allowHero, allowCorr })) return false;
     const spot: PortalSpot = { x, y, kind, w: PORTAL_W, h: PORTAL_H };
+    if (sup) spot.sup = 1;
     if (field === "secret") g.secret = spot;
     else if (field === "gobPort") g.gobPort = spot;
     else g.portal = spot;
@@ -1983,10 +2197,58 @@ function placeKindPortal(g: Game, kind: "secret" | "goblin" | "vault", px: numbe
   for (const dy of [0, -1]) for (const dx of [0, -1]) origins.push({ x: px + dx, y: py + dy });
   for (const allowHero of [false, true]) for (const o of origins) if (tryAt(o.x, o.y, allowHero, false)) return true;
   for (const allowCorr of [false, true]) {
-    const found = findFeatureRect(g, PORTAL_W, PORTAL_H, px, py, { allowHero: true, allowCorr }, true);
+    const found = findFeatureRect(g, PORTAL_W, PORTAL_H, px, py, { allowHero: true, allowCorr }, false);
     if (found && tryAt(found.x, found.y, true, allowCorr)) return true;
   }
   return false;
+}
+// Tiles the hero can walk to from where they stand (walls are the only hard blocker; foes can be fought through).
+function reachFromHero(g: Game): Uint8Array {
+  const seen = new Uint8Array(MW * MH);
+  const q: number[] = [g.hero.y * MW + g.hero.x];
+  seen[q[0]] = 1;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i], x = c % MW, y = (c / MW) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue;
+      const k = ny * MW + nx;
+      if (seen[k] || g.map[k] === 0 || hzSolid(g, nx, ny)) continue;
+      seen[k] = 1; q.push(k);
+    }
+  }
+  return seen;
+}
+function portalReachable(g: Game, p: PortalSpot | null | undefined): boolean {
+  if (!p) return false;
+  const r = reachFromHero(g);
+  return portalCells(p).some((t) => r[t.y * MW + t.x] === 1);
+}
+// Guaranteed cave-portal placement: near the anchor, then near the hero, then (last resort) a 1x1 portal on the
+// closest plain floor tile the hero can walk to. Every result is checked to be on floor and reachable.
+function placeCavePortal(g: Game, kind: "secret" | "goblin" | "vault", field: "portal" | "secret" | "gobPort", px: number, py: number, sup = false): boolean {
+  const ok = (): boolean => {
+    const p = field === "secret" ? g.secret : field === "gobPort" ? g.gobPort : g.portal;
+    if (p && portalCells(p).length && portalCells(p).every((t) => g.map[t.y * MW + t.x] === 1) && portalReachable(g, p)) return true;
+    if (field === "secret") g.secret = null; else if (field === "gobPort") g.gobPort = null; else g.portal = null;
+    return false;
+  };
+  if (inb(px, py) && placeKindPortal(g, kind, px, py, field, sup) && ok()) return true;
+  if (placeKindPortal(g, kind, g.hero.x, g.hero.y, field, sup) && ok()) return true;
+  const reach = reachFromHero(g);
+  let best = -1, bd = 1e9;
+  for (let y = 1; y < MH - 1; y++) for (let x = 1; x < MW - 1; x++) {
+    const k = y * MW + x;
+    if (!reach[k] || g.map[k] !== 1 || (x === g.hero.x && y === g.hero.y)) continue;
+    if (cellFeatureBlocked(g, x, y, { allowCorr: true, allowHero: false })) continue;
+    const d = Math.abs(x - g.hero.x) + Math.abs(y - g.hero.y);
+    if (d < bd) { bd = d; best = k; }
+  }
+  if (best < 0) return false;
+  const spot: PortalSpot = { x: best % MW, y: (best / MW) | 0, kind, w: 1, h: 1 };
+  if (sup) spot.sup = 1;
+  if (field === "secret") g.secret = spot; else if (field === "gobPort") g.gobPort = spot; else g.portal = spot;
+  return ok();
 }
 function pickPortalAnchor(g: Game): { x: number; y: number } | null {
   const used = new Set<number>();
@@ -2000,20 +2262,25 @@ function maybeSpawnGoblinCavePortal(g: Game): boolean {
   if (isActFloor(g.depth) || g.depth < 2) return false;
   if ((GENINFO.rooms && GENINFO.rooms.length) ? GENINFO.rooms.length <= 2 : false) return false;
   if (g.gobPort) return false;
-  if (R() >= cavePortalChance(g)) return false;
+  let sup = false;
+  if (CAVE_FORCE === "sgoblin") sup = true;
+  else if (CAVE_FORCE && CAVE_FORCE !== "goblin") return false;
+  else if (CAVE_FORCE !== "goblin" && R() >= cavePortalChance(g)) {
+    if (R() >= SUPER_GOB_CH * gemPortalMul(g)) return false;
+    sup = true;
+  }
   const c = pickPortalAnchor(g);
-  if (!c) return false;
-  return placeKindPortal(g, "goblin", c[0], c[1], "gobPort");
+  return placeCavePortal(g, "goblin", "gobPort", c ? c[0] : -1, c ? c[1] : -1, sup);
 }
 function maybeSpawnSecretPortal(g: Game): boolean {
-  if (!deepPrisGated(g)) return false;
+  if (CAVE_FORCE && CAVE_FORCE !== "secret") return false;
+  if (!deepPrisGated(g) && CAVE_FORCE !== "secret") return false;
   if (g.area === "camp" || g.area === "vault" || g.area === "arena" || g.area === "goblin") return false;
   if (g.vault || g.arena || g.gobCave) return false;
   if (g.secret) return false;
-  if (R() >= SECRET_PORTAL_CH) return false;
+  if (CAVE_FORCE !== "secret" && R() >= SECRET_PORTAL_CH) return false;
   const c = pickPortalAnchor(g);
-  if (!c) return false;
-  return placeKindPortal(g, "secret", c[0], c[1], "secret");
+  return placeCavePortal(g, "secret", "secret", c ? c[0] : -1, c ? c[1] : -1);
 }
 
 function mkUltraElite(g: Game, x: number, y: number): En {
@@ -2059,9 +2326,10 @@ type SideStash = {
   map: string; seen: string; en: En[]; chests: Chest[]; drops: Drop[];
   trader: Trader | null; hx: number; hy: number; ft: number; ground: Ground[]; gobT: number;
   portal: PortalSpot | null; secret: PortalSpot | null; gobPort: PortalSpot | null;
-  theme: number; cracks?: string; area: string;
+  theme: number; cracks?: string; area: string; ws?: number; xp?: PortalSpot[]; sh?: Shrine | null; hz?: string; ac?: ArtCave | null;
 };
 function packSideStash(g: Game): string {
+  syncMapSize(g);
   const stash: SideStash = {
     map: u8s(g.map), seen: u8s(g.seen),
     en: g.en.filter((e: En) => e.hp > 0).concat(g.pend),
@@ -2069,12 +2337,14 @@ function packSideStash(g: Game): string {
     hx: g.hero.x, hy: g.hero.y, ft: g.floorTurn, ground: g.ground, gobT: g.gobT,
     portal: packPortal(g.portal), secret: packPortal(g.secret), gobPort: packPortal(g.gobPort),
     theme: g.theme, cracks: packCracks(g) || undefined, area: g.area ?? "dungeon",
+    ws: g.wxs, xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p), sh: packShrine(g.shrine), hz: packHz(g), ac: packArtCave(g.artCave),
   };
   return JSON.stringify(stash);
 }
 function applySideStash(g: Game, raw: string): boolean {
   try {
     const s = JSON.parse(raw) as SideStash;
+    if (s && typeof s.map === "string") setMapSize(sizeFromLen(s.map.length));
     if (!s || typeof s.map !== "string" || s.map.length !== MW * MH || typeof s.seen !== "string" || s.seen.length !== MW * MH || !inb(s.hx, s.hy)) return false;
     g.splats = [];
     g.map = su8(s.map); g.seen = su8(s.seen); g.vis = new Uint8Array(MW * MH);
@@ -2086,6 +2356,9 @@ function applySideStash(g: Game, raw: string): boolean {
     g.ground = Array.isArray(s.ground) ? s.ground : [];
     g.floorTurn = Number(s.ft) || 0; g.gobT = Number(s.gobT) || 0;
     g.portal = unpackPortal(s.portal); g.secret = unpackPortal(s.secret); g.gobPort = unpackPortal(s.gobPort);
+    g.wxs = typeof s.ws === "number" ? s.ws : g.wxs;
+    g.xps = Array.isArray(s.xp) ? s.xp.map((p: unknown) => unpackPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p) : [];
+    g.shrine = unpackShrine(s.sh); g.hz = unpackHz(s.hz, MW * MH); g.artCave = s.ac ? packArtCave(s.ac) : null; g.slide = null; hzSanitize(g);
     g.hero.x = s.hx; g.hero.y = s.hy; g.hero.ax = s.hx; g.hero.ay = s.hy;
     if (typeof s.theme === "number") { g.theme = s.theme; g.tiles = makeTiles(g.theme, themeShift(g)); }
     g.cracks = unpackCracks(s.cracks, g.map);
@@ -2094,6 +2367,8 @@ function applySideStash(g: Game, raw: string): boolean {
   } catch { return false; }
 }
 function clearToSideRoom(g: Game, x: number, y: number, w: number, h: number): void {
+  setMapSize(BASE_MAP);
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
   const map = new Uint8Array(MW * MH);
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) map[yy * MW + xx] = 1;
   g.map = map;
@@ -2107,6 +2382,23 @@ function clearToSideRoom(g: Game, x: number, y: number, w: number, h: number): v
 }
 function enterSecretArena(g: Game): void {
   if (g.area === "arena" || g.arena) return;
+  const cs = g.secret && g.secret.cs ? g.secret.cs : null;
+  if (cs && cs.clr) {
+    // Already beaten: the arena keeps its state (no bosses respawn); only what you left on the floor is still there.
+    g.arena = packSideStash(g);
+    const AR0 = { x: 12, y: 12, w: 20, h: 20 };
+    clearToSideRoom(g, AR0.x, AR0.y, AR0.w, AR0.h);
+    g.area = "arena";
+    g.portal = { x: AR0.x + 1, y: AR0.y + Math.floor(AR0.h / 2) - 1, kind: "secret", w: PORTAL_W, h: PORTAL_H };
+    g.hero.x = AR0.x + 4; g.hero.y = AR0.y + Math.floor(AR0.h / 2); g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
+    g.drops = (cs.dr || []).filter((d: Drop) => d.x >= AR0.x && d.x < AR0.x + AR0.w && d.y >= AR0.y && d.y < AR0.y + AR0.h).map((d: Drop) => ({ ...d }));
+    computeVis(g); placeTorches(g);
+    setBanner(g, "SECRET ARENA", "Already conquered \u00b7 " + (g.drops.length ? g.drops.length + " drops left" : "nothing left") + " \u00b7 the bosses do not return", "#ff4060", 5, 2.6);
+    msg(g, "You step back into the conquered arena. The challengers are gone for good.", "#ff8080");
+    g.flash = 0.4; g.flashC = "#ff4060"; g.sfx("portal");
+    saveGame(g); g.notify();
+    return;
+  }
   g.arena = packSideStash(g);
   const AR = { x: 12, y: 12, w: 20, h: 20 };
   clearToSideRoom(g, AR.x, AR.y, AR.w, AR.h);
@@ -2142,14 +2434,16 @@ function enterSecretArena(g: Game): void {
 function arenaBossesLive(g: Game): number { return g.en.filter((e: En) => e.hp > 0 && isBossFoe(e)).length; }
 function exitSecretArena(g: Game): void {
   const raw = g.arena ?? "";
+  const left: CaveState = { clr: arenaBossesLive(g) > 0 ? undefined : 1, dr: caveDrops(g) };
   const ok = applySideStash(g, raw);
-  g.arena = null; g.secret = null; g.shots = []; g.fx = []; g.echo = [];
+  g.arena = null; g.shots = []; g.fx = []; g.echo = [];
   g.shopOpen = false; g.stashOpen = false; g.gambOpen = false;
   g.area = "dungeon";
   if (!ok) genFloor(g);
+  else if (g.secret) { g.secret.cs = left; nudgeHeroOffFeatures(g); }
   computeVis(g); placeTorches(g);
-  setBanner(g, "BACK TO DEPTH " + g.depth, "The secret portal seals behind you", "#ff4060", 4, 2.2);
-  msg(g, "You return to depth " + g.depth + ". The secret portal is gone.", "#ffb0b0");
+  setBanner(g, "BACK TO DEPTH " + g.depth, g.secret ? "The secret portal stays open \u00b7 the arena stays conquered" : "The secret portal seals behind you", "#ff4060", 4, 2.2);
+  msg(g, "You return to depth " + g.depth + "." + (g.secret ? " The secret portal stays open." : ""), "#ffb0b0");
   g.flash = 0.4; g.flashC = "#ff4060"; g.sfx("portal");
   saveGame(g); g.notify();
 }
@@ -2165,41 +2459,88 @@ function mkCaveGoblin(g: Game, x: number, y: number, typ: number): En {
   e.awake = true;
   return e;
 }
+// Royal Goblin Warren goblins: much tougher, better XP, and every one drops boosted loot (see kill()).
+const SGC_HP = 3, SGC_ATK = 1.5, SGC_XP = 3, SGC_KING_HP = 7;
+function supCaveGoblin(e: En, king: boolean): En {
+  e.sgc = king ? 2 : 1;
+  e.hp = e.mhp = safeRound(safeMul(e.mhp, king ? SGC_KING_HP : SGC_HP));
+  e.atk = Math.max(1, Math.round(e.atk * (king ? SGC_ATK * 1.2 : SGC_ATK)));
+  e.def = Math.round(e.def * 1.25);
+  e.xp = Math.round(e.xp * (king ? SGC_XP * 3 : SGC_XP));
+  e.name = king ? "Goblin King" : "Royal " + e.name.replace(/^Cave /, "");
+  if (king) { e.cls = Math.max(e.cls, 1); e.pal = ["#ffd040", "#fff0a0", "#5a1a8a", "#ff4060"]; }
+  else if (!e.gob) e.pal = [e.pal[0], "#ffe080", e.pal[2], "#c060ff"];
+  return e;
+}
 function enterGoblinCave(g: Game): void {
   if (g.area === "goblin" || g.gobCave) return;
+  const ent = g.gobPort;
+  const sup = !!(ent && ent.sup), cs = ent && ent.cs ? ent.cs : null;
   g.gobCave = packSideStash(g);
   const GR = { x: 13, y: 13, w: 18, h: 16 };
   clearToSideRoom(g, GR.x, GR.y, GR.w, GR.h);
   g.area = "goblin";
   g.portal = { x: GR.x + 1, y: GR.y + Math.floor(GR.h / 2) - 1, kind: "goblin", w: PORTAL_W, h: PORTAL_H };
+  if (sup) g.portal.sup = 1;
   g.hero.x = GR.x + 4; g.hero.y = GR.y + Math.floor(GR.h / 2); g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
   g.gobT = 0;
   const used = new Set<number>();
   used.add(g.hero.y * MW + g.hero.x);
-  const mix = [0, 0, 0, 1, 1, 2, 3, 4, 4, 5, 6, 0, 5, 1];
+  const inG = (x: number, y: number): boolean => x >= GR.x && x < GR.x + GR.w && y >= GR.y && y < GR.y + GR.h;
   let n = 0;
-  for (let i = 0; i < mix.length; i++) {
-    const c = pickWalk(g, used, g.hero.x, g.hero.y, 3, 2);
-    if (!c) continue;
-    g.en.push(mkCaveGoblin(g, c[0], c[1], mix[i]));
-    n++;
+  if (cs) {
+    // Returning: the goblins you killed stay dead (wounded ones keep their wounds); nothing respawns.
+    for (const r of cs.gb || []) {
+      const [x, y, typ, hpk, king] = r;
+      if (!inG(x, y) || used.has(y * MW + x) || !walkable(g, x, y)) continue;
+      const e = mkCaveGoblin(g, x, y, typ);
+      e.ct = typ;
+      if (sup) supCaveGoblin(e, !!king);
+      e.hp = Math.max(1, Math.round(e.mhp * hpk / 1000));
+      g.en.push(e); used.add(y * MW + x); n++;
+    }
+    g.drops = (cs.dr || []).filter((d: Drop) => inG(d.x, d.y)).map((d: Drop) => ({ ...d }));
+  } else {
+    const mix = sup ? [1, 2, 3, 1, 2, 3, 5, 5, 6, 6, 4, 4, 0, 1, 2, 5, 6, 3] : [0, 0, 0, 1, 1, 2, 3, 4, 4, 5, 6, 0, 5, 1];
+    for (let i = 0; i < mix.length; i++) {
+      const c = pickWalk(g, used, g.hero.x, g.hero.y, 3, 2);
+      if (!c) continue;
+      const e = mkCaveGoblin(g, c[0], c[1], mix[i]);
+      e.ct = mix[i];
+      if (sup) supCaveGoblin(e, false);
+      g.en.push(e);
+      n++;
+    }
+    if (sup) {
+      const c = pickWalk(g, used, g.hero.x, g.hero.y, 9, 5) || pickWalk(g, used, g.hero.x, g.hero.y, 3, 2);
+      if (c) { const k = mkCaveGoblin(g, c[0], c[1], 5); k.ct = 5; supCaveGoblin(k, true); g.en.push(k); n++; }
+    }
   }
   computeVis(g); placeTorches(g);
-  setBanner(g, "GOBLIN CAVE", n + " goblins \u00b7 the portal stays open behind you", "#80ff60", 6, 2.8);
-  msg(g, "You step into a goblin warren! (" + n + " goblins)", "#b0ff80");
-  g.flash = 0.45; g.flashC = "#60c040"; g.sfx("gob");
+  const back = cs ? " left \u00b7 as you left it" : "";
+  if (sup) {
+    setBanner(g, SUPER_GOB_NAME.toUpperCase(), n + " royal goblins" + back + " \u00b7 tougher \u00b7 far richer drops", SUPER_GOB_C, 8, 3.2);
+    msg(g, "You step into the " + SUPER_GOB_NAME + "! (" + n + " royal goblins" + (cs ? " left" : ", led by the Goblin King") + ")", SUPER_GOB_C);
+  } else {
+    setBanner(g, "GOBLIN CAVE", n + " goblins" + back + " \u00b7 the portal stays open behind you", "#80ff60", 6, 2.8);
+    msg(g, "You step into a goblin warren! (" + n + " goblins" + (cs ? " left" : "") + ")", "#b0ff80");
+  }
+  g.flash = 0.45; g.flashC = sup ? SUPER_GOB_C : "#60c040"; g.sfx("gob");
   saveGame(g); g.notify();
 }
 function exitGoblinCave(g: Game): void {
   const raw = g.gobCave ?? "";
+  const live = g.en.filter((e: En) => e.hp > 0 && !e.child && typeof e.ct === "number");
+  const left: CaveState = { gb: live.map((e: En) => [e.x, e.y, e.ct as number, Math.max(1, Math.min(1000, Math.round(1000 * e.hp / Math.max(1, e.mhp)))), e.sgc === 2 ? 1 : 0]), dr: caveDrops(g) };
   const ok = applySideStash(g, raw);
-  g.gobCave = null; g.gobPort = null; g.shots = []; g.fx = []; g.echo = [];
+  g.gobCave = null; g.shots = []; g.fx = []; g.echo = [];
   g.shopOpen = false; g.stashOpen = false; g.gambOpen = false;
   g.area = "dungeon"; g.gobT = 0;
   if (!ok) genFloor(g);
+  else if (g.gobPort) { g.gobPort.cs = left; nudgeHeroOffFeatures(g); }
   computeVis(g); placeTorches(g);
-  setBanner(g, "BACK TO DEPTH " + g.depth, "The goblin cave portal closes", "#80ff60", 4, 2.2);
-  msg(g, "You return to depth " + g.depth + ". The goblin cave portal is gone.", "#c0ffb0");
+  setBanner(g, "BACK TO DEPTH " + g.depth, g.gobPort ? "The cave portal stays open \u00b7 step back in any time" : "The goblin cave portal closes", g.gobPort && g.gobPort.sup ? SUPER_GOB_C : "#80ff60", 4, 2.2);
+  msg(g, "You return to depth " + g.depth + "." + (g.gobPort ? " The cave portal stays open." : ""), "#c0ffb0");
   g.flash = 0.4; g.flashC = "#60c040"; g.sfx("portal");
   saveGame(g); g.notify();
 }
@@ -2210,8 +2551,18 @@ function sideAreaOf(g: Game): "arena" | "goblin" | "vault" | "" {
   return "";
 }
 function tryUsePortal(g: Game, x: number, y: number): boolean {
+  syncMapSize(g);
   const hit = anyPortalAt(g, x, y);
   if (!hit) return false;
+  if (g.xps && g.xps.includes(hit) && sideAreaOf(g) === "") {
+    // An extra cave portal (big floors): swap it into the primary slot for its kind, then enter it as usual.
+    const field: "portal" | "secret" | "gobPort" = hit.kind === "vault" ? "portal" : hit.kind === "secret" ? "secret" : "gobPort";
+    const cur = g[field] as PortalSpot | null;
+    if (field === "portal" && cur && cur.kind !== "vault") return false;
+    const idx = g.xps.indexOf(hit);
+    if (cur) g.xps[idx] = cur; else g.xps.splice(idx, 1);
+    (g as unknown as Record<string, PortalSpot | null>)[field] = hit;
+  }
   const side = sideAreaOf(g);
   if (hit.kind === "secret" || (g.secret && hit === g.secret) || (side === "arena" && hit.kind === "secret")) {
     if (side === "arena") {
@@ -2232,7 +2583,8 @@ function tryUsePortal(g: Game, x: number, y: number): boolean {
 }
 
 function packSideInterior(g: Game): string | null {
-  if (g.area !== "arena" && g.area !== "goblin") return null;
+  syncMapSize(g);
+  if (g.area !== "arena" && g.area !== "goblin" && !(g.vault && isVaultLayout(g))) return null;
   const body = {
     map: u8s(g.map), seen: u8s(g.seen),
     en: g.en.filter((e: En) => e.hp > 0),
@@ -2247,6 +2599,7 @@ function applySideInterior(g: Game, raw: unknown): boolean {
   if (typeof raw !== "string" || raw.length < 2 || raw.length > 600000) return false;
   try {
     const s = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof s.map === "string") setMapSize(sizeFromLen(s.map.length));
     const map = su8(s.map);
     if (!map || map.length !== MW * MH) return false;
     g.splats = [];
@@ -2430,6 +2783,7 @@ function tickShards(g: Game, dt: number): void {
   const list = (g as Game & { shards?: Shard[] }).shards;
   if (!list || !list.length) return;
   for (const s of list) {
+    if (g.hz) { shardHz(g, s, dt); if (s.hzs === 3 || s.hzs === 4) s.drag = 1; }
     if ((s.rest ?? 0) > 0.05) bounceMove(g, s, dt);
     else { s.x += s.vx * dt; s.y += s.vy * dt; }
     s.vy += s.g * dt; s.vx *= (s.drag ?? 0.98); s.rot += s.vr * dt; s.life -= dt;
@@ -2445,7 +2799,11 @@ function drawShards(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: 
     ctx.globalAlpha = fade;
     ctx.translate(s.x - camX, s.y - camY);
     ctx.rotate(s.rot);
+    if (s.sc !== undefined && s.sc < 1) ctx.scale(s.sc, s.sc);
+    if ((s.burn ?? 0) > 0) ctx.filter = "brightness(" + (1 - 0.75 * (s.burn ?? 0)).toFixed(2) + ") sepia(" + (s.burn ?? 0).toFixed(2) + ")";
+    if (s.hzs === 1) ctx.globalAlpha = fade * 0.75;
     ctx.drawImage(s.cv, -s.cv.width / 2, -s.cv.height / 2);
+    if ((s.burn ?? 0) > 0) ctx.filter = "none";
     ctx.restore();
   }
   ctx.globalAlpha = 1;
@@ -2458,6 +2816,7 @@ function portalSeenOf(p: PortalSpot | null | undefined, seen: Uint8Array): boole
 }
 function portalHueFor(g: Game, p?: PortalSpot | null): string {
   const k = (p && p.kind) || portalKind(g);
+  if (p && p.sup) return k === "goblin" || (!p.kind && g.area === "goblin") ? SUPER_GOB_C : SUPER_LOOT_C;
   if (k === "camp") return "#ffb040";
   if (k === "proceed") return "#40e0ff";
   if (k === "vault") return "#40ffa0";
@@ -2468,8 +2827,19 @@ function portalHueFor(g: Game, p?: PortalSpot | null): string {
   if (g.area === "goblin") return "#70d040";
   return "#c060ff";
 }
+function caveSpent(p: PortalSpot | null | undefined): boolean {
+  const cs = p && p.cs;
+  if (!cs) return false;
+  if (p!.kind === "vault") return !(cs.ch || []).some((c: number[]) => !c[3]) && !(cs.dr || []).length;
+  if (p!.kind === "goblin") return !(cs.gb || []).length && !(cs.dr || []).length;
+  if (p!.kind === "secret") return !!cs.clr && !(cs.dr || []).length;
+  return false;
+}
 function portalLabelFor(g: Game, p?: PortalSpot | null): string {
   const k = (p && p.kind) || portalKind(g);
+  const inside = !!g.vault || g.area === "goblin" || g.area === "arena";
+  if (p && !inside && caveSpent(p)) return k === "vault" ? "LOOTED" : "CLEARED";
+  if (p && p.sup && !inside) return k === "goblin" ? "ROYAL" : "CELESTIAL";
   if (k === "camp") return "CAMP";
   if (k === "proceed") return "NEXT";
   if (k === "vault") return g.vault ? "EXIT" : "LOOT";
@@ -2626,6 +2996,7 @@ function makeItem(ilvl: number, rar: number, kind?: Kind, depth?: number): Item 
   const it: Item = { id: NID++, seed, kind: k, rar, ilvl, name, atk, def, block, bonus, d, spells, pas, ult, ef, st };
   if (wepNeedsEl(k)) ensureWepEl(it);
   rollSockets(it, dlt);
+  rollWW(it, false);
   return it;
 }
 
@@ -3360,13 +3731,126 @@ function drawItem(p: Pt, it: Item): void {
   else if (k === "gem") drawGemIcon(p, it);
   else drawWeapon(p, it);
 }
+// ---------- gem icons: one distinct cut per rarity tier (2026-11-18) ----------
+// 24x24 pixel grid. Common gems are small and plain; each tier up is a new, larger and more ornate cut:
+// 0 Chipped rough pebble, 1 Fine cabochon, 2 Clear step-cut octagon, 3 Bright round brilliant,
+// 4 Vivid faceted pear, 5 Royal hexagon in silver prongs, 6 Imperial princess cut in gold filigree with accent stones,
+// 7 Prismatic rainbow star cut with halo (Golden at 10 stars: gold crown setting).
+function gemRgb(c: string): number[] { const n = c.replace("#", ""); return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)]; }
+function gemMix(c: string, to: string, f: number): string {
+  const a = gemRgb(c), b = gemRgb(to);
+  const m = (i: number): string => Math.round(a[i] + (b[i] - a[i]) * f).toString(16).padStart(2, "0");
+  return "#" + m(0) + m(1) + m(2);
+}
+const GEM_RAINBOW = ["#ff4060", "#ff9a30", "#ffe040", "#50ff70", "#40e0ff", "#5070ff", "#c050ff", "#ff50d0"];
+function polyR(th: number, n: number, rot: number): number {
+  const seg = 6.2832 / n;
+  let a = (th - rot) % seg; if (a < 0) a += seg;
+  return Math.cos(Math.PI / n) / Math.cos(a - seg / 2);
+}
+function starR(th: number, pts: number, inner: number, rot: number): number {
+  const seg = 6.2832 / pts;
+  let a = (th - rot) % seg; if (a < 0) a += seg;
+  const f = Math.abs(a / seg - 0.5) * 2; // 1 at the tips, 0 between
+  return inner + (1 - inner) * f;
+}
 function drawGemIcon(p: Pt, it: Item): void {
   const t = Math.max(0, Math.min(6, it.gt ?? 0));
+  const tier = Math.max(0, Math.min(7, it.rar | 0));
+  const golden = !!it.golden;
   const c = GEMT[t].c;
-  const k = "#1a1020", l = "#ffffff";
-  p(4, 1, 4, 1, c); p(3, 2, 6, 1, c); p(2, 3, 8, 5, c); p(3, 8, 6, 1, c); p(4, 9, 4, 1, c);
-  p(4, 3, 2, 2, l); p(3, 4, 1, 2, k);
-  if (it.rar >= 7) { p(1, 1, 1, 1, "#ff60e0"); p(10, 1, 1, 1, "#40f0ff"); p(1, 9, 1, 1, GOLD); p(10, 9, 1, 1, "#ff60e0"); }
+  const L = gemMix(c, "#ffffff", 0.5), LL = gemMix(c, "#ffffff", 0.8), D = gemMix(c, "#000000", 0.45), DD = gemMix(c, "#000000", 0.7);
+  const K = "#140a1c", W = "#ffffff", G = "#ffd040", GD = "#a06a10", GL = "#fff0a0", SV = "#d8dce8", SVD = "#7a8094";
+  const px = (x: number, y: number, col: string): void => { if (x >= 0 && y >= 0 && x < 24 && y < 24) p(x, y, 1, 1, col); };
+  // shape: returns 0 outside, else the facet colour
+  const cx = 11.5, cy = tier >= 6 ? 12 : 12.5;
+  const fill = (inside: (dx: number, dy: number) => number, col: (dx: number, dy: number, r: number) => string): void => {
+    const sh: boolean[] = [];
+    for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) sh[y * 24 + x] = inside(x - cx, y - cy) <= 1;
+    for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+      if (!sh[y * 24 + x]) {
+        // outline any pixel touching the gem
+        const nb = (xx: number, yy: number): boolean => xx >= 0 && yy >= 0 && xx < 24 && yy < 24 && sh[yy * 24 + xx];
+        if (nb(x + 1, y) || nb(x - 1, y) || nb(x, y + 1) || nb(x, y - 1)) px(x, y, K);
+        continue;
+      }
+      px(x, y, col(x - cx, y - cy, inside(x - cx, y - cy)));
+    }
+  };
+  const facet = (dx: number, dy: number, n: number, rot: number): number => { let a = Math.atan2(dy, dx) - rot; if (a < 0) a += 6.2832; return Math.floor(a / (6.2832 / n)) % n; };
+  if (tier === 0) {
+    // Chipped: small rough pebble with a chip
+    fill((dx, dy) => { const nx = dx / 4.2, ny = (dy - 1) / 3.4; const chip = dx > 1.5 && dy < 0 ? 1.6 : 1; return (nx * nx + ny * ny) * chip; },
+      (dx, dy) => (dy > 1.2 ? D : (dx < -1 && dy < 0 ? L : c)));
+    px(10, 12, gemMix(c, "#ffffff", 0.3));
+    return;
+  }
+  if (tier === 1) {
+    // Fine: smooth domed cabochon, one highlight
+    fill((dx, dy) => (dx * dx) / 25 + (dy * dy) / 20.25, (dx, dy) => (dy > 2.5 ? D : dy < -1.5 ? L : c));
+    px(9, 10, LL); px(10, 10, W); px(9, 11, LL);
+    return;
+  }
+  if (tier === 2) {
+    // Clear: step-cut octagon, concentric steps
+    const ins = (dx: number, dy: number): number => Math.max(Math.abs(dx) / 6.6, Math.abs(dy) / 5.6, (Math.abs(dx) + Math.abs(dy)) / 9.2);
+    fill(ins, (dx, dy, r) => (r > 0.8 ? (dy < 0 ? L : D) : r > 0.55 ? (dx < 0 ? c : D) : r > 0.3 ? L : c));
+    px(8, 9, W); px(9, 9, LL); px(8, 10, LL);
+    return;
+  }
+  if (tier === 3) {
+    // Bright: round brilliant, 8 crown facets around an octagonal table
+    const R0 = 7.2;
+    fill((dx, dy) => Math.hypot(dx, dy) / (R0 * polyR(Math.atan2(dy, dx), 16, 0)),
+      (dx, dy, r) => { if (r < 0.42) return dy < -0.5 ? LL : L; const f = facet(dx, dy, 8, 0.39); return f % 2 ? D : (dy < 0 ? L : c); });
+    px(8, 9, W); px(9, 8, W); px(9, 9, W);
+    px(17, 6, W); px(16, 6, LL); px(18, 6, LL); px(17, 5, LL); px(17, 7, LL);
+    return;
+  }
+  if (tier === 4) {
+    // Vivid: faceted pear / teardrop, point up, with sparkles
+    fill((dx, dy) => { const yy = dy - 1.5; if (yy >= 0) return Math.hypot(dx / 6.6, yy / 6.6); const w = 6.6 * (1 + yy / 9.5); return w <= 0.3 ? 2 : Math.max(Math.abs(dx) / w, -yy / 9.5); },
+      (dx, dy, r) => { if (r < 0.38) return LL; const f = facet(dx, dy - 1.5, 10, 0.3); return f % 2 ? (dy > 3 ? DD : D) : (dy < 0 ? L : c); });
+    px(9, 10, W); px(10, 9, W); px(9, 9, W);
+    for (const [sx, sy] of [[4, 5], [19, 17]]) { px(sx, sy, W); px(sx - 1, sy, LL); px(sx + 1, sy, LL); px(sx, sy - 1, LL); px(sx, sy + 1, LL); }
+    return;
+  }
+  if (tier === 5) {
+    // Royal: hexagon cut with a six-point inner star, held by silver prongs, faint aura dots
+    const R0 = 8.4;
+    for (let i = 0; i < 12; i++) { const a = i * 0.5236; px(Math.round(cx + Math.cos(a) * 11), Math.round(cy + Math.sin(a) * 11), gemMix(c, "#ffffff", 0.35)); }
+    fill((dx, dy) => Math.hypot(dx, dy) / (R0 * polyR(Math.atan2(dy, dx), 6, 0.5236)),
+      (dx, dy, r) => { const th = Math.atan2(dy, dx); if (r < 0.62 * starR(th, 6, 0.45, 0.5236) / 1) return r < 0.25 ? W : LL; const f = facet(dx, dy, 12, 0); return f % 2 ? D : (dy < 0 ? L : c); });
+    for (let i = 0; i < 6; i++) { const a = i * 1.0472 + 0.5236; const x = Math.round(cx + Math.cos(a) * 9), y = Math.round(cy + Math.sin(a) * 9); px(x, y, SV); px(x + (Math.cos(a) > 0 ? 1 : -1), y, SVD); }
+    px(20, 3, W); px(19, 3, LL); px(21, 3, LL); px(20, 2, LL); px(20, 4, LL);
+    return;
+  }
+  if (tier === 6) {
+    // Imperial: princess cut (square on its point) in an ornate gold filigree frame with 4 accent stones
+    for (let i = 0; i < 24; i++) { const a = i * 0.2618; if (i % 2) px(Math.round(cx + Math.cos(a) * 11.4), Math.round(cy + Math.sin(a) * 11.4), G); }
+    const fr = (dx: number, dy: number): number => (Math.abs(dx) + Math.abs(dy)) / 10.6;
+    for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) { const r = fr(x - cx, y - cy); if (r <= 1 && r > 0.83) px(x, y, (x + y) % 3 === 0 ? GL : (y < cy ? G : GD)); }
+    fill((dx, dy) => (Math.abs(dx) + Math.abs(dy)) / 8.6,
+      (dx, dy, r) => { if (r < 0.3) return W; if (r < 0.55) return Math.abs(dx) > Math.abs(dy) ? LL : L; const q = (dx < 0 ? 0 : 1) + (dy < 0 ? 0 : 2); return q === 0 ? L : q === 3 ? DD : (q === 1 ? c : D); });
+    for (const [ax, ay] of [[11.5, 1.5], [11.5, 22.5], [1.5, 12], [21.5, 12]]) { const x = Math.round(ax - 0.5), y = Math.round(ay - 0.5); px(x, y, G); px(x + 1, y, GL); px(x, y + 1, GD); px(x + 1, y + 1, gemMix(c, "#ffffff", 0.2)); }
+    px(3, 3, W); px(2, 3, LL); px(4, 3, LL); px(3, 2, LL); px(3, 4, LL);
+    px(20, 20, W); px(19, 20, LL); px(21, 20, LL);
+    return;
+  }
+  // Prismatic: eight-point star cut with rainbow facets, rainbow halo, sparkles; Golden = gold crown setting
+  for (let i = 0; i < 32; i++) { const a = i * 0.19635; px(Math.round(cx + Math.cos(a) * 11.6), Math.round(cy + Math.sin(a) * 11.6), golden ? (i % 2 ? G : GL) : GEM_RAINBOW[i % 8]); }
+  if (golden) { for (let i = 0; i < 8; i++) { const a = i * 0.7854 + 0.39; for (let r = 9; r <= 11; r++) px(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r), r === 11 ? GL : G); } }
+  fill((dx, dy) => Math.hypot(dx, dy) / (10.2 * starR(Math.atan2(dy, dx), 8, 0.62, -1.5708)),
+    (dx, dy, r) => {
+      if (r < 0.22) return W;
+      if (r < 0.5) return dy < 0 ? LL : L;
+      const f = facet(dx, dy, 16, -1.5708);
+      if (golden) return f % 2 ? (dy < 0 ? c : D) : gemMix(G, c, 0.3);
+      const rb = GEM_RAINBOW[(f >> 1) % 8];
+      return f % 2 ? gemMix(rb, D, 0.55) : gemMix(rb, c, 0.45);
+    });
+  if (golden) { px(9, 1, G); px(11, 0, GL); px(12, 0, GL); px(14, 1, G); px(10, 1, G); px(13, 1, G); px(11, 1, W); px(12, 1, W); }
+  for (const [sx, sy] of [[3, 3], [20, 4], [4, 20], [20, 20]]) { px(sx, sy, W); px(sx - 1, sy, LL); px(sx + 1, sy, LL); px(sx, sy - 1, LL); px(sx, sy + 1, LL); }
 }
 function iconBox(k: Kind): number[] {
   if (k === "head") return [-2, -3, 14, 13];
@@ -3374,29 +3858,41 @@ function iconBox(k: Kind): number[] {
   if (k === "arms" || k === "legs") return [-1, 0, 11, 8];
   if (k === "shield") return [0, 0, 10, 12];
   if (k === "pet") return [0, 0, 16, 16];
-  if (k === "gem") return [1, 1, 11, 10];
+  if (k === "gem") return [0, 0, 24, 24];
   return [0, -1, 9, 25];
 }
-const ICONC = new Map<number, HTMLCanvasElement>();
-const ICONU = new Map<number, string>();
+// Icon caches are keyed by item id + whether socket pips are baked in + the live socket state, so an icon can never
+// show stale sockets, and places that draw their own live pip overlay (inventory cells, ground drops) use a pip-free icon.
+const ICONC = new Map<string, HTMLCanvasElement>();
+const ICONU = new Map<string, string>();
+function sockSig(it: Item): string { return it.sk && it.sk.length ? it.sk.map((z: { c: number; g?: { typ: number; rar: number; s?: number } }) => z.c + (z.g ? ":" + z.g.typ + "." + z.g.rar + "." + (z.g.s ?? 0) : "")).join(",") : ""; }
+function iconKey(it: Item, pips: boolean): string { return it.id + "|" + (pips ? 1 : 0) + "|" + sockSig(it); }
 const SOCK_PIP_ICON = 9;
 const SOCK_PIP_DROP = 5;
+// One circle per real socket, rows of 4 (bottom row first), so 1-4 sockets = one row, 5-8 = two rows.
 function socketPipLayout(n: number, area: number, pip: number, gap = 2): { x: number; y: number }[] {
-  const k = Math.max(0, Math.min(4, n));
-  const total = k * pip + Math.max(0, k - 1) * gap;
-  const x0 = Math.max(1, Math.floor((area - total) / 2));
-  const y = area - pip - 2;
+  const k = Math.max(0, Math.min(8, n | 0));
   const out: { x: number; y: number }[] = [];
-  for (let i = 0; i < k; i++) out.push({ x: x0 + i * (pip + gap), y });
+  const rows = Math.ceil(k / 4);
+  for (let r = 0; r < rows; r++) {
+    const inRow = Math.min(4, k - r * 4);
+    const total = inRow * pip + Math.max(0, inRow - 1) * gap;
+    const x0 = Math.max(1, Math.floor((area - total) / 2));
+    const y = area - pip - 2 - (rows - 1 - r) * (pip + 1);
+    for (let i = 0; i < inRow; i++) out.push({ x: x0 + i * (pip + gap), y });
+  }
   return out;
 }
-function drawSocketPips(x: CanvasRenderingContext2D, ox: number, oy: number, it: Item, pip: number, gap = 2): void {
+const SOCK_DRAW_LOG: { on: boolean; calls: { id: number; n: number; filled: number[] }[] } = { on: false, calls: [] };
+// Draws exactly it.sk.length circles at (ox + layout.x, oy + layout.y); filled sockets show their gem's colour.
+function drawSocketPips(x: CanvasRenderingContext2D, ox: number, oy: number, it: Item, pip: number, gap = 2, area = 0): void {
   if (!it || !it.sk || !it.sk.length) return;
-  const n = Math.min(4, it.sk.length);
-  for (let i = 0; i < n; i++) {
+  const lay = socketPipLayout(it.sk.length, area || (4 * pip + 3 * gap + 2), pip, gap);
+  if (SOCK_DRAW_LOG.on) SOCK_DRAW_LOG.calls.push({ id: it.id, n: lay.length, filled: it.sk.slice(0, lay.length).map((z: { g?: unknown }) => (z.g ? 1 : 0)) });
+  for (let i = 0; i < lay.length; i++) {
     const z = it.sk[i];
     const r = pip / 2;
-    const cx = ox + r, cy = oy + r;
+    const cx = ox + lay[i].x + r, cy = oy + lay[i].y + r;
     x.beginPath();
     x.arc(cx, cy, Math.max(1.5, r - 1), 0, Math.PI * 2);
     x.fillStyle = z.g ? GEMT[z.g.typ].c : "rgba(8,8,12,0.15)";
@@ -3409,11 +3905,17 @@ function drawSocketPips(x: CanvasRenderingContext2D, ox: number, oy: number, it:
     x.lineWidth = 1.6;
     x.strokeStyle = GEMT[z.c].c;
     x.stroke();
-    ox += pip + gap;
+    if (z.g && z.g.rar >= 3) {
+      // the socketed gem's rarity: a rarity-coloured core (gold for a Golden gem), white glint from Ethereal up
+      x.beginPath(); x.arc(cx, cy, Math.max(0.8, r * 0.38), 0, Math.PI * 2);
+      x.fillStyle = z.g.rar >= 7 && (z.g.s ?? 0) >= 10 ? GOLD : RC[z.g.rar]; x.fill();
+      if (z.g.rar >= 5) { x.fillStyle = "#ffffff"; x.fillRect(cx - r * 0.45, cy - r * 0.45, Math.max(1, r * 0.3), Math.max(1, r * 0.3)); }
+    }
   }
 }
-function iconCanvas(it: Item): HTMLCanvasElement {
-  const got = ICONC.get(it.id);
+function iconCanvas(it: Item, pips = true): HTMLCanvasElement {
+  const key = iconKey(it, pips);
+  const got = ICONC.get(key);
   if (got) return got;
   const c = document.createElement("canvas");
   c.width = ICON; c.height = ICON;
@@ -3424,24 +3926,37 @@ function iconCanvas(it: Item): HTMLCanvasElement {
     const ox = Math.round((ICON - bw * s) / 2 - bx * s);
     const oy = Math.round((ICON - bh * s) / 2 - by * s);
     drawItem(painter(x, ox, oy, s, false, 0), it);
-    if (it.sk && it.sk.length) {
-      const layout = socketPipLayout(it.sk.length, ICON, SOCK_PIP_ICON, 2);
-      if (layout.length) drawSocketPips(x, layout[0].x, layout[0].y, it, SOCK_PIP_ICON, 2);
-    }
+    if (pips && it.sk && it.sk.length) drawSocketPips(x, 0, 0, it, SOCK_PIP_ICON, 2, ICON);
   }
-  ICONC.set(it.id, c);
+  if (ICONC.size > 1500) ICONC.clear();
+  ICONC.set(key, c);
   return c;
 }
 function bustIcon(it: Item): void {
-  ICONC.delete(it.id);
-  ICONU.delete(it.id);
+  const pre = it.id + "|";
+  for (const k of [...ICONC.keys()]) if (k.startsWith(pre)) ICONC.delete(k);
+  for (const k of [...ICONU.keys()]) if (k.startsWith(pre)) ICONU.delete(k);
 }
-function iconURL(it: Item): string {
-  const got = ICONU.get(it.id);
+const SOCK_GEM_ICON = new Map<string, string>();
+function sockGemIconURL(z: { typ: number; rar: number; s?: number }): string {
+  const k = z.typ + "|" + z.rar + "|" + (z.s ?? 0);
+  const got = SOCK_GEM_ICON.get(k);
+  if (got !== undefined) return got;
+  const gem = makeGem(z.rar, z.typ, 1, z.s ?? 0);
+  let u = "";
+  try { u = iconCanvas(gem).toDataURL(); } catch { u = ""; }
+  bustIcon(gem);
+  SOCK_GEM_ICON.set(k, u);
+  return u;
+}
+function iconURL(it: Item, pips = true): string {
+  const key = iconKey(it, pips);
+  const got = ICONU.get(key);
   if (got) return got;
   let u = "";
-  try { u = iconCanvas(it).toDataURL(); } catch { u = ""; }
-  ICONU.set(it.id, u);
+  try { u = iconCanvas(it, pips).toDataURL(); } catch { u = ""; }
+  if (ICONU.size > 1500) ICONU.clear();
+  ICONU.set(key, u);
   return u;
 }
 const MERCH_ICONU = new Map<string, string>();
@@ -3933,6 +4448,7 @@ function rollChestRar(d: number, vault: boolean): number {
 function packChest(c: Chest): Chest {
   const o: Chest = { x: c.x, y: c.y, open: !!c.open, rar: Math.max(0, Math.min(4, Math.floor(Number(c.rar) || 0))) };
   if (c.starter) o.starter = true;
+  if (c.bur) o.bur = true;
   if (c.starter && !o.open && Array.isArray(c.items)) {
     o.items = c.items.map((it: unknown) => validItem(it)).filter((it: Item | null): it is Item => !!it);
   }
@@ -4204,7 +4720,7 @@ function resolveShot(g: Game, s: Shot): void {
 
 const enemyAt = (g: Game, x: number, y: number): En | null => { for (const e of g.en) if (e.hp > 0 && e.x === x && e.y === y) return e; for (const e of g.pend) if (e.x === x && e.y === y) return e; return null; };
 const chestAt = (g: Game, x: number, y: number): Chest | null => { for (const c of g.chests) if (!c.open && c.x === x && c.y === y) return c; return null; };
-const walkable = (g: Game, x: number, y: number): boolean => inb(x, y) && g.map[y * MW + x] !== 0 && !enemyAt(g, x, y) && !chestAt(g, x, y) && !merchAt(g, x, y) && !campBlocked(g, x, y);
+const walkable = (g: Game, x: number, y: number): boolean => inb(x, y) && g.map[y * MW + x] !== 0 && !enemyAt(g, x, y) && !chestAt(g, x, y) && !merchAt(g, x, y) && !campBlocked(g, x, y) && !hzSolid(g, x, y);
 
 function los(g: Game, x0: number, y0: number, x1: number, y1: number): boolean {
   const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -4219,6 +4735,7 @@ function los(g: Game, x0: number, y0: number, x1: number, y1: number): boolean {
   return true;
 }
 function computeVis(g: Game): void {
+  syncMapSize(g);
   g.vis.fill(0);
   const h = g.hero, RR = 6;
   for (let dy = -RR; dy <= RR; dy++) for (let dx = -RR; dx <= RR; dx++) {
@@ -4378,6 +4895,7 @@ function bounceMove(g: Game, o: { x: number; y: number; vx: number; vy: number; 
   }
 }
 function stepPart(g: Game, p: Part, dt: number): void {
+  if (p.gib && g.hz) partHz(g, p, dt);
   if (p.gib && (p.rest ?? 0) > 0.05) bounceMove(g, p, dt);
   else { p.x += p.vx * dt; p.y += p.vy * dt; }
   p.vy += p.g * dt;
@@ -4487,9 +5005,38 @@ function setBanner(g: Game, txt: string, sub: string, c: string, rar: number, t:
   announce(txt + (sub ? " — " + sub : ""));
 }
 
+// ---- Floor size tiers (item 13) ----
+// From depth 25 every 25 depths unlocks one more, slightly larger tier; any unlocked size can roll
+// (normal has double weight). Square maps; capped at 72x72 (2.7x the normal area) for phones.
+const FLOOR_SIZES = [44, 50, 56, 61, 65, 68, 70, 72];
+const FLOOR_SIZE_NAMES = ["Normal", "Large", "Larger", "Huge", "Vast", "Immense", "Colossal", "Titanic"];
+const FLOOR_SIZE_START = 25, FLOOR_SIZE_STEP = 25, FLOOR_NORMAL_W = 2;
+function floorTierMax(depth: number): number {
+  if (depth < FLOOR_SIZE_START) return 0;
+  return Math.min(FLOOR_SIZES.length - 1, 1 + Math.floor((depth - FLOOR_SIZE_START) / FLOOR_SIZE_STEP));
+}
+function floorTierProbs(depth: number): number[] {
+  const m = floorTierMax(depth);
+  const w = FLOOR_SIZES.map((_: number, i: number) => (i > m ? 0 : i === 0 ? FLOOR_NORMAL_W : 1));
+  const tot = w.reduce((a: number, b: number) => a + b, 0);
+  return w.map((x: number) => x / tot);
+}
+function floorTierFor(depth: number, seed: number, act: boolean): number {
+  if (act) return 0;
+  const pr = floorTierProbs(depth);
+  let r = rng32(hash32(seed, depth, 0x512e) | 1)();
+  for (let i = 0; i < pr.length; i++) { r -= pr[i]; if (r <= 0) return i; }
+  return 0;
+}
+let FLOOR_TIER_FORCE: number | null = null;
+function floorTierOf(g: Game): number { const i = FLOOR_SIZES.indexOf(MW); return i < 0 ? 0 : i; }
 function genFloor(g: Game): void {
   g.splats = [];
+  g.wxs = (R() * 4294967296) >>> 0;
+  setMapSize(FLOOR_SIZES[FLOOR_TIER_FORCE !== null ? Math.max(0, Math.min(FLOOR_SIZES.length - 1, FLOOR_TIER_FORCE)) : floorTierFor(g.depth, g.wxs, isActFloor(g.depth))]);
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
   clearCracks(g);
+  const areaK = (MW * MH) / (BASE_MAP * BASE_MAP);
   const map = new Uint8Array(MW * MH);
   const rooms: { x: number; y: number; w: number; h: number }[] = [];
   const carve = (x: number, y: number): void => { if (x > 0 && y > 0 && x < MW - 1 && y < MH - 1) map[y * MW + x] = 1; };
@@ -4499,7 +5046,8 @@ function genFloor(g: Game): void {
     else { while (cy !== by) { carve(cx, cy); cy += Math.sign(by - cy); } while (cx !== bx) { carve(cx, cy); cx += Math.sign(bx - cx); } }
     carve(bx, by);
   };
-  for (let tries = 0; tries < 600 && rooms.length < 15; tries++) {
+  const roomTarget = Math.round(15 * areaK);
+  for (let tries = 0; tries < Math.round(600 * areaK) && rooms.length < roomTarget; tries++) {
     const w = 4 + ri(6), h = 4 + ri(5), x = 1 + ri(MW - w - 2), y = 1 + ri(MH - h - 2);
     let ok = true;
     for (const r of rooms) if (x < r.x + r.w + 1 && x + w + 1 > r.x && y < r.y + r.h + 1 && y + h + 1 > r.y) { ok = false; break; }
@@ -4634,7 +5182,14 @@ function genFloor(g: Game): void {
   // traders live at camp only (raw30); no dungeon shops
   // rare treasure portal (~4% of floors from depth 2) — skipped on act floors
   // loot goblins from depth 3: classic 6% (was 3%), Gem Goblin 2.5%, Gold Goblin 2.5%; at most one per floor
-  if (!actFl && d >= 2 && rooms.length > 2 && R() < 0.04 * gemPortalMul(g)) { const c = cell(1 + ri(rooms.length - 1)); if (c) { placePortalNear(g, "vault", c[0], c[1]); markPortalUsed(g, used); } }
+  if (!actFl && d >= 2 && rooms.length > 2) {
+    const lr = CAVE_FORCE === "vault" ? 0 : CAVE_FORCE === "svault" ? 1 : R(), pm = gemPortalMul(g);
+    const sup = lr >= LOOT_CAVE_CH * pm && (CAVE_FORCE === "svault" || (!CAVE_FORCE && R() < SUPER_LOOT_CH * pm));
+    if (lr < LOOT_CAVE_CH * pm || sup) {
+      const c = cell(1 + ri(rooms.length - 1));
+      if (placeCavePortal(g, "vault", "portal", c ? c[0] : -1, c ? c[1] : -1, sup)) markPortalUsed(g, used);
+    }
+  }
   if (d >= 3 && rooms.length > 2) {
     const mul = gemGobMul(g);
     const gr = R();
@@ -4654,15 +5209,15 @@ function genFloor(g: Game): void {
     }
   }
   for (const e of g.en) { GENINFO.nEn++; if (inRoom(e.x, e.y)) GENINFO.nRoom++; else GENINFO.nCorr++; }
-  const nCh = 2 + ri(3);
+  const nCh = Math.round((2 + ri(3)) * areaK);
   for (let i = 0; i < nCh; i++) { const c = cell(ri(rooms.length)); if (c) g.chests.push({ x: c[0], y: c[1], open: false, rar: rollChestRar(d, false) }); }
-  const nPot = POT_FLOOR_BASE + ri(POT_FLOOR_SPAN);
+  const nPot = Math.round((POT_FLOOR_BASE + ri(POT_FLOOR_SPAN)) * areaK);
   for (let i = 0; i < nPot; i++) { const c = cell(ri(rooms.length)); if (c) g.drops.push({ x: c[0], y: c[1], item: null, pot: true, gold: 0 }); }
   const nGold = 2 + ri(3);
   for (let i = 0; i < nGold; i++) { const c = cell(ri(rooms.length)); if (c) g.drops.push({ x: c[0], y: c[1], item: null, pot: false, gold: Math.round((6 + d * 4) * (0.5 + R())) }); }
   if (R() < GEM_CH_FLOOR) {
     const c = cell(ri(rooms.length));
-    if (c) g.drops.push({ x: c[0], y: c[1], item: makeGem(rollGemRar(d), ri(7), Math.max(1, d)), pot: false, gold: 0 });
+    if (c) g.drops.push({ x: c[0], y: c[1], item: ((): Item => { const r0 = rollGemRar(d); return makeGem(r0, ri(7), Math.max(1, d), rollGemStars(r0, d)); })(), pot: false, gold: 0 });
   }
   computeVis(g);
   placeTorches(g);
@@ -4673,6 +5228,10 @@ function genFloor(g: Game): void {
   maybeSpawnPrisThreats(g);
   maybeSpawnGoblinCavePortal(g);
   maybeSpawnSecretPortal(g);
+  if (!CAVE_FORCE) rollExtraPortals(g);
+  maybeSpawnShrine(g);
+  genHazards(g);
+  maybeSpawnArtifactCave(g);
 }
 const HUNTER_CHANCE = 0.025; // ~2.5% of floors
 const HUNTER_MIN_DEPTH = 4;
@@ -5121,6 +5680,7 @@ function makePet(ilvl: number, rar: number, depth?: number): Item {
   const st = rollStars("pet", rar, false, depth ?? ilvl);
   if (st) it.st = st;
   if (rar >= 7) { it.pab = petAbiRoll(it); it.prt = petRareRoll(it); }
+  rollWW(it, true);
   return it;
 }
 const petPower = (lvl: number, it: Item): number => {
@@ -5530,7 +6090,7 @@ function petLines(it: Item, lvl: number): string[] {
   const pt = it.pt ?? 0;
   const lines = ["Companion: " + PETN[pt] + " (" + PARCH[Math.floor(pt / 10)] + ")",
     "Fires a " + petProjName(pt) + " at the nearest foe in sight every turn (range " + PET_RANGE + ")",
-    "Each shot: " + Math.round(petPower(lvl, it) * 100) + "% of your damage per turn" + (it.ilvl < lvl ? " (weaker below your level)" : "") + (it.st && it.st.length ? "  " + starBadge(it) + (it.rar >= 7 && it.st.length > 5 ? "  power x" + fmtBig(prisStarMul(it)) : "") : ""),
+    "Each shot: " + Math.round(petPower(lvl, it) * 100) + "% of your damage per turn" + (it.ilvl < lvl ? " (weaker below your level)" : "") + (it.st && it.st.length ? "  " + starBadge(it) + (it.rar >= 7 && it.st.length > 0 ? "  power x" + fmtBig(prisStarMul(it)) : "") : ""),
     "Pets never die and follow you everywhere. Same rarity colors and star rules as other gear (combine 3 of the same rarity and stars)."];
   if (it.rar >= 7) {
     lines.push(petAbiTitle(it), petAbiDesc(it));
@@ -6048,9 +6608,37 @@ function gobTick(g: Game, dt: number): void {
   }
 }
 const VR = { x: 14, y: 15, w: 16, h: 13 };
+function isVaultLayout(g: Game): boolean {
+  if (!g.map || g.map.length !== BASE_MAP * BASE_MAP) return false;
+  let n = 0;
+  for (let i = 0; i < g.map.length; i++) if (g.map[i] !== 0) {
+    const x = i % MW, y = (i / MW) | 0;
+    if (x < VR.x || x >= VR.x + VR.w || y < VR.y || y >= VR.y + VR.h) return false;
+    n++;
+  }
+  return n === VR.w * VR.h;
+}
 // Step into a treasure portal: stash the current floor (kept in the save) and open a monster-free vault full of chests.
+const SUPER_LOOT_NAME = "Celestial Treasury", SUPER_LOOT_C = "#7fe8ff";
+const SUPER_GOB_NAME = "Royal Goblin Warren", SUPER_GOB_C = "#ffb020";
+// Inside a super cave the exit portal carries sup=1 (it survives save/reload with the interior).
+function inSuperCave(g: Game): boolean { return !!((g.vault || g.area === "goblin") && g.portal && g.portal.sup); }
+function supChestRar(): number {
+  // Celestial Treasury chests: never Normal; mostly Legendary/Mythic (normal vault: 22/32/26/14/6).
+  const w = [0, 8, 26, 38, 28];
+  let r = R() * 100;
+  for (let i = 0; i < 5; i++) { r -= w[i]; if (r <= 0) return i; }
+  return 4;
+}
+function caveDrops(g: Game): Drop[] {
+  return (g.drops || []).filter((d: Drop) => d && inb(d.x, d.y) && (d.pot || (d.gold || 0) > 0 || d.item)).map((d: Drop) => packDrop(d)).slice(0, SAVE_DROP_CAP);
+}
 function enterVault(g: Game): void {
-  const stash = { map: u8s(g.map), seen: u8s(g.seen), en: g.en.filter((e: En) => e.hp > 0).concat(g.pend), chests: g.chests, drops: g.drops, trader: g.trader, hx: g.hero.x, hy: g.hero.y, ft: g.floorTurn, ground: g.ground, gobT: g.gobT };
+  const ent = packPortal(g.portal);
+  const sup = !!(ent && ent.sup), cs = ent ? ent.cs : undefined;
+  const stash = { map: u8s(g.map), seen: u8s(g.seen), en: g.en.filter((e: En) => e.hp > 0).concat(g.pend), chests: g.chests, drops: g.drops, trader: g.trader, hx: g.hero.x, hy: g.hero.y, ft: g.floorTurn, ground: g.ground, gobT: g.gobT, portal: ent, ws: g.wxs, xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p), sh: packShrine(g.shrine), hz: packHz(g), ac: packArtCave(g.artCave) };
+  setMapSize(BASE_MAP);
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
   g.vault = JSON.stringify(stash);
   const map = new Uint8Array(MW * MH);
   for (let y = VR.y; y < VR.y + VR.h; y++) for (let x = VR.x; x < VR.x + VR.w; x++) map[y * MW + x] = 1;
@@ -6063,26 +6651,48 @@ function enterVault(g: Game): void {
   g.trader = null; g.shopOpen = false; g.stashOpen = false; g.floorTurn = 0;
   const my = VR.y + (VR.h >> 1);
   g.portal = { x: VR.x + 1, y: my - 1, w: PORTAL_W, h: PORTAL_H };
+  if (sup) g.portal.sup = 1;
   g.hero.x = VR.x + 3; g.hero.y = my; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
-  const slots: number[][] = [];
-  for (let y = VR.y + 1; y < VR.y + VR.h - 1; y += 2) for (let x = VR.x + 4; x < VR.x + VR.w - 1; x += 2) slots.push([x, y]);
-  for (let i = slots.length - 1; i > 0; i--) { const j = ri(i + 1); const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp; }
-  const n = Math.min(slots.length, 12 + ri(9));
-  for (let i = 0; i < n; i++) g.chests.push({ x: slots[i][0], y: slots[i][1], open: false, rar: rollChestRar(g.depth, true) });
-  for (let i = 0; i < 4; i++) { const x = VR.x + 3, y = VR.y + 1 + i * 3; if (y < VR.y + VR.h) g.drops.push({ x, y, item: null, pot: false, gold: Math.round((40 + g.depth * 20) * (0.7 + R() * 0.6)) }); }
+  let n = 0;
+  if (cs) {
+    // Returning: the vault is exactly as you left it (opened chests stay open, nothing refills).
+    const inV = (x: number, y: number): boolean => x >= VR.x && x < VR.x + VR.w && y >= VR.y && y < VR.y + VR.h;
+    for (const c of cs.ch || []) if (inV(c[0], c[1])) g.chests.push({ x: c[0], y: c[1], open: !!c[3], rar: c[2] });
+    g.drops = (cs.dr || []).filter((d: Drop) => inV(d.x, d.y)).map((d: Drop) => ({ ...d }));
+    n = g.chests.filter((c: Chest) => !c.open).length;
+  } else {
+    const slots: number[][] = [];
+    for (let y = VR.y + 1; y < VR.y + VR.h - 1; y += 2) for (let x = VR.x + 4; x < VR.x + VR.w - 1; x += 2) slots.push([x, y]);
+    for (let i = slots.length - 1; i > 0; i--) { const j = ri(i + 1); const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp; }
+    n = Math.min(slots.length, sup ? 18 + ri(7) : 12 + ri(9));
+    for (let i = 0; i < n; i++) g.chests.push({ x: slots[i][0], y: slots[i][1], open: false, rar: sup ? supChestRar() : rollChestRar(g.depth, true) });
+    const piles = sup ? 6 : 4, pileMul = sup ? 4 : 1;
+    for (let i = 0; i < piles; i++) { const x = VR.x + 3 - (i >= 4 ? 1 : 0), y = VR.y + 1 + (i % 4) * 3; if (y < VR.y + VR.h) g.drops.push({ x, y, item: null, pot: false, gold: Math.round((40 + g.depth * 20) * (0.7 + R() * 0.6) * pileMul) }); }
+  }
   computeVis(g);
   placeTorches(g);
-  setBanner(g, "TREASURE VAULT", n + " chests \u00b7 no monsters \u00b7 exit portal behind you", GOLD, 6, 2.8);
-  msg(g, "You step through the portal into a treasure vault! (" + n + " chests)", GOLD);
-  g.flash = 0.5; g.flashC = "#c060ff";
+  const back = cs ? " \u00b7 as you left it" : "";
+  if (sup) {
+    setBanner(g, SUPER_LOOT_NAME.toUpperCase(), n + " celestial chests" + back + " \u00b7 far richer loot", SUPER_LOOT_C, 7, 3.2);
+    msg(g, "You step into the " + SUPER_LOOT_NAME + "! (" + n + " chests" + (cs ? " left" : "") + ")", SUPER_LOOT_C);
+  } else {
+    setBanner(g, "TREASURE VAULT", n + " chests" + back + " \u00b7 no monsters \u00b7 exit portal behind you", GOLD, 6, 2.8);
+    msg(g, "You step through the portal into a treasure vault! (" + n + " chests" + (cs ? " left" : "") + ")", GOLD);
+  }
+  g.flash = 0.5; g.flashC = sup ? SUPER_LOOT_C : "#c060ff";
   g.sfx("portal");
   saveGame(g);
   g.notify();
 }
 function exitVault(g: Game): void {
   let ok = false;
+  let ent: PortalSpot | null = null;
+  // Only record the interior if we are really standing in the vault room (old reloads could leave the floor map here).
+  const inRoom = isVaultLayout(g);
+  const left: CaveState | null = inRoom ? { ch: g.chests.map((c: Chest) => [c.x, c.y, c.rar | 0, c.open ? 1 : 0]), dr: caveDrops(g) } : null;
   try {
-    const s = JSON.parse(g.vault ?? "") as { map: string; seen: string; en: En[]; chests: Chest[]; drops: Drop[]; trader: Trader | null; hx: number; hy: number; ft: number; ground: Ground[]; gobT: number };
+    const s = JSON.parse(g.vault ?? "") as { map: string; seen: string; en: En[]; chests: Chest[]; drops: Drop[]; trader: Trader | null; hx: number; hy: number; ft: number; ground: Ground[]; gobT: number; portal?: PortalSpot | null; ws?: number; xp?: PortalSpot[]; sh?: Shrine | null; hz?: string; ac?: ArtCave | null };
+    if (s && typeof s.map === "string") setMapSize(sizeFromLen(s.map.length));
     if (s && typeof s.map === "string" && s.map.length === MW * MH && typeof s.seen === "string" && s.seen.length === MW * MH && inb(s.hx, s.hy)) {
       g.splats = [];
       g.map = su8(s.map); g.seen = su8(s.seen); g.vis = new Uint8Array(MW * MH);
@@ -6094,14 +6704,24 @@ function exitVault(g: Game): void {
       g.ground = Array.isArray(s.ground) ? s.ground : [];
       g.floorTurn = Number(s.ft) || 0; g.gobT = Number(s.gobT) || 0;
       g.hero.x = s.hx; g.hero.y = s.hy; g.hero.ax = s.hx; g.hero.ay = s.hy;
+      ent = unpackPortal(s.portal);
+      g.wxs = typeof s.ws === "number" ? s.ws : g.wxs;
+      g.xps = Array.isArray(s.xp) ? s.xp.map((p: unknown) => unpackPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p) : [];
+      g.shrine = unpackShrine(s.sh); g.hz = unpackHz(s.hz, MW * MH); g.artCave = s.ac ? packArtCave(s.ac) : null; g.slide = null; hzSanitize(g);
       ok = true;
     }
   } catch { ok = false; }
   g.vault = null; g.portal = null; g.shots = []; g.fx = []; g.echo = []; g.shopOpen = false; g.stashOpen = false; g.gambOpen = false;
   if (!ok) genFloor(g);
+  else if (ent && ent.kind === "vault" && !portalCells(ent).some((t) => g.map[t.y * MW + t.x] === 0)) {
+    // The loot-cave portal stays open for good and remembers what is left inside.
+    if (left) ent.cs = left;
+    g.portal = ent;
+    nudgeHeroOffFeatures(g);
+  }
   computeVis(g);
   placeTorches(g);
-  setBanner(g, "BACK TO DEPTH " + g.depth, "The portal closes behind you", "#c060ff", 4, 2.2);
+  setBanner(g, "BACK TO DEPTH " + g.depth, g.portal ? "The portal stays open \u00b7 step back in any time" : "The portal closes behind you", "#c060ff", 4, 2.2);
   msg(g, "You return to depth " + g.depth + ".", "#c8a0ff");
   g.flash = 0.4; g.flashC = "#c060ff";
   g.sfx("portal");
@@ -6133,7 +6753,7 @@ function actAddCount(act: number, phase: number): number {
   if (act < 2 || phase < 2) return 0;
   return (phase >= 3 ? 2 : 1) + Math.floor((act - 2) / 2);
 }
-function uiBlocked(g: Game): boolean { return !!(g.shopOpen || g.stashOpen || g.gambOpen); }
+function uiBlocked(g: Game): boolean { return !!(g.shopOpen || g.stashOpen || g.gambOpen || g.trophyOpen); }
 function portalKind(g: Game): "vault" | "camp" | "proceed" | "secret" | "goblin" | "" {
   if (!g.portal) {
     if (g.vault) return "vault";
@@ -6151,7 +6771,7 @@ function portalKind(g: Game): "vault" | "camp" | "proceed" | "secret" | "goblin"
 function portalHue(g: Game): string { return portalHueFor(g, g.portal); }
 function portalLabel(g: Game): string { return portalLabelFor(g, g.portal); }
 function campBlocked(g: Game, x: number, y: number): boolean {
-  return !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y);
+  return !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y) || shrineAt(g, x, y) || !!(g.trophyAt && g.trophyAt.x === x && g.trophyAt.y === y);
 }
 function merchAt(g: Game, x: number, y: number): boolean {
   return !!(g.merchant && g.merchant.x === x && g.merchant.y === y);
@@ -6168,6 +6788,7 @@ function canBreakWall(g: Game, x: number, y: number): boolean {
   if (g.map[y * MW + x] !== 0) return false;
   if (campBlocked(g, x, y)) return false;
   if (portalAt(g, x, y)) return false;
+  if (artLocked(g, x, y)) return false; // the artifact pocket can only be reached over its lava moat
   return true;
 }
 function cracksOf(g: Game): number[] {
@@ -6238,7 +6859,23 @@ function breakWallTile(g: Game, x: number, y: number): void {
   burst(g, x * TS + 12, y * TS + 12, 16, ["#c0b8a0", "#6a6050", "#ffffff"], 50, 40);
   try { g.sfx("step"); } catch { /* ignore */ }
   floatTxt(g, x, y - 0.4, "BREAK", "#e8d8b0");
+  maybeBuriedChest(g, x, y);
   computeVis(g);
+}
+// Item 21b: a destroyed wall tile sometimes hides a buried chest (normal chest rules for the depth), max 2 per floor.
+const BURIED_CH = 0.04, BURIED_CAP = 2;
+let BURIED_FORCE = false;
+function maybeBuriedChest(g: Game, x: number, y: number): boolean {
+  if (!wallDmgOk(g) || !inb(x, y) || g.map[y * MW + x] !== 1) return false;
+  if (g.chests.filter((c: Chest) => c.bur).length >= BURIED_CAP) return false;
+  if (!BURIED_FORCE && !(R() < BURIED_CH)) return false;
+  if (chestAt(g, x, y) || portalAt(g, x, y) || enemyAt(g, x, y) || (g.hero.x === x && g.hero.y === y)) return false;
+  g.chests.push({ x, y, open: false, rar: rollChestRar(g.depth, false), bur: true });
+  burst(g, x * TS + 12, y * TS + 12, 34, ["#c8b890", "#8a7a5a", "#e8dcc0", GOLD], 70, 50);
+  floatTxt(g, x, y - 0.8, "BURIED CHEST!", GOLD);
+  msg(g, "Buried chest uncovered!", GOLD);
+  g.sfx("chest");
+  return true;
 }
 function pushDig(g: Game, x: number, y: number, dt: number): boolean {
   if (!g.wallBreak || !canBreakWall(g, x, y)) return false;
@@ -6443,7 +7080,9 @@ function mkActBoss(g: Game, x: number, y: number): En {
   if (g.eq) {
     const hs = calc(g.lvl, g.eq);
     const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
-    const hsWant = calc(g.lvl, eqStarCapped(g.eq, PRIS_STAR_BASE));
+    PRIS_STAR_LEGACY = true;
+    let hsWant: Stats;
+    try { hsWant = calc(g.lvl, eqStarCapped(g.eq, PRIS_STAR_BASE)); } finally { PRIS_STAR_LEGACY = false; }
     const ev = Math.max(1, hsWant.atk * combatSwingMul(hsWant, isTwo(main)));
     const want = Math.max(1, (actFightSec(act) / RT_ATK) * ev / (1 + sh));
     // Want-based at every depth (beatable with a 5★-capped version of the current kit).
@@ -7159,10 +7798,11 @@ function chestTypeRange(g: Game, id: MerchId): { lo: number; hi: number } {
   return { lo, hi };
 }
 function merchRarTitle(it: Item): string {
-  const n = it.st ? it.st.length : 0;
+  const n = starCount(it);
   const stars = n > 0 ? " " + (n <= 8 ? "\u2605".repeat(n) : "\u2605" + n) : "";
-  if (it.golden) return "GOLDEN PRISMATIC" + stars;
+  if (it.golden && !isGem(it)) return "GOLDEN PRISMATIC" + stars;
   if (it.set !== undefined) return "SET RELIC" + stars;
+  if (isGem(it)) return (it.golden ? "GOLDEN PRISMATIC GEM" : ((RT[it.rar] || "") + " GEM").toUpperCase()) + stars;
   return ((RT[it.rar] || "ITEM").toUpperCase()) + stars;
 }
 function dismissChestReveal(g: Game): void { g.chestReveal = null; }
@@ -7286,6 +7926,8 @@ function restAtCamp(g: Game): void {
   g.notify();
 }
 function genCamp(g: Game): void {
+  setMapSize(BASE_MAP);
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
   g.splats = [];
   clearCracks(g);
   const map = new Uint8Array(MW * MH);
@@ -7310,6 +7952,10 @@ function genCamp(g: Game): void {
   g.stashAt = { x: cx + 5, y: cy };
   placeMerchant(g);
   placePortalNear(g, "proceed", cx, cy - 6);
+  g.trophyAt = undefined;
+  for (const [tx, ty] of [[cx - 3, cy - 3], [cx + 3, cy - 3], [cx - 3, cy + 3], [cx + 3, cy + 3]]) {
+    if (g.map[ty * MW + tx] === 1 && !campBlocked(g, tx, ty) && !portalAt(g, tx, ty) && !(tx === cx && ty === cy + 2)) { g.trophyAt = { x: tx, y: ty }; break; }
+  }
   g.hero.x = cx; g.hero.y = cy + 2; g.hero.ax = g.hero.x; g.hero.ay = g.hero.y;
   nudgeHeroOffFeatures(g);
   g.campSpot = undefined;
@@ -7374,11 +8020,8 @@ function leaveCamp(g: Game): void {
 function useStairsOrPortal(g: Game): void {
   if (g.mode !== "play" || uiBlocked(g) || g.paused) return;
   if (portalAt(g, g.hero.x, g.hero.y)) {
-    const k = portalKind(g);
-    if (k === "proceed") { leaveCamp(g); return; }
-    if (k === "camp") { enterCamp(g); return; }
-    if (g.vault) { exitVault(g); return; }
-    enterVault(g);
+    // Same routing as stepping onto it, so goblin / secret portals open their own caves (not the loot vault).
+    tryUsePortal(g, g.hero.x, g.hero.y);
     return;
   }
   const tile = g.map[g.hero.y * MW + g.hero.x];
@@ -7714,6 +8357,7 @@ function parsedRunRank(s: Record<string, unknown> | null): number {
 }
 let jaxSeedEnabled = true;
 let jaxSeedBusy = false;
+let jaxSeedCache: { rank: number; raw: string } | null = null;
 function ensureJaxSeed(): boolean {
   // If Jax is empty, a starter, or behind the embedded seed, fill it. Never
   // clobber a Jax run that has more level/depth/XP than the seed. Never touch
@@ -7722,16 +8366,24 @@ function ensureJaxSeed(): boolean {
   if (!jaxSeedEnabled || jaxSeedBusy) return false;
   jaxSeedBusy = true;
   try {
-    let seedG: Game | null = null;
-    QUIET_ANNOUNCE++;
-    try { seedG = decodeCode(JAX_SEED_CODE, null); } finally { QUIET_ANNOUNCE--; }
-    if (!seedG) return false;
-    seedG.mode = "play";
-    const seedRank = runProgressRank(seedG.lvl, seedG.depth, seedG.xp);
+    // Decode the embedded seed once per session. decodeCode -> newGame ->
+    // genFloor resizes the global map (MW/MH), so it must not run on every
+    // save in the middle of live play; restore the live size afterwards.
+    if (!jaxSeedCache) {
+      let seedG: Game | null = null;
+      const mw = MW, mh = MH;
+      QUIET_ANNOUNCE++;
+      try { seedG = decodeCode(JAX_SEED_CODE, null); } finally { QUIET_ANNOUNCE--; setMapSize(mw, mh); }
+      if (!seedG) return false;
+      seedG.mode = "play";
+      const r = buildPersistRaw(seedG);
+      if (!parseSaveRaw(r)) return false;
+      jaxSeedCache = { rank: runProgressRank(seedG.lvl, seedG.depth, seedG.xp), raw: r };
+    }
+    const seedRank = jaxSeedCache.rank;
     const existing = parseSaveRaw(profBlob(JAX_SEED_PROF));
     if (existing && !isFreshSave(existing) && parsedRunRank(existing) >= seedRank) return false;
-    const raw = buildPersistRaw(seedG);
-    if (!parseSaveRaw(raw)) return false;
+    const raw = jaxSeedCache.raw;
     memSaveBy[JAX_SEED_PROF] = raw;
     if (activeProf === JAX_SEED_PROF) memSave = raw;
     writeDurable(profSaveKey(JAX_SEED_PROF), raw);
@@ -7973,8 +8625,8 @@ function parseSaveRaw(raw: string | null): Record<string, unknown> | null {
     if (typeof s.lvl !== "number" || !isFinite(s.lvl) || s.lvl < 1) return null;
     // compact 1 = ED2 wrapper; compact 2 = LZ-compressed character + current/previous floor.
     if ((s.compact === 1 && typeof s.code === "string" && s.code.length > 0) || (s.compact === 2 && typeof s.z === "string" && s.z.length > 0)) return s;
-    if (typeof s.map !== "string" || s.map.length !== MW * MH) return null;
-    if (typeof s.seen !== "string" || s.seen.length !== MW * MH) return null;
+    if (typeof s.map !== "string" || s.map.length !== sizeFromLen(s.map.length) ** 2) return null;
+    if (typeof s.seen !== "string" || s.seen.length !== s.map.length) return null;
     if (typeof s.hx !== "number" || typeof s.hy !== "number" || !isFinite(s.hx) || !isFinite(s.hy)) return null;
     const hx = Math.floor(s.hx), hy = Math.floor(s.hy);
     if (!inb(hx, hy)) return null;
@@ -8052,13 +8704,15 @@ function pruneFloorSnap(snap: FloorSnap | null | undefined): FloorSnap | null {
   };
 }
 function codeBodyOf(g: Game): Record<string, unknown> {
+  syncMapSize(g);
+  repairSocketSpill(g);
   const bagCap = g.bagCap ?? BAG;
   const gemCap = g.gemCap ?? GEM_BAG;
   const vault = (g.vault && g.vault.length <= SAVE_VAULT_MAX) ? g.vault : null;
   return {
     v: 2, d: g.depth, l: g.lvl, x: Math.round(g.xp), g: g.gold, p: g.potions, b: g.best, bl: g.bestLvl, k: g.kills, dt: g.deaths || 0,
     u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), pa: Math.max(0, Math.round((g.paraAt ?? 0) - Date.now())), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
-    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g),
+    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0,
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
     ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
     hx: g.hero.x, hy: g.hero.y, hp: g.hero.hp, dir: heroDir(g.hero), tn: g.turn,
@@ -8067,6 +8721,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     gv: (g.gobCave && g.gobCave.length <= SAVE_VAULT_MAX) ? g.gobCave : null,
     ai: g.area === "arena" ? packSideInterior(g) : null,
     gi: g.area === "goblin" ? packSideInterior(g) : null,
+    vi: g.vault && vault ? packSideInterior(g) : null,
     sc: packPortal(g.secret),
     gp: packPortal(g.gobPort),
     pk: g.pk && (g.pk.s || g.pk.u || g.pk.d0) ? g.pk : null,
@@ -8076,6 +8731,8 @@ function codeBodyOf(g: Game): Record<string, unknown> {
 }
 
 function fullSnapOf(g: Game): Record<string, unknown> {
+  syncMapSize(g);
+  repairSocketSpill(g);
   // Legacy uncompressed snapshot, kept so older blobs and tests that rewrite raw v1 fields still load.
   return {
     v: SAVE_VER, t: Date.now(), depth: g.depth, lvl: g.lvl, xp: g.xp, gold: g.gold, potions: g.potions, hp: g.hero.hp, hx: g.hero.x, hy: g.hero.y, face: g.hero.face,
@@ -8085,7 +8742,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, paraAt: g.paraAt ?? 0, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
     area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
-    wallBreak: !!g.wallBreak, cracks: packCracks(g),
+    wallBreak: !!g.wallBreak, cracks: packCracks(g), arts: artsOf(g).slice(), shrUsedD: g.shrUsedD ?? 0,
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
   };
 }
@@ -8157,6 +8814,7 @@ function writeDurable(key: string, raw: string): boolean {
   return durable;
 }
 function saveGame(g: Game, quiet = false, force = false): boolean {
+  syncMapSize(g);
   if (GIB_SKIP_SAVE) return false;
   if (g.mode !== "play") return false;
   lastPersistOk = false;
@@ -8308,7 +8966,7 @@ function packItem(it: Item | null): unknown {
     it.spells ? it.spells.map((s: Spell) => [ELS.indexOf(s.el), SHAPES.indexOf(s.sh), s.mod, r3(s.ch), r3(s.pw), r3(s.r), s.name]) : 0,
     it.pas ? it.pas.map((p: Passive) => [ELS.indexOf(p.el), PTYPES.indexOf(p.ty), p.mod, r3(p.pw), p.name]) : 0,
     it.ult === undefined ? -1 : it.ult, it.ef ? it.ef.map((e: number[]) => [e[0], r3(e[1])]) : 0, it.pt === undefined ? -1 : it.pt, it.set === undefined ? -1 : it.set, it.st ? it.st.map((e: number[]) => [e[0], r3(e[1] ?? 1)]) : 0, wepNeedsEl(it.kind) ? ELS.indexOf(ensureWepEl(it)) : -1,
-    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number } }) => [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1]) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab, it.prt === undefined ? -1 : it.prt];
+    it.sk ? it.sk.map((z: { c: number; g?: { typ: number; rar: number; s?: number } }) => (z.g && z.g.s ? [z.c, z.g.typ, z.g.rar, z.g.s] : [z.c, z.g ? z.g.typ : -1, z.g ? z.g.rar : -1])) : 0, it.gt === undefined ? -1 : it.gt, it.golden ? 1 : 0, it.pab === undefined ? -1 : it.pab, it.prt === undefined ? -1 : it.prt, it.kind === "gem" && it.gs ? it.gs : 0, it.ww ? 1 : 0];
 }
 function unpackItem(a: unknown): Item | null {
   if (!Array.isArray(a) || a.length < 13) return null;
@@ -8320,13 +8978,14 @@ function unpackItem(a: unknown): Item | null {
   const o = { id: NID++, seed: n(a[3]) || 1, kind: KINDS[n(a[0])], rar: n(a[1]), ilvl: n(a[2]), name: String(a[9] ?? ""), atk: n(a[4]), def: n(a[5]), block: n(a[6]), bonus,
     d: String(a[8] ?? "").split("").map((c: string) => Number(c)), spells: sp, pas: pa, ult: n(a[12]) >= 0 ? n(a[12]) : undefined,
     ef: Array.isArray(a[13]) ? (a[13] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, pt: n(a[14]) >= 0 ? n(a[14]) : undefined, set: n(a[15]) >= 0 ? n(a[15]) : undefined, st: Array.isArray(a[16]) ? (a[16] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, wel: (ELS as string[]).includes(ELS[n(a[17])]) ? ELS[n(a[17])] : undefined,
-    sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); return { c: Math.max(0, Math.min(6, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)) } : undefined }; }) : undefined,
-    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined };
+    sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); const zs = row.length > 3 ? n(row[3]) : 0; return { c: Math.max(0, Math.min(6, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? (zs >= 1 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)), s: Math.floor(zs) } : { typ: typ, rar: Math.max(0, Math.min(7, rr)) }) : undefined }; }) : undefined,
+    gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined, gs: a.length > 23 && n(a[23]) >= 1 && n(a[23]) <= 10 ? Math.floor(n(a[23])) : undefined, ww: a.length > 24 && n(a[24]) === 1 ? 1 : undefined };
   if ([o.rar, o.ilvl, o.atk, o.def, o.block].some((v: number) => !isFinite(v))) return null;
   return validItem(o);
 }
 const CODE_PRE = "ED2-";
 function makeCode(g: Game): string {
+  syncMapSize(g);
   return CODE_PRE + lzc(JSON.stringify(codeBodyOf(g)));
 }
 // Turns a Save Code (new ED2- or legacy ED16-) into a playable game. Never touches storage unless the code is fully valid.
@@ -8374,6 +9033,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     normUltCds(g);
     syncLegacyUlt(g);
     g.thSeen = thSeenParse(s.ts);
+    g.arts = unpackArts(s.afx); g.shrUsedD = typeof s.sud === "number" && isFinite(s.sud) ? Math.floor(s.sud) : 0;
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
     g.bpm = cleanBpm(s.bpm); // before the floor is restored, so respawned bosses reuse their rolls
@@ -8415,6 +9075,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.bpm = cleanBpm(s.bpm);
     if (s.ar === "arena" && applySideInterior(g, s.ai)) g.area = "arena";
     else if (s.ar === "goblin" && applySideInterior(g, s.gi)) g.area = "goblin";
+    else if (g.vault && typeof s.vi === "string") applySideInterior(g, s.vi); // back inside the loot cave room itself
     g.mode = "play";
     repairCampBossHybrid(g);
     expandFeaturesOnLoad(g);
@@ -8482,6 +9143,7 @@ function validItem(o: unknown): Item | null {
       .filter((e: number[]) => e[0] >= (wpn ? 0 : 50) && e[0] < (wpn ? 50 : 100) && !seenEf.has(e[0]) && !!seenEf.add(e[0])).slice(0, 4);
     if (!it.ef.length) it.ef = undefined;
   } else it.ef = undefined;
+  if (it.ww === 1 && it.kind !== "gem") it.ww = 1; else delete it.ww;
   if (it.bonus.mv !== undefined) { if (isArmor(it.kind)) it.bonus.mv = Math.max(0, Math.min(MV_CAP, Math.round(it.bonus.mv))); else delete it.bonus.mv; }
   if (typeof it.set === "number" && isFinite(it.set) && it.set >= 0 && it.set < SETS.length) it.set = Math.floor(it.set); else delete it.set;
   if (it.kind === "gem") {
@@ -8489,7 +9151,7 @@ function validItem(o: unknown): Item | null {
     it.gt = typ >= 0 && typ <= 6 ? typ : 0;
     it.atk = 0; it.def = 0; it.block = 0;
     delete it.st; delete it.sk; delete it.set; delete it.ult; delete it.spells; delete it.pas; delete it.ef; delete it.golden; delete it.wel;
-    it.name = GEM_QN[it.rar] + " " + GEMT[it.gt].n;
+    setGemStars(it, typeof it.gs === "number" && isFinite(it.gs) ? Math.floor(it.gs) : 0);
   } else {
     if (Array.isArray(it.st)) {
       it.st = it.st.filter((e: number[]) => Array.isArray(e) && typeof e[0] === "number" && e[0] >= 0 && e[0] < 22).map((e: number[]) => [Math.floor(e[0]), Math.max(0.1, Number(e[1]) || 1)]).slice(0, 10);
@@ -8497,10 +9159,26 @@ function validItem(o: unknown): Item | null {
     } else delete it.st;
     if (Array.isArray(it.sk)) {
       it.sk = it.sk.filter((z: { c?: number; g?: { typ?: number; rar?: number } }) => z && typeof z.c === "number" && z.c >= 0 && z.c <= 6).map((z: { c: number; g?: { typ?: number; rar?: number } }) => {
-        const sock: { c: number; g?: { typ: number; rar: number } } = { c: Math.floor(z.c) };
-        if (z.g && typeof z.g.typ === "number" && z.g.typ >= 0 && z.g.typ <= 6 && typeof z.g.rar === "number" && z.g.rar >= 0 && z.g.rar <= 7) sock.g = { typ: Math.floor(z.g.typ), rar: Math.floor(z.g.rar) };
+        const sock: { c: number; g?: { typ: number; rar: number; s?: number } } = { c: Math.floor(z.c) };
+        if (z.g && typeof z.g.typ === "number" && z.g.typ >= 0 && z.g.typ <= 6 && typeof z.g.rar === "number" && z.g.rar >= 0 && z.g.rar <= 7) {
+          sock.g = { typ: Math.floor(z.g.typ), rar: Math.floor(z.g.rar) };
+          const zs = Number((z.g as { s?: number }).s);
+          if (isFinite(zs) && zs >= 1) sock.g.s = Math.min(gemStarMax(sock.g.rar), Math.floor(zs));
+          if (!sock.g.s) delete sock.g.s;
+        }
         return sock;
-      }).slice(0, SOCK_MAX);
+      });
+      if (it.sk.length > SOCK_MAX) {
+        // Item 22 repair: never more sockets than SOCK_MAX. Keep the first valid sockets (filled ones first, in order);
+        // gems from the surplus sockets are parked on the item and moved to the gem bag by repairSocketSpill().
+        const all = it.sk;
+        const keep = all.filter((z: { g?: unknown }) => !!z.g).slice(0, SOCK_MAX);
+        for (const z of all) { if (keep.length >= SOCK_MAX) break; if (!z.g && !keep.includes(z)) keep.push(z); }
+        const extra = all.filter((z: { g?: unknown }) => !keep.includes(z as never) && !!z.g).map((z: { g?: { typ: number; rar: number; s?: number } }) => z.g as { typ: number; rar: number; s?: number });
+        it.sk = all.filter((z: unknown) => keep.includes(z as never));
+        if (extra.length) (it as Item & { skx?: { typ: number; rar: number; s?: number }[] }).skx = extra;
+        SOCK_FIXED.n++;
+      }
     } else it.sk = undefined;
     ensureSockets(it);
     if (it.golden || (it.rar >= 7 && it.st && it.st.length >= 10)) markGolden(it); else delete it.golden;
@@ -8549,6 +9227,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
       if (g) { optimizeEquipped(g); return g; }
     }
     const num = (k: string, min: number): number => { const v = s[k]; if (typeof v !== "number" || !isFinite(v) || v < min) throw new Error("bad " + k); return v; };
+    if (typeof s.map === "string") setMapSize(sizeFromLen(s.map.length));
     const map = typeof s.map === "string" && s.map.length === MW * MH ? su8(s.map) : null;
     const seen = typeof s.seen === "string" && s.seen.length === MW * MH ? su8(s.seen) : null;
     if (!map || !seen) return null;
@@ -8571,6 +9250,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.splats = [];
     g.map = map; g.seen = seen; g.vis = new Uint8Array(MW * MH);
     g.thSeen = thSeenParse(s.thSeen);
+    g.arts = unpackArts(s.arts); g.shrUsedD = typeof s.shrUsedD === "number" && isFinite(s.shrUsedD) ? Math.floor(s.shrUsedD as number) : 0;
     g.theme = themeOf(g.depth);
     THDREAD = (g.area === "camp" || g.vault) ? 0 : dreadT(g.depth);
     if (!g.thSeen.includes(g.theme)) g.thSeen.push(g.theme);
@@ -9263,7 +9943,8 @@ function kill(g: Game, e: En): void {
   const mf = efP(g, 54);
   const drop = (it: Item): void => { it = maybeSet(it); const mfAll = mf + gemMagicFind(g); if (mfAll > 0 && it.rar < 5 && R() < efc(0.06, mfAll)) { it.rar++; floatTxt(g, e.x, e.y - 1.3, "MAGIC FIND!", RC[it.rar]); } announceDrop(g, it, e.x, e.y); g.drops.push({ x: e.x, y: e.y, item: it, pot: false, gold: 0 }); };
   const gold = (mul: number): void => { const n = Math.max(1, Math.round((14 + d * 6.8) * (0.6 + R() * 0.8) * mul * gm * gemGoldMul(g))); g.gold += n; floatTxt(g, e.x, e.y - 0.9, "+" + n + "g", GOLD); g.sfx("coin"); };
-  if (e.child) { /* split spawn: no loot */ }
+  if (e.sw) { if (g.swarm) g.swarm.kills++; if (R() < 0.05) gold(0.4); } // shrine swarm: counted, almost no loot (the reward comes at the end)
+  else if (e.child) { /* split spawn: no loot */ }
   else if (e.gob === 2) {
     const n = Math.max(2, Math.min(6, Math.round(2 + d * 0.08 + R() * 2)));
     for (let i = 0; i < n; i++) giveDroppedGem(g, e.x, e.y, d, true);
@@ -9360,6 +10041,15 @@ function kill(g: Game, e: En): void {
     if (R() < ch) giveDroppedGem(g, e.x, e.y, d);
   }
   if (!e.child) petFortuneDrop(g, e, drop);
+  if (!e.child && e.sgc) {
+    // Royal Goblin Warren: every royal goblin drops boosted loot (min Rare, ilvl +5); the Goblin King drops a hoard.
+    const king = e.sgc === 2;
+    const nI = king ? 4 : 1 + (R() < 0.5 ? 1 : 0);
+    for (let i = 0; i < nI; i++) drop(makeItem(d + (king ? 8 : 5), king ? Math.max(3, jackpotRar(d)) : rollRar(1.6, 2, d)));
+    gold(king ? 40 : 6);
+    if (R() < (king ? 1 : 0.3)) giveDroppedGem(g, e.x, e.y, d + (king ? 10 : 4), true);
+    if (king) { setBanner(g, "GOBLIN KING SLAIN!", "The royal hoard spills out!", SUPER_GOB_C, 8, 3.2); msg(g, "You slew the Goblin King!", SUPER_GOB_C); }
+  }
   if (!e.child && setCounts(g.eq)[7] >= 4 && R() < 0.12) drop(makeItem(d, rollRar(1.1, 0, d)));
   if (e.tr.includes("split") && !e.child) {
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -9677,7 +10367,8 @@ function rollStars(kind: Kind, rar: number, isSet: boolean, d: number = 1): numb
 const starPool = (it: Item): StarDef[] => (isArmor(it.kind) || it.kind === "shield" ? STAR_DEF : STAR_OFF);
 const starName = (it: Item, e: number[]): string => starPool(it)[e[0]]?.n ?? "Star";
 const starDesc = (it: Item, e: number[]): string => starPool(it)[e[0]]?.d ?? "";
-const starBadge = (it: Item): string => (it.st && it.st.length > 0 ? "\u2605" + it.st.length : "");
+function starCount(it: Item | null | undefined): number { return !it ? 0 : it.kind === "gem" ? gemStarsOf(it) : (it.st ? it.st.length : 0); }
+const starBadge = (it: Item): string => (starCount(it) > 0 ? "\u2605" + starCount(it) : "");
 
 const SOCK_MAX = 4;
 const SOCK_W: number[][] = [
@@ -9705,6 +10396,16 @@ const STAR_COMBINE_MAX = [0, 0, 0, 1, 2, 3, 4, 10];
 const SALV_RM = [0.6, 1.1, 2.2, 8, 22, 60, 180, 900];
 const GOLDEN_COL = "#ffd840";
 function isGem(it: Item | null | undefined): boolean { return !!it && it.kind === "gem"; }
+// "Prismatic Ruby Gem (Prismatic)" style: quality word + type + "Gem" + the rarity tier name.
+function gemFullName(it: Item): string {
+  const r = Math.max(0, Math.min(7, it.rar | 0));
+  const t = Math.max(0, Math.min(6, it.gt ?? 0));
+  const n = gemStarsOf(it);
+  const stars = n > 0 ? " \u2605" + n : "";
+  if (it.golden) return "Golden Prismatic " + GEMT[t].n + " Gem" + stars;
+  const base = GEM_QN[r] + " " + GEMT[t].n + " Gem";
+  return (GEM_QN[r] === RT[r] ? base : base + " (" + RT[r] + ")") + stars;
+}
 function gemQ(rar: number): number { return 1 + Math.max(0, Math.min(7, rar)) * 0.4; }
 function sockWeights(rar: number, d: number = 1): number[] {
   const w = SOCK_W[Math.max(0, Math.min(7, rar | 0))].slice();
@@ -9736,11 +10437,44 @@ function gemFitsSocket(gem: Item, color: number): boolean {
   if (gem.rar >= 7) return true;
   return gem.gt === color;
 }
-function makeGem(rar: number, typ?: number, ilvl: number = 1): Item {
+function makeGem(rar: number, typ?: number, ilvl: number = 1, stars: number = 0): Item {
   const r = Math.max(0, Math.min(7, rar | 0));
   const t = typ !== undefined ? Math.max(0, Math.min(6, typ | 0)) : ri(7);
-  const name = GEM_QN[r] + " " + GEMT[t].n;
-  return { id: NID++, seed: Math.floor(R() * 2147483646) + 1, kind: "gem", rar: r, ilvl: Math.max(1, ilvl), name, atk: 0, def: 0, block: 0, bonus: {}, d: [t, r, 0, 0], gt: t };
+  const it: Item = { id: NID++, seed: Math.floor(R() * 2147483646) + 1, kind: "gem", rar: r, ilvl: Math.max(1, ilvl), name: "", atk: 0, def: 0, block: 0, bonus: {}, d: [t, r, 0, 0], gt: t };
+  setGemStars(it, stars);
+  return it;
+}
+// ---------- gem stars (2026-11-18) ----------
+// Same caps and merge rule as gear: 3 gems of the same type, rarity and stars -> one star higher until the
+// rarity's cap (Normal/Magic/Rare 0, Legendary 1, Mythic 2, Ethereal 3, Relic 4, Prismatic 10), then the next rarity.
+// A 10-star Prismatic gem turns GOLDEN. Stars are stored as gs (item) / s (socketed); missing = 0 stars.
+function gemStarMax(rar: number): number { return STAR_COMBINE_MAX[Math.max(0, Math.min(7, rar | 0))] ?? 0; }
+function gemStarsOf(it: Item | null | undefined): number { return it && it.kind === "gem" ? Math.max(0, Math.min(gemStarMax(it.rar), (it.gs ?? 0) | 0)) : 0; }
+// socket bonus multiplier from stars: lower rarities +15% per star; Prismatic uses the Prismatic star curve
+function gemStarMul(rar: number, stars: number): number {
+  const n = Math.max(0, Math.min(gemStarMax(rar), stars | 0));
+  if (n <= 0) return 1;
+  if (rar >= 7) return prisStarMulN(n);
+  return 1 + 0.15 * n;
+}
+function setGemStars(it: Item, stars: number): void {
+  const n = Math.max(0, Math.min(gemStarMax(it.rar), stars | 0));
+  if (n > 0) it.gs = n; else delete it.gs;
+  const t = Math.max(0, Math.min(6, it.gt ?? 0));
+  if (it.rar >= 7 && n >= 10) { it.golden = true; it.name = "Golden Prismatic " + GEMT[t].n; }
+  else { delete it.golden; it.name = GEM_QN[it.rar] + " " + GEMT[t].n; }
+}
+function gemSockOf(gem: Item): { typ: number; rar: number; s?: number } {
+  const n = gemStarsOf(gem);
+  const o: { typ: number; rar: number; s?: number } = { typ: gem.gt ?? 0, rar: gem.rar };
+  if (n > 0) o.s = n;
+  return o;
+}
+function gemFromSock(z: { typ: number; rar: number; s?: number }, ilvl: number): Item { return makeGem(z.rar, z.typ, ilvl, z.s ?? 0); }
+function gemSockPow(z: { typ: number; rar: number; s?: number }): number { return gemQ(z.rar) * gemStarMul(z.rar, z.s ?? 0); }
+function rollGemStars(rar: number, d: number): number {
+  const st = rollStars("head", Math.min(7, rar), false, d);
+  return st ? st.length : 0;
 }
 function gemRarWRaw(depth: number): number[] {
   const d = Math.max(1, depth);
@@ -9768,7 +10502,8 @@ function rollGobGemRar(depth: number): number {
   return 0;
 }
 function giveDroppedGem(g: Game, x: number, y: number, d: number, gob = false): Item {
-  const gem = makeGem(gob ? rollGobGemRar(d) : rollGemRar(d), ri(7), Math.max(1, d));
+  const gr0 = gob ? rollGobGemRar(d) : rollGemRar(d);
+  const gem = makeGem(gr0, ri(7), Math.max(1, d), rollGemStars(gr0, d));
   announceDrop(g, gem, x, y);
   if (autoSocketGem(g, gem, x, y)) { runAutoCombine(g); return gem; }
   placeGem(g, gem, x, y);
@@ -9785,8 +10520,8 @@ function actBossGoldHigh(d: number, g: Game | null = null): number {
 function goldGoblinPayout(d: number, g: Game): number {
   return Math.max(1, Math.round(actBossGoldHigh(d, g) * 10 * (1.05 + R() * 0.30)));
 }
-function equippedGems(eq: Eq): { typ: number; rar: number }[] {
-  const out: { typ: number; rar: number }[] = [];
+function equippedGems(eq: Eq): { typ: number; rar: number; s?: number }[] {
+  const out: { typ: number; rar: number; s?: number }[] = [];
   for (const k of EQK) {
     const it = eq[k]; if (!it || !it.sk) continue;
     for (const s of it.sk) if (s.g) out.push(s.g);
@@ -9795,7 +10530,7 @@ function equippedGems(eq: Eq): { typ: number; rar: number }[] {
 }
 function gemTypePower(eq: Eq, typ: number): number {
   let p = 0;
-  for (const g of equippedGems(eq)) if (g.typ === typ) p += gemQ(g.rar);
+  for (const g of equippedGems(eq)) if (g.typ === typ) p += gemSockPow(g);
   return p;
 }
 function applyGemStats(s: Stats, eq: Eq): void {
@@ -9806,7 +10541,7 @@ function applyGemStats(s: Stats, eq: Eq): void {
   if (sap > 0) s.def += Math.round(1.2 * sap);
 }
 function gemMagicFind(g: Game): number { return gemTypePower(g.eq, 4); }
-function gemGoldMul(g: Game): number { return 1 + 0.12 * gemTypePower(g.eq, 5); }
+function gemGoldMul(g: Game): number { return Math.min(8, 1 + 0.12 * gemTypePower(g.eq, 5)); }
 function gemGobMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 5)); }
 function gemPortalMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 6)); }
 function gemRareMul(g: Game): number { return Math.min(2.5, 1 + 0.15 * gemTypePower(g.eq, 6)); }
@@ -9846,7 +10581,7 @@ function popSocketGems(it: Item): Item[] {
   if (!it.sk) return out;
   for (const s of it.sk) {
     if (!s.g) continue;
-    out.push(makeGem(s.g.rar, s.g.typ, it.ilvl));
+    out.push(gemFromSock(s.g, it.ilvl));
     delete s.g;
   }
   return out;
@@ -9857,13 +10592,13 @@ function socketGem(it: Item, si: number, gem: Item): string {
   if (!isGem(gem) || gem.gt === undefined) return "That is not a gemstone.";
   if (!gemFitsSocket(gem, it.sk[si].c)) return "That gem does not fit this " + GEMT[it.sk[si].c].n + " socket.";
   if (it.sk[si].g) return "That socket is already filled. Unsocket it first.";
-  it.sk[si].g = { typ: gem.gt, rar: gem.rar };
+  it.sk[si].g = gemSockOf(gem);
   bustIcon(it);
   return "Socketed " + gem.name + ".";
 }
 function unsocketGem(g: Game, it: Item, si: number): string {
   if (!it.sk || si < 0 || si >= it.sk.length || !it.sk[si].g) return "That socket is empty.";
-  const gg = makeGem(it.sk[si].g.rar, it.sk[si].g.typ, it.ilvl);
+  const gg = gemFromSock(it.sk[si].g, it.ilvl);
   delete it.sk[si].g;
   bustIcon(it);
   placeGem(g, gg, g.hero.x, g.hero.y);
@@ -9952,11 +10687,11 @@ function autoSocketUpgradeEquipped(g: Game): boolean {
       for (let i = 0; i < gb.length; i++) {
         const gem = gb[i];
         if (!gem || !gemFitsSocket(gem, s.c)) continue;
-        if (gem.rar > s.g.rar && (bestI < 0 || gem.rar > gb[bestI].rar)) bestI = i;
+        if (gemSockPow(gemSockOf(gem)) > gemSockPow(s.g) && (bestI < 0 || gemSockPow(gemSockOf(gem)) > gemSockPow(gemSockOf(gb[bestI])))) bestI = i;
       }
       if (bestI < 0) continue;
       const better = gb.splice(bestI, 1)[0];
-      const lower = makeGem(s.g.rar, s.g.typ, it.ilvl);
+      const lower = gemFromSock(s.g, it.ilvl);
       delete s.g;
       socketGem(it, si, better);
       placeGem(g, lower, g.hero.x, g.hero.y);
@@ -10031,7 +10766,7 @@ function combineTrack(it: Item): string | null {
 function combineKey(it: Item): string | null {
   const t = combineTrack(it);
   if (!t) return null;
-  if (it.kind === "gem") return t + "|r" + it.rar;
+  if (it.kind === "gem") { const gs = gemStarsOf(it); if (it.rar >= 7 && gs >= 10) return null; return t + "|r" + it.rar + "|s" + gs; }
   const stars = it.st ? it.st.length : 0;
   // Set pieces: same kind, same rarity tier, same stars; stop at the set star cap (4).
   if (t.indexOf("set:") === 0) return stars >= combineStarMax(it.rar, true) ? null : t + "|r" + it.rar + "|s" + stars;
@@ -10057,7 +10792,7 @@ function pickCombinedKind(inputs: Item[]): Kind {
   return sharedKind(inputs);
 }
 function copySocket(s: { c: number; g?: { typ: number; rar: number } }): { c: number; g?: { typ: number; rar: number } } {
-  return s.g ? { c: s.c, g: { typ: s.g.typ, rar: s.g.rar } } : { c: s.c };
+  return s.g ? { c: s.c, g: s.g.s ? { typ: s.g.typ, rar: s.g.rar, s: s.g.s } : { typ: s.g.typ, rar: s.g.rar } } : { c: s.c };
 }
 // On combine, keep the equipped (or primary) input's sockets and gems, same colors and positions.
 // Then rollSocketCount(newRar): extra sockets only if that roll exceeds the carried count, capped at SOCK_MAX (4, every gear kind). Never decrease; never re-roll existing sockets. Pets stay socketless.
@@ -10082,9 +10817,14 @@ function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | nul
   const a = inputs[0], b = inputs[1], c = inputs[2];
   const ilvl = Math.max(depth, ...inputs.map((it: Item) => it.ilvl));
   if (a.kind === "gem") {
+    const gs = gemStarsOf(a);
+    if (a.gt === undefined || !inputs.every((it: Item) => isGem(it) && it.gt === a.gt && it.rar === a.rar && gemStarsOf(it) === gs)) return null;
+    // Same rule as gear: one star higher until the rarity's cap, then the next rarity (Legendary+ results keep
+    // at least 1 star, like gear); a 10-star Prismatic gem is Golden and combines no further.
+    if (gs < gemStarMax(a.rar)) return makeGem(a.rar, a.gt, ilvl, gs + 1);
     if (a.rar >= 7) return null;
-    if (a.gt === undefined || !inputs.every((it: Item) => isGem(it) && it.gt === a.gt && it.rar === a.rar)) return null;
-    return makeGem(a.rar + 1, a.gt, ilvl); // next rarity, same gem type; gems have no stars
+    const nr = a.rar + 1;
+    return makeGem(nr, a.gt, ilvl, nr >= 3 ? 1 : 0);
   }
   if (a.set !== undefined) return makeCombinedSet(inputs, ilvl, primary);
   if (inputs.some((it: Item) => it.set !== undefined)) return null;
@@ -10150,9 +10890,17 @@ function bagGroups(g: Game): Map<string, number[]> { return bagGroupsOf(g.bag); 
 function wouldCompleteCombine(g: Game, it: Item): boolean { return wouldCompleteCombineBag(destBag(g, it), it); }
 function combineChime(g: Game, it: Item): void {
   g.sfx("sparkle");
-  const lab = it.golden ? "GOLDEN PRISMATIC" : isGem(it) ? it.name : (it.name + (it.st && it.st.length ? " " + starBadge(it) : ""));
+  if (isGem(it)) {
+    // Gems get their own wording so a gem result can never be mistaken for armor or a weapon.
+    const gname = gemFullName(it);
+    msg(g, "Gems combined: " + gname + " created (gem bag)", RC[it.rar]);
+    setBanner(g, (it.golden ? "GOLDEN PRISMATIC" : RT[Math.max(0, Math.min(7, it.rar))].toUpperCase()) + " GEM CREATED!", gname + " \u00b7 a socket gem, in your gem bag", RC[it.rar], it.rar, 2.2);
+    g.toast = Math.max(g.toast, 1.1);
+    return;
+  }
+  const lab = it.golden ? "GOLDEN PRISMATIC" : (it.name + (it.st && it.st.length ? " " + starBadge(it) : ""));
   const isSetP = it.set !== undefined;
-  msg(g, "Combined into " + (isSetP ? "Set Relic " : "") + lab + "!", it.golden ? GOLDEN_COL : isSetP ? SET_COL : isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : RC[it.rar]);
+  msg(g, "Combined into " + (isSetP ? "Set Relic " : "") + lab + "!", it.golden ? GOLDEN_COL : isSetP ? SET_COL : RC[it.rar]);
   setBanner(g, it.golden ? "GOLDEN PRISMATIC!" : isSetP ? "SET RELIC COMBINED!" : "COMBINED!", lab, it.golden ? GOLDEN_COL : isSetP ? SET_COL : RC[it.rar], it.golden ? 8 : it.rar, it.golden ? 3.2 : 1.8);
   if (it.golden) { g.flash = 0.85; g.flashC = GOLDEN_COL; g.shake = 8; g.sfx("loot", 32); }
   else g.toast = Math.max(g.toast, 1.1);
@@ -10207,7 +10955,7 @@ function runSocketedGemCombine(g: Game): number {
     for (let si = 0; si < it.sk.length; si++) {
       const s = it.sk[si];
       if (!s.g) continue;
-      add("gem:" + s.g.typ + "|r" + s.g.rar, { kind: "sock", it, si });
+      { const gs0 = Math.min(gemStarMax(s.g.rar), s.g.s ?? 0); if (!(s.g.rar >= 7 && gs0 >= 10)) add("gem:" + s.g.typ + "|r" + s.g.rar + "|s" + gs0, { kind: "sock", it, si }); }
     }
   }
   for (const srcs of groups.values()) {
@@ -10224,7 +10972,7 @@ function runSocketedGemCombine(g: Game): number {
       if (s.kind === "bag") inputs.push(gb[s.i]);
       else {
         const g0 = s.it.sk![s.si].g!;
-        inputs.push(makeGem(g0.rar, g0.typ, s.it.ilvl));
+        inputs.push(gemFromSock(g0, s.it.ilvl));
       }
     }
     const out = makeCombined(inputs, g.depth);
@@ -10838,11 +11586,7 @@ function petLootTarget(g: Game): { kind: "drop" | "chest"; x: number; y: number;
     const d = Math.abs(dr.x - h.x) + Math.abs(dr.y - h.y);
     if (d < bd && d <= PET_LOOT_RANGE) { bd = d; best = { kind: "drop", x: dr.x, y: dr.y, drop: dr }; }
   }
-  for (const c of g.chests) {
-    if (c.open) continue;
-    const d = Math.abs(c.x - h.x) + Math.abs(c.y - h.y);
-    if (d < bd && d <= PET_LOOT_RANGE) { bd = d; best = { kind: "chest", x: c.x, y: c.y, chest: c }; }
-  }
+  // Item 21: pets no longer open chests (any kind) - only the hero does; the pet still collects what spills out.
   return best;
 }
 
@@ -11631,6 +12375,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
 }
 
 function heroDie(g: Game): void {
+  if (g.swarm) endSwarm(g, true);
   g.mode = "dead"; g.deadT = 0; g.hero.hp = 0;
   g.flash = 0.6; g.flashC = "#ff0000"; g.shake = 6;
   burst(g, g.hero.ax * TS + 12, g.hero.ay * TS + 12, 80, ["#ff3030", "#a01010", SKIN], 100, 80);
@@ -11873,10 +12618,12 @@ function heroStepDur(g: Game): number {
   if (g.rt && (g.swT ?? 0) > Date.now()) d *= SWING_MOVE_MUL;
   return d;
 }
+let CAM_FOCUS: number[] | null = null; // test/screenshot-only camera target (never set in play)
 function camTick(g: Game, dt: number): void {
   const h = g.hero;
   let tx = h.ax * TS + 12 - VW / 2;
   let ty = h.ay * TS + 12 - (HUD + VIEWH / 2);
+  if (CAM_FOCUS) { tx = CAM_FOCUS[0] * TS + 12 - VW / 2; ty = CAM_FOCUS[1] * TS + 12 - (HUD + VIEWH / 2); }
   const maxX = Math.max(0, MW * TS - VW);
   const minY = -HUD;
   const maxY = Math.max(minY, MH * TS - HUD - VIEWH);
@@ -11894,6 +12641,8 @@ function camTick(g: Game, dt: number): void {
 }
 function camXY(): number[] { return [Math.round(IP.camX * PX) / PX, Math.round(IP.camY * PX) / PX]; }
 function visTick(g: Game, dt: number): void {
+  floorCrackTick(g, dt);
+  if (dt > 0) { swarmTick(g, dt); slideTick(g, dt); hzFxTick(dt); ultShowTick(g, dt); }
   const h = g.hero;
   if (IP.h !== h) { IP.h = h; IP.hp = null; IP.camOk = false; IP.em.clear(); }
   const ox = h.ax, oy = h.ay;
@@ -11953,7 +12702,12 @@ function openChest(g: Game, c: Chest): void {
   const cols = cr >= 4 ? [col, "#ffffff", "#ff60e0", GOLD] : cr >= 2 ? [col, "#ffffff", GOLD] : [col, "#ffffff", "#d0d0d0"];
   burst(g, c.x * TS + 12, c.y * TS + 10, burstN, cols, 60 + cr * 16, 50 + cr * 8);
   const vlt = g.vault !== null;
+  const sup = vlt && inSuperCave(g);
   const plan = chestLoot(cr, vlt, g.depth);
+  if (sup) {
+    // Celestial Treasury: +1 item, ilvl +5, rarity weights x1.25 with at least Rare, gold x3.
+    plan.n += 1; plan.ilvl += 5; plan.f *= 1.25; plan.min = Math.max(plan.min, 2); plan.goldMul *= 3;
+  }
   msg(g, "Opened " + CHN[cr] + "!", col);
   if (cr >= 3) setBanner(g, CHN[cr].toUpperCase() + "!", plan.n + " items · richer loot", col, cr, cr >= 4 ? 2.8 : 2.0);
   floatTxt(g, c.x, c.y - 0.7, CHN[cr], col);
@@ -11967,7 +12721,7 @@ function openChest(g: Game, c: Chest): void {
   g.gold += gd;
   floatTxt(g, c.x, c.y - 0.3, "+" + gd + "g", GOLD);
   if (R() < (vlt ? POT_CH_VAULT : POT_CH_CHEST)) g.drops.push({ x: c.x, y: c.y, item: null, pot: true, gold: 0 });
-  if (R() < (vlt ? GEM_CH_VAULT : GEM_CH_CHEST)) giveDroppedGem(g, c.x, c.y, g.depth);
+  if (R() < (vlt ? GEM_CH_VAULT : GEM_CH_CHEST) * (sup ? 3 : 1)) giveDroppedGem(g, c.x, c.y, g.depth + (sup ? 5 : 0));
 }
 
 function ultDamage(g: Game, st: Stats, w: Item, e: En, jitter?: number): number {
@@ -11978,6 +12732,387 @@ function ultDamage(g: Game, st: Stats, w: Item, e: En, jitter?: number): number 
   if (w.golden) pow = safeMul(pow, 4);
   pow = magicWepRaw(e, ultBestEl(e), pow);
   return Math.max(0, safeRound(pow));
+}
+// ---------- Item 23: redesigned Prismatic ultimate visuals (2026-11-18) ----------
+// Every regular Prismatic ultimate now plays its own show in world space over the battlefield (Paramount is untouched).
+// 10 patterns (Starfall, Supernova, Collapse, Tempest, Cataclysm, Lances, Reaping, Judgement, Crossfire, Maelstrom),
+// each tinted and dressed by the ult's element (motes: holy sparkles, fire flames, frost flakes, storm sparks,
+// hellfire embers, void specks, shadow wisps) with Prismatic rainbow accents. Visual + sound only: damage, the damage
+// formula and cooldowns are unchanged (damage still lands at cast, as before). Shows are capped (3 live) for phones.
+interface UShowEv { t: number; x: number; y: number; n: number; done?: boolean }
+interface UShow {
+  pat: number; el: El; elI: number; row: number; golden: boolean; t: number; dur: number;
+  x: number; y: number; vx: number; vy: number; vw: number; vh: number;
+  tg: number[][]; seed: number; r: number[]; ev: UShowEv[]; c: string; c2: string; map?: unknown;
+}
+const USHOWS: UShow[] = [];
+const USHOW_CAP = 3;
+const UDUR = [2.3, 2.1, 2.2, 2.4, 2.3, 2.3, 2.0, 2.2, 2.0, 2.6];
+function ushowRand(n: number, seed: number): number[] { const f = rng32(seed | 1); const a: number[] = []; for (let i = 0; i < n; i++) a.push(f()); return a; }
+function ultShowStart(g: Game, u: Ult, hx: number, hy: number, ts: En[], golden: boolean): UShow {
+  const [cx, cy] = camXY();
+  const s: UShow = {
+    pat: u.pat, el: u.el, elI: Math.max(0, ELS.indexOf(u.el)), row: Math.floor(u.i / 10), golden, t: 0, dur: UDUR[u.pat] ?? 2.2,
+    x: hx, y: hy, vx: cx, vy: cy + HUD, vw: VW, vh: VIEWH,
+    tg: ts.slice(0, 24).map((e: En) => [e.ax * TS + 12, e.ay * TS + 12]), seed: (R() * 1e9) | 0, r: [], ev: [],
+    c: golden ? GOLD : ELC[u.el], c2: golden ? "#fff8c0" : u.c2, map: g.map,
+  };
+  s.r = ushowRand(600, s.seed);
+  ushowEvents(s);
+  while (USHOWS.length >= USHOW_CAP) USHOWS.shift();
+  USHOWS.push(s);
+  return s;
+}
+// spot k: the k-th target, then seeded points across the visible screen
+function uSpot(s: UShow, k: number): number[] {
+  if (k < s.tg.length) return s.tg[k];
+  const a = s.r[(k * 7 + 3) % s.r.length], b = s.r[(k * 13 + 5) % s.r.length];
+  return [s.vx + 16 + a * (s.vw - 32), s.vy + 20 + b * (s.vh - 40)];
+}
+function uCount(s: UShow, base: number): number { return Math.max(s.tg.length, base + s.row * 2) ; }
+function uMael(s: UShow): { pts: number[][]; hitT: number[] } {
+  const R0 = s.r, W = s.vw, H = s.vh;
+  const order = s.tg.map((p: number[], i: number) => i).sort((a: number, b: number) => Math.atan2(s.tg[a][1] - s.y, s.tg[a][0] - s.x) - Math.atan2(s.tg[b][1] - s.y, s.tg[b][0] - s.x));
+  const pts: number[][] = [[s.x, s.y]];
+  const node: number[] = new Array(s.tg.length).fill(-1);
+  for (const i of order.slice(0, 8)) { node[i] = pts.length; pts.push(s.tg[i]); }
+  if (pts.length < 4) for (let k = 0; k < 4; k++) { const an = k * 1.5708 + R0[k]; pts.push([s.x + Math.cos(an) * W * 0.32, s.y + Math.sin(an) * H * 0.28]); }
+  pts.push([s.x, s.y]);
+  const seg = pts.length - 1;
+  const hitT = node.map((nd: number) => nd < 0 ? 2.2 : 0.3 + 1.95 * (nd / seg));
+  return { pts, hitT };
+}
+function ushowEvents(s: UShow): void {
+  const E = (t: number, p: number[], n = 12): void => { if (s.ev.length < 34) s.ev.push({ t, x: p[0], y: p[1], n }); };
+  const R0 = s.r;
+  switch (s.pat) {
+    case 0: { const n = Math.min(30, uCount(s, 16)); for (let i = 0; i < n; i++) E(i * 0.07 + R0[i] * 0.1 + 0.45, uSpot(s, i), 14); break; }
+    case 1: { E(0.55, [s.x, s.y], 30); s.tg.forEach((p: number[]) => E(0.55 + Math.hypot(p[0] - s.x, p[1] - s.y) / 420, p, 10)); break; }
+    case 2: { E(0.95, [s.x, s.y], 34); s.tg.forEach((p: number[], i: number) => E(1.0 + i * 0.02, p, 10)); break; }
+    case 3: { const n = Math.min(30, uCount(s, 18)); for (let i = 0; i < n; i++) E(0.25 + (i / n) * 1.7 + R0[i + 40] * 0.08, uSpot(s, i), 10); break; }
+    case 4: { s.tg.forEach((p: number[], i: number) => E(0.55 + i * 0.05, p, 14)); for (let i = 0; i < 8; i++) E(0.6 + i * 0.12, uSpot(s, 40 + i), 10); break; }
+    case 5: { s.tg.forEach((p: number[], i: number) => E(0.35 + (i % 6) * 0.14, p, 12)); break; }
+    case 6: { s.tg.forEach((p: number[]) => { let a = Math.atan2(p[1] - s.y, p[0] - s.x) + Math.PI / 2; if (a < 0) a += 6.2832; E(0.1 + (a / 6.2832) * 0.65, p, 12); }); break; }
+    case 7: { const n = Math.max(6, s.tg.length); for (let i = 0; i < Math.min(26, n); i++) E(0.5 + i * 0.07, uSpot(s, i), 14); break; }
+    case 8: { s.tg.forEach((p: number[], i: number) => E(0.25 + (i % 8) * 0.12, p, 10)); break; }
+    default: { const m = uMael(s); s.tg.forEach((p: number[], i: number) => E(m.hitT[i], p, 12)); break; }
+  }
+  s.ev.sort((a: UShowEv, b: UShowEv) => a.t - b.t);
+}
+function ultShowTick(g: Game, dt: number): void {
+  for (let i = USHOWS.length - 1; i >= 0; i--) {
+    const s = USHOWS[i];
+    if (s.map !== g.map) { USHOWS.splice(i, 1); continue; } // left the floor
+    s.t += dt;
+    for (const e of s.ev) {
+      if (e.done || s.t < e.t) continue;
+      e.done = true;
+      burst(g, e.x, e.y, e.n, [s.c, s.c2, "#ffffff", uHue(s, e.t * 3)], 110, 40);
+      g.shake = Math.max(g.shake, e.n >= 30 ? 9 : 3);
+    }
+    if (s.t > s.dur) USHOWS.splice(i, 1);
+  }
+}
+function uHue(s: UShow, k: number): string { return s.golden ? (k % 2 < 1 ? "#ffe070" : "#fff6d0") : "hsl(" + Math.round((k * 57 + s.seed % 360) % 360) + ",100%,66%)"; }
+function uHueA(s: UShow, k: number, a: number): string { return s.golden ? "rgba(255,224,112," + a.toFixed(3) + ")" : "hsla(" + Math.round((k * 57 + s.seed % 360) % 360) + ",100%,66%," + a.toFixed(3) + ")"; }
+function uGlow(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, c: string, a: number): void {
+  if (r <= 0.5 || a <= 0.01) return;
+  const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
+  gr.addColorStop(0, c); gr.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.globalAlpha = Math.min(1, a); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+}
+// one small element-themed particle
+function uMote(ctx: CanvasRenderingContext2D, s: UShow, x: number, y: number, z: number, t: number, a: number): void {
+  if (a <= 0.02) return;
+  ctx.globalAlpha = Math.min(1, a);
+  switch (s.golden ? 0 : s.elI) {
+    case 0: { ctx.fillStyle = "#fff6c0"; ctx.beginPath(); ctx.moveTo(x, y - 3 * z); ctx.lineTo(x + 0.8 * z, y - 0.8 * z); ctx.lineTo(x + 3 * z, y); ctx.lineTo(x + 0.8 * z, y + 0.8 * z); ctx.lineTo(x, y + 3 * z); ctx.lineTo(x - 0.8 * z, y + 0.8 * z); ctx.lineTo(x - 3 * z, y); ctx.lineTo(x - 0.8 * z, y - 0.8 * z); ctx.closePath(); ctx.fill(); break; }
+    case 1: { ctx.fillStyle = "#ff8a20"; ctx.beginPath(); ctx.moveTo(x, y - 4 * z); ctx.quadraticCurveTo(x + 2.4 * z, y, x, y + 1.6 * z); ctx.quadraticCurveTo(x - 2.4 * z, y, x, y - 4 * z); ctx.fill(); ctx.fillStyle = "#ffe060"; ctx.beginPath(); ctx.arc(x, y + 0.2 * z, 0.9 * z, 0, 6.2832); ctx.fill(); break; }
+    case 2: { ctx.strokeStyle = "#e8fbff"; ctx.lineWidth = Math.max(0.6, 0.5 * z); ctx.beginPath(); for (let k = 0; k < 3; k++) { const an = k * 1.0472 + t; ctx.moveTo(x - Math.cos(an) * 3 * z, y - Math.sin(an) * 3 * z); ctx.lineTo(x + Math.cos(an) * 3 * z, y + Math.sin(an) * 3 * z); } ctx.stroke(); break; }
+    case 3: { ctx.strokeStyle = "#e0e6ff"; ctx.lineWidth = Math.max(0.6, 0.5 * z); ctx.beginPath(); ctx.moveTo(x - 2 * z, y - 3 * z); ctx.lineTo(x + 0.6 * z, y - 0.4 * z); ctx.lineTo(x - 0.6 * z, y + 0.4 * z); ctx.lineTo(x + 2 * z, y + 3 * z); ctx.stroke(); break; }
+    case 4: { ctx.fillStyle = "rgba(40,0,0,0.6)"; ctx.beginPath(); ctx.arc(x, y - 1.5 * z, 2.4 * z, 0, 6.2832); ctx.fill(); ctx.fillStyle = "#ff3020"; ctx.beginPath(); ctx.arc(x, y, 1.3 * z, 0, 6.2832); ctx.fill(); ctx.fillStyle = "#ffb060"; ctx.fillRect(x - 0.4 * z, y - 0.4 * z, 0.8 * z, 0.8 * z); break; }
+    case 5: { ctx.fillStyle = "#14001e"; ctx.beginPath(); ctx.arc(x, y, 1.6 * z, 0, 6.2832); ctx.fill(); ctx.strokeStyle = "#d070ff"; ctx.lineWidth = Math.max(0.5, 0.4 * z); ctx.beginPath(); ctx.arc(x, y, 2.4 * z, 0, 6.2832); ctx.stroke(); break; }
+    default: { ctx.strokeStyle = "rgba(190,160,240,0.9)"; ctx.lineWidth = Math.max(0.6, 0.6 * z); ctx.beginPath(); ctx.arc(x, y, 3 * z, t, t + 2.2); ctx.stroke(); break; }
+  }
+}
+// jagged lightning path from (x0,y0) to (x1,y1), seeded
+function uBolt(ctx: CanvasRenderingContext2D, s: UShow, x0: number, y0: number, x1: number, y1: number, k: number, w: number, col: string, a: number, fork: boolean): void {
+  const n = 9, pts: number[] = [x0, y0];
+  for (let i = 1; i < n; i++) { const f = i / n, j = (s.r[(k * 11 + i * 3) % s.r.length] - 0.5) * 26; pts.push(x0 + (x1 - x0) * f + j, y0 + (y1 - y0) * f + j * 0.25); }
+  pts.push(x1, y1);
+  const path = (): void => { ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); ctx.stroke(); };
+  ctx.globalAlpha = a * 0.5; ctx.strokeStyle = col; ctx.lineWidth = w * 3; path();
+  ctx.globalAlpha = a; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, w * 0.8); path();
+  if (fork) {
+    const m = 4 + (k % 3) * 2, fx = pts[m], fy = pts[m + 1], fx2 = fx + (s.r[(k * 5) % s.r.length] - 0.5) * 70, fy2 = fy + 30 + s.r[(k * 9) % s.r.length] * 40;
+    ctx.globalAlpha = a * 0.7; ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo((fx + fx2) / 2 + 8, (fy + fy2) / 2); ctx.lineTo(fx2, fy2); ctx.stroke();
+  }
+}
+function uImpact(ctx: CanvasRenderingContext2D, s: UShow, x: number, y: number, p: number, k: number, size: number): void {
+  if (p < 0 || p > 1) return;
+  uGlow(ctx, x, y, size * (0.4 + p * 0.9), s.c, (1 - p) * 0.95);
+  uGlow(ctx, x, y, size * 0.35 * (1 - p), "#ffffff", 1 - p);
+  ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = uHue(s, k); ctx.lineWidth = 2.5 * (1 - p) + 0.5;
+  ctx.beginPath(); ctx.ellipse(x, y, size * (0.3 + p * 1.2), size * (0.15 + p * 0.55), 0, 0, 6.2832); ctx.stroke();
+  for (let j = 0; j < 6; j++) { const an = j * 1.047 + k, d = size * (0.2 + p * 1.1); uMote(ctx, s, x + Math.cos(an) * d, y + Math.sin(an) * d * 0.55 - p * 10, 0.9, an + p * 4, 1 - p); }
+}
+function drawUltShows(ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+  if (!USHOWS.length) return;
+  ctx.save();
+  for (const s of USHOWS) { try { drawUltShow(ctx, s, camX, camY); } catch { /* never break the frame */ } }
+  ctx.restore();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+}
+function drawUltShow(ctx: CanvasRenderingContext2D, s: UShow, camX: number, camY: number): void {
+  const t = s.t, L = (v: number): number => v; void L;
+  const ox = -camX, oy = -camY, hx = s.x + ox, hy = s.y + oy;
+  const top = s.vy + oy, left = s.vx + ox, W = s.vw, H = s.vh;
+  const fadeIn = Math.min(1, t / 0.18), fadeOut = Math.max(0, Math.min(1, (s.dur - t) / 0.45)), env = fadeIn * fadeOut;
+  // shared: a tinted wash over the play view, strongest at the start
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 0.16 * env; ctx.fillStyle = s.pat === 2 || s.pat === 3 ? "#05000c" : "#000000"; ctx.fillRect(left, top, W, H);
+  ctx.globalCompositeOperation = "lighter";
+  const R0 = s.r;
+  switch (s.pat) {
+    case 0: { // STARFALL: rainbow meteors rain across the screen, each with its own explosion
+      const n = Math.min(30, uCount(s, 16)), dir = R0[1] < 0.5 ? -1 : 1;
+      for (let i = 0; i < n; i++) {
+        const t0 = i * 0.07 + R0[i] * 0.1, p = (t - t0) / 0.45, [px, py] = uSpot(s, i), x = px + ox, y = py + oy;
+        if (p < 0) continue;
+        if (p <= 1) {
+          const e = p * p, sx = x - dir * 150 * (1 - e), sy = y - 260 * (1 - e), tx = sx - dir * 60, ty = sy - 104;
+          const gr = ctx.createLinearGradient(tx, ty, sx, sy); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.6, uHueA(s, i, 0.55)); gr.addColorStop(1, "#ffffff");
+          ctx.globalAlpha = 1; ctx.strokeStyle = gr; ctx.lineWidth = 7; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(sx, sy); ctx.stroke();
+          ctx.lineWidth = 2.5; ctx.strokeStyle = "#ffffff"; ctx.beginPath(); ctx.moveTo((tx + sx * 2) / 3, (ty + sy * 2) / 3); ctx.lineTo(sx, sy); ctx.stroke();
+          uGlow(ctx, sx, sy, 16, s.c, 0.9); uGlow(ctx, sx, sy, 6, "#ffffff", 1);
+          for (let j = 0; j < 3; j++) uMote(ctx, s, sx + (tx - sx) * (0.2 + j * 0.22) + (R0[(i * 3 + j) % 600] - 0.5) * 8, sy + (ty - sy) * (0.2 + j * 0.22), 1, t * 6 + j, 0.8);
+          // landing marker
+          ctx.globalAlpha = 0.5 * p; ctx.strokeStyle = s.c; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, 10 * p, 4 * p, 0, 0, 6.2832); ctx.stroke();
+        } else uImpact(ctx, s, x, y, (p - 1) / 0.9, i, 26);
+      }
+      break;
+    }
+    case 1: { // SUPERNOVA: a star swells over the hero, then detonates in layered rainbow shock rings
+      const det = 0.55;
+      if (t < det + 0.15) {
+        const k = Math.min(1, t / det), rr = 8 + k * 26, sp = t * 3;
+        for (let j = 0; j < 12; j++) { const an = j * 0.5236 + sp, len = rr * (1.6 + (j % 2) * 1.2) * k; ctx.globalAlpha = 0.7 * k; ctx.strokeStyle = uHue(s, j); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + Math.cos(an) * len, hy + Math.sin(an) * len); ctx.stroke(); }
+        uGlow(ctx, hx, hy, rr * 2.2, s.c, 0.9 * k); uGlow(ctx, hx, hy, rr * 0.7, "#ffffff", 1);
+      }
+      if (t >= det) {
+        const q = t - det, maxR = Math.hypot(W, H) * 0.75;
+        uGlow(ctx, hx, hy, 60 + q * 260, "#ffffff", Math.max(0, 0.9 - q * 2.2));
+        for (let k = 0; k < 4; k++) {
+          const r = q * (300 + k * 110) - k * 12; if (r <= 0 || r > maxR) continue;
+          const a = Math.max(0, 1 - r / maxR) * env;
+          ctx.globalAlpha = a; ctx.strokeStyle = uHue(s, k * 2 + q * 4); ctx.lineWidth = 10 - k * 2; ctx.beginPath(); ctx.arc(hx, hy, r, 0, 6.2832); ctx.stroke();
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(hx, hy, r, 0, 6.2832); ctx.stroke();
+          if (k === 0) for (let j = 0; j < 18; j++) { const an = j * 0.349 + q; uMote(ctx, s, hx + Math.cos(an) * r, hy + Math.sin(an) * r, 1.2, an + q * 5, a); }
+        }
+        for (let j = 0; j < 24; j++) { const an = j * 0.2618 + R0[j] * 0.2, l1 = q * 380 * (0.6 + R0[j + 30] * 0.5); ctx.globalAlpha = Math.max(0, 0.7 - q * 0.5); ctx.strokeStyle = uHue(s, j); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(hx + Math.cos(an) * l1 * 0.6, hy + Math.sin(an) * l1 * 0.6); ctx.lineTo(hx + Math.cos(an) * l1, hy + Math.sin(an) * l1); ctx.stroke(); }
+        s.tg.forEach((p: number[], i: number) => { const d = Math.hypot(p[0] - s.x, p[1] - s.y), tt = det + d / 420; uImpact(ctx, s, p[0] + ox, p[1] + oy, (t - tt) / 0.6, i, 18); });
+      }
+      break;
+    }
+    case 2: { // COLLAPSE: everything is dragged into a dark core with an accretion ring, then it detonates
+      const det = 0.95;
+      if (t < det) {
+        const k = t / det;
+        ctx.globalCompositeOperation = "source-over";
+        const vg = ctx.createRadialGradient(hx, hy, 10, hx, hy, Math.hypot(W, H) * 0.6); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(4,0,12," + (0.55 * k).toFixed(3) + ")");
+        ctx.globalAlpha = 1; ctx.fillStyle = vg; ctx.fillRect(left, top, W, H);
+        ctx.globalCompositeOperation = "lighter";
+        for (let j = 0; j < 70; j++) {
+          const a0 = R0[j] * 6.2832, r0 = 90 + R0[j + 100] * Math.max(W, H) * 0.6, f = Math.min(1, k * (1 + R0[j + 200]));
+          const r = r0 * (1 - f) + 6, an = a0 + f * 3.2;
+          const x = hx + Math.cos(an) * r, y = hy + Math.sin(an) * r * 0.8;
+          ctx.globalAlpha = 0.85 * f; ctx.strokeStyle = uHue(s, j); ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(an + 0.4) * 10, y + Math.sin(an + 0.4) * 8); ctx.stroke();
+          if (j % 5 === 0) uMote(ctx, s, x, y, 0.9, an, 0.8 * f);
+        }
+        s.tg.forEach((p: number[]) => { const x = p[0] + ox, y = p[1] + oy; ctx.globalAlpha = 0.6 * k; ctx.strokeStyle = s.c; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (hx - x) * 0.3 * k, y + (hy - y) * 0.3 * k); ctx.stroke(); });
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1; ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(hx, hy, 6 + k * 16, 0, 6.2832); ctx.fill();
+        ctx.globalCompositeOperation = "lighter";
+        for (let j = 0; j < 3; j++) { ctx.globalAlpha = 0.9; ctx.strokeStyle = uHue(s, j * 2 + t * 4); ctx.lineWidth = 3 - j * 0.7; ctx.beginPath(); ctx.ellipse(hx, hy, 14 + k * 22 + j * 5, (14 + k * 22 + j * 5) * 0.35, t * 2 + j, 0, 6.2832); ctx.stroke(); }
+      } else {
+        const q = t - det;
+        uGlow(ctx, hx, hy, 40 + q * 420, "#ffffff", Math.max(0, 1 - q * 2.5));
+        uGlow(ctx, hx, hy, 30 + q * 300, s.c, Math.max(0, 0.9 - q * 1.2));
+        for (let k = 0; k < 3; k++) { const r = q * (380 + k * 140); ctx.globalAlpha = Math.max(0, 0.9 - q * 0.8) * env; ctx.strokeStyle = uHue(s, k * 3); ctx.lineWidth = 7 - k * 2; ctx.beginPath(); ctx.arc(hx, hy, r, 0, 6.2832); ctx.stroke(); }
+        for (let j = 0; j < 40; j++) { const an = R0[j + 300] * 6.2832, d = q * (200 + R0[j + 340] * 300); uMote(ctx, s, hx + Math.cos(an) * d, hy + Math.sin(an) * d, 1.3, an + q * 6, Math.max(0, 1 - q * 0.9)); }
+        s.tg.forEach((p: number[], i: number) => uImpact(ctx, s, p[0] + ox, p[1] + oy, (t - 1.0 - i * 0.02) / 0.6, i, 22));
+      }
+      break;
+    }
+    case 3: { // TEMPEST: a churning storm front rolls over the top of the screen and hurls forked strikes everywhere
+      const cloudA = Math.min(1, t / 0.25) * fadeOut;
+      ctx.globalCompositeOperation = "source-over";
+      for (let j = 0; j < 9; j++) { const cx = left + (j / 8) * W + Math.sin(t * 1.3 + j) * 10, cy = top + 10 + (j % 3) * 9; ctx.globalAlpha = 0.65 * cloudA; ctx.fillStyle = j % 2 ? "#141024" : "#1e1834"; ctx.beginPath(); ctx.ellipse(cx, cy, 52, 22, 0, 0, 6.2832); ctx.fill(); }
+      ctx.globalCompositeOperation = "lighter";
+      const n = Math.min(30, uCount(s, 18));
+      let flash = 0;
+      for (let i = 0; i < n; i++) {
+        const t0 = 0.25 + (i / n) * 1.7 + R0[i + 40] * 0.08, p = (t - t0) / 0.2, [px, py] = uSpot(s, i), x = px + ox, y = py + oy;
+        if (p < 0 || p > 3.5) continue;
+        if (p <= 1) {
+          flash = Math.max(flash, 1 - p);
+          const fl = (Math.floor(t * 40) + i) % 3 === 0 ? 0.55 : 1;
+          const sx = x + (R0[i + 80] - 0.5) * 60;
+          uBolt(ctx, s, sx, top + 18, x, y, i, 2.6, uHue(s, i), fl * (1 - p * 0.4), true);
+          uGlow(ctx, sx, top + 20, 40, s.c, 0.5 * (1 - p));
+          if (s.elI === 2 || s.elI === 1) for (let j = 0; j < 4; j++) uMote(ctx, s, x + (R0[(i * 4 + j) % 600] - 0.5) * 30, y - 20 - j * 12 * p, 1, t * 8 + j, 0.8);
+        }
+        uImpact(ctx, s, x, y, p / 3.5, i, 20);
+      }
+      if (flash > 0) { ctx.globalAlpha = 0.18 * flash; ctx.fillStyle = s.golden ? "#fff0c0" : "#dfe6ff"; ctx.fillRect(left, top, W, H); }
+      break;
+    }
+    case 4: { // CATACLYSM: the ground splits into glowing fissures that erupt in columns of light and rubble
+      const nC = 8 + s.row;
+      const grow = Math.min(1, t / 0.55);
+      for (let c = 0; c < nC; c++) {
+        const a0 = c * (6.2832 / nC) + R0[c] * 0.4, len = Math.max(W, H) * (0.55 + R0[c + 20] * 0.3) * grow;
+        ctx.beginPath(); ctx.moveTo(hx, hy);
+        let x = hx, y = hy; const seg = 8;
+        for (let k = 1; k <= seg; k++) { const an = a0 + (R0[(c * 9 + k) % 600] - 0.5) * 0.7; x = hx + Math.cos(an) * len * (k / seg); y = hy + Math.sin(an) * len * (k / seg) * 0.85; ctx.lineTo(x, y); }
+        ctx.globalAlpha = 0.55 * env; ctx.strokeStyle = uHue(s, c); ctx.lineWidth = 7; ctx.stroke();
+        ctx.globalAlpha = 0.95 * env; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 0.5 * env; ctx.strokeStyle = "#0a0408"; ctx.lineWidth = 0.8; ctx.stroke(); ctx.globalCompositeOperation = "lighter";
+        // eruptions along the crack
+        for (let k = 0; k < 3; k++) {
+          const f = 0.35 + k * 0.25, t0 = 0.5 + c * 0.05 + k * 0.18, p = (t - t0) / 0.7; if (p < 0 || p > 1) continue;
+          const an = a0, ex = hx + Math.cos(an) * len * f / Math.max(0.01, grow) * grow, ey = hy + Math.sin(an) * len * f * 0.85;
+          const hgt = 70 * Math.sin(p * Math.PI);
+          const gr = ctx.createLinearGradient(ex, ey, ex, ey - hgt); gr.addColorStop(0, s.c); gr.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.globalAlpha = 0.9 * (1 - p); ctx.fillStyle = gr; ctx.fillRect(ex - 6, ey - hgt, 12, hgt);
+          for (let j = 0; j < 4; j++) { const vx = (R0[(c * 31 + k * 7 + j) % 600] - 0.5) * 70, vy = -90 - R0[(c * 17 + j) % 600] * 60; const rx = ex + vx * p, ry = ey + vy * p + 160 * p * p; ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1 - p; ctx.fillStyle = "#3a2a24"; ctx.fillRect(rx - 2, ry - 2, 4, 4); ctx.globalCompositeOperation = "lighter"; uMote(ctx, s, rx, ry - 3, 0.8, p * 6 + j, 1 - p); }
+        }
+      }
+      uGlow(ctx, hx, hy, 50, s.c, 0.8 * env);
+      s.tg.forEach((p: number[], i: number) => { const x = p[0] + ox, y = p[1] + oy, q = (t - 0.55 - i * 0.05) / 0.7; if (q < 0 || q > 1) return; const hgt = 90 * Math.sin(q * Math.PI); const gr = ctx.createLinearGradient(x, y, x, y - hgt); gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.3, s.c); gr.addColorStop(1, "rgba(0,0,0,0)"); ctx.globalAlpha = 1 - q; ctx.fillStyle = gr; ctx.fillRect(x - 8, y - hgt, 16, hgt); uImpact(ctx, s, x, y, q, i, 20); });
+      break;
+    }
+    case 5: { // LANCES: several wide rainbow lances of light fall from the sky and rake the ground
+      const xs: number[] = [];
+      for (const p of s.tg) if (xs.every((v: number) => Math.abs(v - p[0]) > 34) && xs.length < 6) xs.push(p[0]);
+      while (xs.length < 4 + Math.min(2, s.row)) xs.push(s.vx + 20 + R0[xs.length + 60] * (s.vw - 40));
+      xs.forEach((bx: number, i: number) => {
+        const t0 = 0.15 + i * 0.14, p = (t - t0) / 1.0; if (p < 0 || p > 1) return;
+        const x = bx + ox + Math.sin(p * 3 + i) * 14, wBeam = (14 + (i % 3) * 3) * Math.min(1, p * 6) * (1 - Math.max(0, p - 0.8) * 5);
+        if (wBeam <= 0.5) return;
+        const gr = ctx.createLinearGradient(x - wBeam, 0, x + wBeam, 0);
+        gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.25, uHueA(s, i * 2, 0.6)); gr.addColorStop(0.5, "rgba(255,255,255,0.95)"); gr.addColorStop(0.75, uHueA(s, i * 2 + 1, 0.6)); gr.addColorStop(1, "rgba(0,0,0,0)");
+        const gy = (s.tg.find((q: number[]) => Math.abs(q[0] - bx) < 34) ?? [0, s.vy + s.vh * (0.35 + R0[i + 90] * 0.45)])[1] + oy;
+        ctx.globalAlpha = 1; ctx.fillStyle = gr; ctx.fillRect(x - wBeam, top, wBeam * 2, gy - top);
+        uGlow(ctx, x, gy, wBeam * 3.2, s.c, 0.95); uGlow(ctx, x, gy, wBeam * 1.1, "#ffffff", 1);
+        ctx.globalAlpha = 0.6; ctx.strokeStyle = uHue(s, i); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, gy, wBeam * 2.4, wBeam * 0.8, 0, 0, 6.2832); ctx.stroke();
+        for (let j = 0; j < 5; j++) uMote(ctx, s, x + (R0[(i * 5 + j + Math.floor(t * 20)) % 600] - 0.5) * wBeam * 3, gy - R0[(j * 7 + Math.floor(t * 30)) % 600] * 40, 1, t * 5 + j, 0.9);
+      });
+      break;
+    }
+    case 6: { // REAPING: a giant spectral scythe sweeps around the hero leaving a ghostly slash, souls rise from the struck
+      const sweeps = s.row >= 2 ? 2 : 1;
+      for (let sw = 0; sw < sweeps; sw++) {
+        const t0 = 0.1 + sw * 0.85, p = (t - t0) / 0.65; if (p < 0 || p > 1.6) continue;
+        const R = Math.min(W, H) * (0.42 + sw * 0.08), dirn = sw ? -1 : 1;
+        const base = -Math.PI / 2;
+        for (let ghost = 5; ghost >= 0; ghost--) {
+          const pp = Math.min(1, p) - ghost * 0.035; if (pp < 0) continue;
+          const an = base + dirn * pp * 6.2832, a = (ghost === 0 ? 1 : 0.35 - ghost * 0.05) * Math.max(0, 1 - Math.max(0, p - 1) * 2);
+          const bx = hx + Math.cos(an) * R * 0.55, by = hy + Math.sin(an) * R * 0.55;
+          ctx.save(); ctx.translate(bx, by); ctx.rotate(an + dirn * 1.2);
+          const gr = ctx.createLinearGradient(-R * 0.5, 0, R * 0.5, 0); gr.addColorStop(0, uHueA(s, 1, 0.1)); gr.addColorStop(0.5, s.c); gr.addColorStop(1, "#ffffff");
+          ctx.globalAlpha = a; ctx.fillStyle = gr;
+          ctx.beginPath(); ctx.moveTo(-R * 0.5, 0); ctx.quadraticCurveTo(0, -R * 0.42, R * 0.5, -R * 0.05); ctx.quadraticCurveTo(0, -R * 0.2, -R * 0.5, 0); ctx.fill();
+          if (ghost === 0) { ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-R * 0.5, 0); ctx.quadraticCurveTo(0, -R * 0.42, R * 0.5, -R * 0.05); ctx.stroke(); }
+          ctx.restore();
+        }
+        const end = Math.min(1, p);
+        ctx.globalAlpha = 0.7 * Math.max(0, 1 - Math.max(0, p - 0.9) * 1.4); ctx.lineWidth = 6;
+        for (let k = 0; k < 3; k++) { ctx.strokeStyle = uHue(s, k * 2 + sw); ctx.lineWidth = 6 - k * 2; ctx.beginPath(); if (dirn > 0) ctx.arc(hx, hy, R * (0.55 + k * 0.03), base + Math.max(0, end - 0.3) * 6.2832, base + end * 6.2832); else ctx.arc(hx, hy, R * (0.55 + k * 0.03), base - end * 6.2832, base - Math.max(0, end - 0.3) * 6.2832); ctx.stroke(); }
+      }
+      s.tg.forEach((p: number[], i: number) => {
+        let a = Math.atan2(p[1] - s.y, p[0] - s.x) + Math.PI / 2; if (a < 0) a += 6.2832; const q = (t - (0.1 + (a / 6.2832) * 0.65)) / 0.8; if (q < 0 || q > 1) return;
+        const x = p[0] + ox, y = p[1] + oy; ctx.globalAlpha = 1 - q; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x - 12, y - 12); ctx.lineTo(x + 12, y + 12); ctx.moveTo(x + 10, y - 12); ctx.lineTo(x - 10, y + 12); ctx.stroke();
+        uGlow(ctx, x, y, 22, s.c, 1 - q); for (let j = 0; j < 3; j++) uMote(ctx, s, x + (j - 1) * 6 + Math.sin(q * 6 + j) * 3, y - q * 40 - j * 6, 1.2, q * 4 + j, 1 - q);
+      });
+      break;
+    }
+    case 7: { // JUDGEMENT: runic sigils brand the ground, then narrow pillars of light slam down on each mark
+      const rs = 26 + s.row * 3;
+      ctx.globalAlpha = 0.8 * env; ctx.strokeStyle = s.c; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(hx, hy, rs * 1.6, rs * 0.6, 0, 0, 6.2832); ctx.stroke();
+      ctx.save(); ctx.translate(hx, hy); ctx.scale(1, 0.38); ctx.rotate(t * 1.4);
+      for (let j = 0; j < 12; j++) { ctx.rotate(0.5236); ctx.strokeStyle = uHue(s, j); ctx.beginPath(); ctx.moveTo(rs * 1.3, 0); ctx.lineTo(rs * 1.55, 0); ctx.stroke(); }
+      ctx.beginPath(); for (let j = 0; j <= 5; j++) { const an = j * 2.5133; ctx.lineTo(Math.cos(an) * rs * 1.25, Math.sin(an) * rs * 1.25); } ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      ctx.restore();
+      const n = Math.min(26, Math.max(6, s.tg.length));
+      for (let i = 0; i < n; i++) {
+        const [px, py] = uSpot(s, i), x = px + ox, y = py + oy, t0 = 0.05 + i * 0.07, p = (t - t0); if (p < 0) continue;
+        const sig = Math.min(1, p / 0.3), slam = p - 0.45;
+        if (slam < 0.9) { ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.4); ctx.rotate(-t * 2 + i); ctx.globalAlpha = sig * 0.95 * (slam > 0 ? Math.max(0, 1 - slam * 1.2) : 1); ctx.strokeStyle = uHue(s, i); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 14 * sig, 0, 6.2832); ctx.stroke(); ctx.beginPath(); for (let j = 0; j <= 3; j++) { const an = j * 2.0944; ctx.lineTo(Math.cos(an) * 12 * sig, Math.sin(an) * 12 * sig); } ctx.stroke(); ctx.restore(); }
+        if (slam >= 0 && slam < 0.55) {
+          const k = slam / 0.55, w = 11 * (1 - k * 0.7);
+          const gr = ctx.createLinearGradient(x - w, 0, x + w, 0); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.3, uHueA(s, i, 0.7)); gr.addColorStop(0.5, "#ffffff"); gr.addColorStop(0.7, uHueA(s, i + 1, 0.7)); gr.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.globalAlpha = 1 - k * 0.6; ctx.fillStyle = gr; ctx.fillRect(x - w, top, w * 2, y - top);
+        }
+        if (slam >= 0) uImpact(ctx, s, x, y, slam / 0.7, i, 22);
+      }
+      break;
+    }
+    case 8: { // CROSSFIRE: emitters flare at the screen edges and fire searing beams that cross the field
+      const beams: number[][] = [];
+      const nb = Math.min(12, Math.max(6 + s.row, s.tg.length));
+      for (let i = 0; i < nb; i++) {
+        const [px, py] = uSpot(s, i), x = px + ox, y = py + oy;
+        const an = R0[i + 120] * 6.2832, d = Math.hypot(W, H);
+        const x0 = x - Math.cos(an) * d, y0 = y - Math.sin(an) * d, x1 = x + Math.cos(an) * d, y1 = y + Math.sin(an) * d;
+        const t0 = 0.08 + (i % 8) * 0.12, p = (t - t0) / 0.55; if (p < 0 || p > 1) continue;
+        const reach = Math.min(1, p * 4), w = 6 * (1 - Math.max(0, p - 0.6) * 2.5);
+        if (w <= 0.3) continue;
+        const ex = x0 + (x1 - x0) * reach, ey = y0 + (y1 - y0) * reach;
+        ctx.globalAlpha = 0.6; ctx.strokeStyle = uHue(s, i * 1.7); ctx.lineWidth = w * 2.2; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, w * 0.6); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
+        const cx0 = Math.max(left, Math.min(left + W, x0)), cy0 = Math.max(top, Math.min(top + H, y0));
+        uGlow(ctx, cx0, cy0, 18, s.c, 0.9);
+        if (reach >= 1) { uGlow(ctx, x, y, 16, "#ffffff", 0.8 * (1 - p)); uMote(ctx, s, x, y - 8, 1.3, t * 6, 1 - p); }
+        beams.push([x0, y0, ex, ey, i]);
+      }
+      // intersections flare
+      let flares = 0;
+      for (let a = 0; a < beams.length && flares < 14; a++) for (let b = a + 1; b < beams.length && flares < 14; b++) {
+        const [x1, y1, x2, y2] = beams[a], [x3, y3, x4, y4] = beams[b];
+        const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4); if (Math.abs(den) < 1e-6) continue;
+        const px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den, py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den;
+        if (px < left || px > left + W || py < top || py > top + H) continue;
+        const onA = (px - x1) * (px - x2) <= 1 && (py - y1) * (py - y2) <= 1, onB = (px - x3) * (px - x4) <= 1 && (py - y3) * (py - y4) <= 1; if (!onA || !onB) continue;
+        flares++; uGlow(ctx, px, py, 14, "#ffffff", 0.9);
+        ctx.globalAlpha = 0.9; ctx.strokeStyle = uHue(s, a + b); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px - 10, py); ctx.lineTo(px + 10, py); ctx.moveTo(px, py - 10); ctx.lineTo(px, py + 10); ctx.stroke();
+      }
+      break;
+    }
+    default: { // MAELSTROM: a towering rainbow cyclone tears across the battlefield, sweeping through every foe
+      const mm = uMael(s), pts = mm.pts;
+      const f = Math.min(0.999, Math.max(0, (t - 0.3) / 1.95)) * (pts.length - 1), i0 = Math.floor(f), fr = f - i0;
+      const A = pts[i0], B = pts[Math.min(pts.length - 1, i0 + 1)];
+      const e2 = fr * fr * (3 - 2 * fr), bx = A[0] + (B[0] - A[0]) * e2 + ox, by = A[1] + (B[1] - A[1]) * e2 + oy;
+      const grow = Math.min(1, t / 0.35) * fadeOut, Ht = 150 * grow;
+      // dust ring at the base
+      ctx.globalAlpha = 0.5 * grow; ctx.strokeStyle = s.c; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(bx, by, 30, 10, 0, 0, 6.2832); ctx.stroke();
+      for (let k = 0; k < 18; k++) {
+        const hk = k / 17, y = by - hk * Ht, rx = (8 + hk * hk * 70) * grow, wob = Math.sin(t * 7 + k * 0.6) * 8 * hk;
+        ctx.globalAlpha = (0.25 + 0.5 * (1 - hk)) * grow; ctx.strokeStyle = uHue(s, k * 0.6 + t * 6); ctx.lineWidth = 3.2 - hk * 1.4;
+        ctx.beginPath(); ctx.ellipse(bx + wob, y, rx, rx * 0.28, 0, t * 9 + k, t * 9 + k + 4.2); ctx.stroke();
+      }
+      for (let j = 0; j < 30; j++) { const hk = R0[j + 400], an = t * (6 + R0[j + 430] * 5) + R0[j + 460] * 6.2832, rr = (10 + hk * hk * 72) * grow; uMote(ctx, s, bx + Math.cos(an) * rr, by - hk * Ht + Math.sin(an) * rr * 0.28, 1.1, an, 0.9 * grow); }
+      if (s.row >= 3 && Math.floor(t * 9) % 3 === 0) uBolt(ctx, s, bx, by - Ht * 0.9, bx + (R0[Math.floor(t * 9) % 600] - 0.5) * 30, by - Ht * 0.2, Math.floor(t * 9), 1.5, uHue(s, t * 9), 0.9, false);
+      uGlow(ctx, bx, by - Ht * 0.4, 70, s.c, 0.35 * grow);
+      s.tg.forEach((p: number[], i: number) => uImpact(ctx, s, p[0] + ox, p[1] + oy, (t - mm.hitT[i]) / 0.6, i, 18));
+      break;
+    }
+  }
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.lineCap = "butt";
 }
 function ultFx(g: Game, u: Ult, hx: number, hy: number, ts: En[], golden: boolean = false, tier = 1, cap = 220, scale = 1, delay0 = 0): void {
   const c = golden ? GOLD : ELC[u.el], c2 = golden ? "#fff8c0" : u.c2, row = Math.floor(u.i / 10);
@@ -12098,6 +13233,7 @@ function paraDetonate(g: Game): void {
   P.fired = true;
   g.shake = 52;
   P.walls = (P.walls ?? 0) + paraRipTo(g, paraRadius(g), 400);
+  ultTerrain(g, true);
   // everything just beyond the rip radius is left heavily cracked
   if (wallDmgOk(g)) {
     const hh = g.hero, R1 = paraRadius(g), R2 = R1 + 2, RI = Math.ceil(R2);
@@ -12197,6 +13333,7 @@ function crackWall(g: Game, x: number, y: number, add: number, cap: number, ox: 
 function ripWall(g: Game, x: number, y: number, ox: number, oy: number, power: number, cap: number): boolean {
   if (!canBreakWall(g, x, y)) return false;
   g.map[y * MW + x] = 1;
+  maybeBuriedChest(g, x, y);
   cracksOf(g)[y * MW + x] = 0;
   if (g.digAt && g.digAt.x === x && g.digAt.y === y) { g.digAt = undefined; g.digClock = undefined; }
   g.wallVer = (g.wallVer || 0) + 1;
@@ -12204,16 +13341,1356 @@ function ripWall(g: Game, x: number, y: number, ox: number, oy: number, power: n
   return true;
 }
 // Tier 1 hook: a main strike landed on `tg` (k = 0 normal, 1 crit, 2 super crit).
+// ---------- Floor weather (depth 50+; purely visual) ----------
+type WxKind = "snow" | "blizzard" | "drift" | "frost" | "drizzle" | "rain" | "lightning" | "storm" | "wind";
+const WX_MIN_DEPTH = 50;
+const WX_NONE_CH = 0.55; // 55% of depth-50+ floors stay clear
+const WX_LIST: { k: WxKind; n: string; w: number; icon: string }[] = [
+  { k: "snow", n: "Light Snow", w: 13, icon: "\u2744" }, { k: "blizzard", n: "Blowing Snow", w: 10, icon: "\u2744" },
+  { k: "drift", n: "Drifting Snow", w: 10, icon: "\u2744" }, { k: "frost", n: "Ice & Frost", w: 10, icon: "\u2746" },
+  { k: "drizzle", n: "Light Rain", w: 13, icon: "\u2602" }, { k: "rain", n: "Heavy Rain", w: 10, icon: "\u2614" },
+  { k: "lightning", n: "Distant Lightning", w: 10, icon: "\u26A1" }, { k: "storm", n: "Thunderstorm", w: 9, icon: "\u26C8" },
+  { k: "wind", n: "Windstorm", w: 15, icon: "\u2248" },
+];
+// ---------- Item 15: shrine swarm ----------
+type Shrine = { x: number; y: number; used?: number };
+type Swarm = { t: number; kills: number; acc: number; spawned: number; pool: number[] };
+const SHRINE_MIN_DEPTH = 26, SHRINE_CH = 0.05, SWARM_SEC = 60, SWARM_CAP = 40, SWARM_RATE = 6, SWARM_BURST = 18;
+const SWARM_TIERS: { k: number; n: string; c: string; items: number; min: number; il: number; gold: number; gems: number; pris: number }[] = [
+  { k: 25, n: "Bronze", c: "#d08a50", items: 2, min: 1, il: 0, gold: 4, gems: 0, pris: 0 },
+  { k: 60, n: "Silver", c: "#d0d8e8", items: 3, min: 2, il: 2, gold: 8, gems: 0, pris: 0 },
+  { k: 110, n: "Gold", c: GOLD, items: 4, min: 3, il: 4, gold: 14, gems: 1, pris: 0 },
+  { k: 170, n: "Mythic", c: "#ff60e0", items: 5, min: 4, il: 6, gold: 22, gems: 1, pris: 0 },
+  { k: 240, n: "Relic", c: "#ff8040", items: 6, min: 5, il: 8, gold: 32, gems: 2, pris: 0.35 },
+  { k: 300, n: "Prismatic", c: "#80ffff", items: 7, min: 6, il: 10, gold: 45, gems: 3, pris: 1 },
+];
+function swarmTierOf(kills: number): number { let t = -1; for (let i = 0; i < SWARM_TIERS.length; i++) if (kills >= SWARM_TIERS[i].k) t = i; return t; }
+function packShrine(s: Shrine | null | undefined): Shrine | null {
+  if (!s || typeof s.x !== "number" || typeof s.y !== "number" || !inb(s.x, s.y)) return null;
+  const o: Shrine = { x: Math.floor(s.x), y: Math.floor(s.y) };
+  if (s.used) o.used = 1;
+  return o;
+}
+function unpackShrine(raw: unknown): Shrine | null { return raw && typeof raw === "object" ? packShrine(raw as Shrine) : null; }
+function shrineAt(g: Game, x: number, y: number): boolean { return !!(g.shrine && g.shrine.x === x && g.shrine.y === y) || !!(g.artCave && !g.artCave.taken && g.artCave.cx === x && g.artCave.cy === y); }
+let SHRINE_FORCE = false, ART_FORCE = false, ART_PRIZE: "" | "art" | "chest" = "";
+function maybeSpawnShrine(g: Game): boolean {
+  if (g.area === "camp" || g.vault || (g.area ?? "dungeon") !== "dungeon" || isActFloor(g.depth)) return false;
+  if (!SHRINE_FORCE && (g.depth < SHRINE_MIN_DEPTH || g.depth === g.shrUsedD)) return false;
+  if (!SHRINE_FORCE && rng32(hash32(floorSeed(g), g.depth, 0x5821) | 1)() >= SHRINE_CH) return false;
+  const reach = reachFromHero(g);
+  const cx = MW >> 1, cy = MH >> 1;
+  let best = -1, bd = 1e9;
+  for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) {
+    const k = y * MW + x;
+    if (!reach[k] || g.map[k] !== 1 || (x === g.hero.x && y === g.hero.y)) continue;
+    if (cellFeatureBlocked(g, x, y, { allowCorr: false }) || enemyAt(g, x, y)) continue;
+    const d = Math.abs(x - cx) + Math.abs(y - cy);
+    if (d < bd) { bd = d; best = k; }
+  }
+  if (best < 0) return false;
+  g.shrine = { x: best % MW, y: (best / MW) | 0 };
+  return true;
+}
+function markShrineUsed(g: Game): void {
+  if (!g.shrine) return;
+  g.shrine.used = 1;
+  g.shrUsedD = g.depth;
+  for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.sh = packShrine(g.shrine);
+}
+function startSwarm(g: Game): void {
+  if (!g.shrine || g.shrine.used || g.swarm) return;
+  markShrineUsed(g);
+  const reach = reachFromHero(g);
+  const pool: number[] = [];
+  for (let k = 0; k < reach.length; k++) if (reach[k] && g.map[k] === 1) pool.push(k);
+  g.swarm = { t: SWARM_SEC, kills: 0, acc: 0, spawned: 0, pool };
+  for (let i = 0; i < SWARM_BURST; i++) swarmSpawnOne(g);
+  setBanner(g, "SHRINE SWARM!", "Survive 60 seconds \u00b7 every kill raises the reward tier", "#ff4060", 8, 3.2);
+  msg(g, "You touch the shrine. The dungeon answers - enemies pour in from every direction!", "#ff8080");
+  g.flash = 0.6; g.flashC = "#ff2040"; g.shake = Math.max(g.shake, 10);
+  g.sfx("boss");
+  saveGame(g, true);
+}
+function swarmSpawnOne(g: Game): boolean {
+  const S = g.swarm; if (!S || !S.pool.length) return false;
+  const cam = camTarget(g);
+  const h = g.hero;
+  for (let tries = 0; tries < 24; tries++) {
+    const k = S.pool[ri(S.pool.length)];
+    const x = k % MW, y = (k / MW) | 0;
+    const d = Math.abs(x - h.x) + Math.abs(y - h.y);
+    if (d < 6 || d > 20) continue;
+    const sx = x * TS + 12 - cam.x, sy = y * TS + 12 - cam.y;
+    if (sx > -16 && sx < VW + 16 && sy > HUD - 16 && sy < HUD + VIEWH + 16) continue; // must start off screen
+    if (!walkable(g, x, y) || portalAt(g, x, y)) continue;
+    const cls = R() < 0.14 ? 1 : 0;
+    const e = mkEnemy(g, x, y, cls);
+    e.awake = true; e.sw = 1;
+    e.xp = Math.max(1, Math.round(e.xp * 0.6));
+    g.en.push(e); S.spawned++;
+    return true;
+  }
+  return false;
+}
+function swarmTick(g: Game, dt: number): void {
+  const S = g.swarm;
+  if (!S || g.mode !== "play" || dt <= 0) return;
+  S.t -= dt;
+  if (S.t <= 0) { endSwarm(g, false); return; }
+  const live = g.en.filter((e: En) => e.hp > 0 && e.sw).length;
+  S.acc += dt * SWARM_RATE;
+  let n = 0;
+  while (S.acc >= 1 && n < 4) { S.acc -= 1; if (live + n < SWARM_CAP && swarmSpawnOne(g)) n++; }
+  if (S.acc > 3) S.acc = 3;
+}
+function endSwarm(g: Game, died: boolean): void {
+  const S = g.swarm; if (!S) return;
+  g.swarm = null;
+  for (const e of g.en) if (e.sw && e.hp > 0) { burst(g, e.x * TS + 12, e.y * TS + 12, 6, ["#ff4060", "#400010"], 30, 30); e.hp = 0; }
+  g.en = g.en.filter((e: En) => e.hp > 0);
+  if (died) { msg(g, "The shrine swarm ends with your death. The shrine crumbles.", "#ff6060"); return; }
+  const ti = swarmTierOf(S.kills);
+  if (ti < 0) {
+    setBanner(g, "SWARM SURVIVED", S.kills + " kills \u00b7 below Bronze (" + SWARM_TIERS[0].k + ") \u00b7 no reward", "#c0a0a0", 4, 3);
+    msg(g, "The swarm recedes. " + S.kills + " kills - not enough to stir the shrine's hoard.", "#c0a0a0");
+    return;
+  }
+  const T = SWARM_TIERS[ti], d = g.depth, x = g.shrine ? g.shrine.x : g.hero.x, y = g.shrine ? g.shrine.y : g.hero.y;
+  let prisN = 0;
+  for (let i = 0; i < T.items; i++) {
+    let rar = Math.max(T.min, rollRar(1.3 + ti * 0.08, T.min, d));
+    if (i === 0 && T.pris > 0 && R() < T.pris) { rar = 7; prisN++; }
+    rar = Math.min(rar, 7);
+    giveItem(g, makeItem(d + T.il, rar), x, y);
+  }
+  for (let i = 0; i < T.gems; i++) giveDroppedGem(g, x, y, d + T.il, true);
+  const gd = Math.round((40 + d * 18) * T.gold * gemGoldMul(g));
+  g.gold += gd;
+  setBanner(g, "SWARM TIER: " + T.n.toUpperCase() + "!", S.kills + " kills \u00b7 " + T.items + " items" + (prisN ? " incl. PRISMATIC" : "") + " \u00b7 +" + gd + "g", T.c, 6 + ti, 4);
+  msg(g, "Shrine swarm complete: " + S.kills + " kills \u2192 " + T.n + " tier (" + T.items + " items" + (T.gems ? ", " + T.gems + " gems" : "") + ", +" + gd + " gold).", T.c);
+  g.flash = 0.5; g.flashC = T.c; g.sfx("levelup");
+  saveGame(g, true);
+}
+function drawShrine(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const s = g.shrine;
+  if (!s || !g.vis[s.y * MW + s.x]) return;
+  const sx = s.x * TS - camX, sy = s.y * TS - camY, cx = sx + 12;
+  ctx.save();
+  if (!s.used) {
+    const p = 0.6 + 0.4 * Math.sin(t * 3);
+    const gl = ctx.createRadialGradient(cx, sy + 8, 2, cx, sy + 8, 26);
+    gl.addColorStop(0, "rgba(255,80,110," + (0.5 * p).toFixed(2) + ")"); gl.addColorStop(1, "rgba(120,0,40,0)");
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(cx, sy + 8, 26, 0, 6.2832); ctx.fill();
+  }
+  ctx.fillStyle = s.used ? "#3a3438" : "#5a5060"; ctx.fillRect(sx + 3, sy + 17, 18, 6);
+  ctx.fillStyle = s.used ? "#2a2428" : "#786a80"; ctx.fillRect(sx + 6, sy + 6, 12, 12);
+  ctx.fillStyle = s.used ? "#1a1418" : "#9a8aa8"; ctx.fillRect(sx + 6, sy + 6, 12, 2);
+  if (s.used) { ctx.strokeStyle = "#100c10"; ctx.beginPath(); ctx.moveTo(sx + 8, sy + 7); ctx.lineTo(sx + 13, sy + 14); ctx.lineTo(sx + 11, sy + 20); ctx.stroke(); }
+  else {
+    ctx.fillStyle = "#ff3060"; ctx.fillRect(sx + 10, sy + 9, 4, 6); ctx.fillRect(sx + 8, sy + 11, 8, 2);
+    const fl = Math.sin(t * 9) * 1.5;
+    ctx.fillStyle = "#ffb0c0"; ctx.beginPath(); ctx.moveTo(cx - 3, sy + 5); ctx.quadraticCurveTo(cx + fl, sy - 6, cx + 3, sy + 5); ctx.fill();
+    ctx.font = "5px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ff8090"; ctx.fillText("SHRINE", cx, sy - 7);
+  }
+  ctx.restore();
+}
+function drawSwarmHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
+  const S = g.swarm; if (!S) return;
+  const ti = swarmTierOf(S.kills), nx = SWARM_TIERS[ti + 1];
+  const secs = Math.max(0, Math.ceil(S.t));
+  ctx.save();
+  ctx.fillStyle = "rgba(20,0,8,0.78)"; ctx.fillRect(VW / 2 - 70, HUD + 26, 140, 34);
+  ctx.strokeStyle = secs <= 10 && Math.floor(t * 4) % 2 ? "#ffffff" : "#ff3060"; ctx.lineWidth = 1; ctx.strokeRect(VW / 2 - 69.5, HUD + 26.5, 139, 33);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold 14px monospace"; ctx.fillStyle = secs <= 10 ? "#ff6060" : "#ffffff";
+  ctx.fillText("0:" + String(secs).padStart(2, "0"), VW / 2 - 34, HUD + 40);
+  ctx.font = "bold 11px monospace"; ctx.fillStyle = "#ffd040";
+  ctx.fillText(S.kills + " KILLS", VW / 2 + 30, HUD + 38);
+  ctx.font = "6px monospace"; ctx.fillStyle = ti >= 0 ? SWARM_TIERS[ti].c : "#c0a0a0";
+  ctx.fillText((ti >= 0 ? "Tier " + SWARM_TIERS[ti].n : "No tier yet") + (nx ? " \u00b7 next " + nx.k : " \u00b7 MAX"), VW / 2 + 30, HUD + 50);
+  ctx.fillStyle = "#ff3060"; ctx.fillRect(VW / 2 - 66, HUD + 56, Math.max(0, 132 * S.t / SWARM_SEC), 2);
+  ctx.restore();
+}
+// ---------- Item 16: hidden artifact caves + trophy case ----------
+type ArtCave = { dx: number; dy: number; cx: number; cy: number; ox?: number; oy?: number; sx?: number; sy?: number; rc?: number; open?: number; taken?: number };
+const ARTIFACTS: { t: string; n: string; l: string }[] = [
+  { t: "Idol", n: "Sunken Jade Idol", l: "A squat river-god carved from jade; its eyes were once pearls." },
+  { t: "Idol", n: "Idol of the Hollow King", l: "Its belly is hollow; something used to rattle inside." },
+  { t: "Idol", n: "Obsidian Watcher", l: "Carved facing the wall, as if it was never meant to see you." },
+  { t: "Idol", n: "Twin-Faced Effigy", l: "One face smiles, one weeps; both were worn smooth by hands." },
+  { t: "Idol", n: "Bone Matriarch", l: "A fertility idol of yellowed bone, bound in faded red thread." },
+  { t: "Mask", n: "Mask of the Last Choir", l: "The mouth is carved open mid-song, forever." },
+  { t: "Mask", n: "Gilded Death Mask", l: "Pressed over a forgotten face; the gold still holds its shape." },
+  { t: "Mask", n: "Antlered Ritual Mask", l: "Worn by the one who spoke for the forest, until the forest stopped." },
+  { t: "Mask", n: "Mirror-Eyed Visage", l: "Its eye slits are polished silver; you see yourself looking out." },
+  { t: "Mask", n: "Ashen Jester's Grin", l: "Even the plague-priests laughed when this one danced." },
+  { t: "Tablet", n: "Tablet of First Names", l: "Lists the names of things before they had names." },
+  { t: "Tablet", n: "Cracked Star Chart", l: "Maps a sky with three moons, none of which exist." },
+  { t: "Tablet", n: "Tablet of the Drowned Law", l: "Every rule ends with the same word: 'downward'." },
+  { t: "Tablet", n: "Clay Debt Ledger", l: "Someone owed a king nine hundred sheep. They never paid." },
+  { t: "Tablet", n: "Runestone of Binding", l: "The runes are cut so deep they still hum in the dark." },
+  { t: "Coin", n: "Coin of the Twelfth Emperor", l: "The emperor reigned one day; they minted exactly one coin." },
+  { t: "Coin", n: "Ferryman's Obol", l: "Warm to the touch, as if it has just been paid." },
+  { t: "Coin", n: "Square Copper Talent", l: "From a kingdom that refused to make anything round." },
+  { t: "Coin", n: "Moonsilver Drachma", l: "It shines brighter underground than above." },
+  { t: "Coin", n: "Bloodstone Token", l: "A gambling chip from a game whose players never left the table." },
+  { t: "Crown", n: "Circlet of the Child Queen", l: "Tiny, dented, and set with a single blue bead." },
+  { t: "Crown", n: "Thorned Iron Crown", l: "Made to hurt the wearer, so they would never forget the weight." },
+  { t: "Crown", n: "Coral Crown of the Deep Court", l: "It still smells faintly of the sea, a mile underground." },
+  { t: "Crown", n: "Broken Sun Diadem", l: "Its rays were snapped off one by one, by a usurper's hand." },
+  { t: "Crown", n: "Crown of Antlers and Gold", l: "Half beast, half throne: the last king of the old wood." },
+  { t: "Fossil", n: "Fossil Dragon Tooth", l: "Longer than your forearm, and still sharp." },
+  { t: "Fossil", n: "Ammonite of Endless Spiral", l: "Count its turns and you will lose count every time." },
+  { t: "Fossil", n: "Petrified Heart", l: "A heart turned to stone; it is said to beat once a century." },
+  { t: "Fossil", n: "Amber Moth", l: "A moth frozen mid-flight, its wings still dusted with gold." },
+  { t: "Fossil", n: "Skull of the First Delver", l: "Human, very old, and with a tiny pickaxe scratched on the brow." },
+  { t: "Relic Blade", n: "Hilt of the Oathbreaker", l: "The blade was shattered on purpose, the oath along with it." },
+  { t: "Relic Blade", n: "Glass Sword Fragment", l: "Volcanic glass, sharper than any steel, lighter than a feather." },
+  { t: "Relic Blade", n: "Sickle of the Harvest Moon", l: "Used to reap only one crop: silver grain under a red moon." },
+  { t: "Relic Blade", n: "Rusted Executioner's Edge", l: "Someone carved tally marks along the spine. Many of them." },
+  { t: "Relic Blade", n: "Spearhead of the Hundred Wars", l: "Reforged a hundred times; it remembers every battle." },
+  { t: "Amulet", n: "Amulet of the Sleeping Eye", l: "Its eye is closed. Pray it stays that way." },
+  { t: "Amulet", n: "Locket of Two Strangers", l: "Two tiny portraits inside; neither has a face." },
+  { t: "Amulet", n: "Serpent Torc", l: "A bronze snake swallowing its tail, warm as a living thing." },
+  { t: "Amulet", n: "Scarab of the Deep Sun", l: "Lapis blue, with a sun carved on its belly instead of its back." },
+  { t: "Amulet", n: "Pilgrim's Keyhole Pendant", l: "A keyhole with no door. Pilgrims wore it to the end of the world." },
+  { t: "Chalice", n: "Chalice of Bitter Water", l: "Whatever you pour in tastes of tears." },
+  { t: "Chalice", n: "Horn Cup of the Feast Hall", l: "From a feast that, the songs say, lasted seven years." },
+  { t: "Chalice", n: "Silver Grail of the Hermit", l: "Plain and dented; a hermit drank from it for three hundred years." },
+  { t: "Chalice", n: "Skull Goblet", l: "A warlord's trophy, rimmed in gold and very well used." },
+  { t: "Chalice", n: "Starlit Censer", l: "When lit, its smoke draws constellations on the ceiling." },
+  { t: "Orb", n: "Orb of Frozen Lightning", l: "A storm trapped in glass; it still flickers at night." },
+  { t: "Orb", n: "Seer's Clouded Sphere", l: "Look long enough and it shows you looking back from the future." },
+  { t: "Orb", n: "Heartstone of the Mountain", l: "Dug from the mountain's core; the mountain has been quieter since." },
+  { t: "Orb", n: "Weeping Pearl", l: "The size of a fist, forever damp no matter how you dry it." },
+  { t: "Orb", n: "Void Marble", l: "Darker than shadow; light bends politely around it." },
+];
+const ART_N = ARTIFACTS.length; // 50
+const ART_CH = 0.001; // per lava-eligible floor past depth 25
+function artsOf(g: Game): number[] { return Array.isArray(g.arts) ? g.arts : (g.arts = []); }
+function packArts(a: unknown): string {
+  const ok = (Array.isArray(a) ? a : []).filter((n: unknown) => typeof n === "number" && n >= 0 && n < ART_N);
+  return [...new Set(ok as number[])].sort((x: number, y: number) => x - y).map((n: number) => n.toString(36)).join(".");
+}
+function unpackArts(raw: unknown): number[] {
+  if (Array.isArray(raw)) return [...new Set((raw as unknown[]).filter((n: unknown) => typeof n === "number" && n >= 0 && n < ART_N) as number[])];
+  if (typeof raw !== "string" || !raw) return [];
+  return [...new Set(raw.split(".").map((p: string) => parseInt(p, 36)).filter((n: number) => isFinite(n) && n >= 0 && n < ART_N))];
+}
+// Layout (s = depth into the rock from the room, q = sideways), all carved out of a solid 5x9 block of rock:
+//   s=0..2, q=-1..1  lava moat (3x3) opening onto the room at s=-1
+//   s=3,    q=-1..1  landing
+//   s=4,    q=0      hidden door (wall with a faint glowing crack)
+//   s=5..7, q=-1..1  sealed chamber, pedestal at s=6, q=0
+// Every wall tile of the block (s=0..8, q=-2..2) is indestructible, so the only ways in are the lava-walking affix or
+// a Paramount turning the moat into obsidian.
+const ART_POCKET_S = 8, ART_POCKET_Q = 2;
+function packArtCave(a: ArtCave | null | undefined): ArtCave | null {
+  if (!a || !inb(a.dx, a.dy) || !inb(a.cx, a.cy)) return null;
+  const o: ArtCave = { dx: a.dx | 0, dy: a.dy | 0, cx: a.cx | 0, cy: a.cy | 0 };
+  if (typeof a.ox === "number" && typeof a.oy === "number" && inb(a.ox, a.oy) && Math.abs(a.sx ?? 0) + Math.abs(a.sy ?? 0) === 1) { o.ox = a.ox | 0; o.oy = a.oy | 0; o.sx = a.sx | 0; o.sy = a.sy | 0; }
+  if (a.rc) o.rc = 1; if (a.open) o.open = 1; if (a.taken) o.taken = 1;
+  return o;
+}
+// (s, q) of a tile in the artifact pocket's frame, or null if there is no pocket.
+function artSQ(g: Game, x: number, y: number): { s: number; q: number } | null {
+  const a = g.artCave; if (!a || a.ox === undefined || a.oy === undefined || a.sx === undefined || a.sy === undefined) return null;
+  const rx = x - a.ox, ry = y - a.oy;
+  return { s: rx * a.sx + ry * a.sy, q: rx * -a.sy + ry * a.sx };
+}
+function artInBlock(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= 0 && p.s <= ART_POCKET_S && Math.abs(p.q) <= ART_POCKET_Q; }
+// Walls of the pocket block can never be chipped, dug, cracked or ripped.
+function artLocked(g: Game, x: number, y: number): boolean { return inb(x, y) && g.map[y * MW + x] === 0 && artInBlock(g, x, y); }
+// The landing/chamber behind the moat (used so a player who got in can always walk back out over the moat).
+function artInside(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= 3 && p.s <= 7 && Math.abs(p.q) <= 1; }
+function artSpotOk(g: Game, ox: number, oy: number, sx: number, sy: number): boolean {
+  const at = (s0: number, q0: number): number[] => [ox + s0 * sx - q0 * sy, oy + s0 * sy + q0 * sx];
+  for (let s0 = 0; s0 <= ART_POCKET_S; s0++) for (let q0 = -ART_POCKET_Q; q0 <= ART_POCKET_Q; q0++) {
+    const [x, y] = at(s0, q0);
+    if (!inb(x, y) || isOuterBarrier(x, y) || g.map[y * MW + x] !== 0) return false;
+  }
+  // a single room tile in front of the moat; the rest of the room side may be anything
+  const [fx, fy] = at(-1, 0);
+  if (!inb(fx, fy) || g.map[fy * MW + fx] !== 1 || isCorridorCell(g.map, fx, fy) || hzSolid(g, fx, fy) || portalAt(g, fx, fy) || chestAt(g, fx, fy) || shrineAt(g, fx, fy)) return false;
+  return true;
+}
+function maybeSpawnArtifactCave(g: Game): boolean {
+  g.artCave = null;
+  if (g.area === "camp" || g.vault || (g.area ?? "dungeon") !== "dungeon") return false;
+  if (!ART_FORCE && (g.depth < HZ_MIN_DEPTH || isActFloor(g.depth) || !lavaWxOk(floorWx(g)))) return false; // lava-eligible floors only
+  const ar = rng32(hash32(floorSeed(g), g.depth, 0xa27) | 1);
+  if (!ART_FORCE && ar() >= ART_CH) return false;
+  // Item 20: each cave holds exactly ONE prize - an artifact OR a Resplendent Chest (50/50); once all 50 artifacts are owned, always the chest.
+  const rc = ART_PRIZE === "chest" ? true : ART_PRIZE === "art" ? artsOf(g).length >= ART_N : (artsOf(g).length >= ART_N || ar() < 0.5);
+  const reach = reachFromHero(g);
+  const cand: number[] = [];
+  for (let k = 0; k < MW * MH; k++) if (reach[k] && g.map[k] === 1) cand.push(k);
+  for (let i = cand.length - 1; i > 0; i--) { const j = ri(i + 1); const tt = cand[i]; cand[i] = cand[j]; cand[j] = tt; }
+  for (const k of cand) {
+    const fx = k % MW, fy = (k / MW) | 0;
+    for (const [sx, sy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ox = fx + sx, oy = fy + sy;
+      if (!artSpotOk(g, ox, oy, sx, sy)) continue;
+      const at = (s0: number, q0: number): number => (oy + s0 * sy + q0 * sx) * MW + (ox + s0 * sx - q0 * sy);
+      if (!g.hz || g.hz.length !== MW * MH) g.hz = new Uint8Array(MW * MH);
+      for (let s0 = 0; s0 <= 2; s0++) for (let q0 = -1; q0 <= 1; q0++) { const t = at(s0, q0); g.map[t] = 1; g.hz[t] = HZ_LAVA; g.seen[t] = 0; }
+      for (let q0 = -1; q0 <= 1; q0++) { const t = at(3, q0); g.map[t] = 1; g.hz[t] = 0; g.seen[t] = 0; }
+      for (let s0 = 5; s0 <= 7; s0++) for (let q0 = -1; q0 <= 1; q0++) { const t = at(s0, q0); g.map[t] = 1; g.hz[t] = 0; g.seen[t] = 0; }
+      const d = at(4, 0), c = at(6, 0);
+      g.artCave = { dx: d % MW, dy: (d / MW) | 0, cx: c % MW, cy: (c / MW) | 0, ox, oy, sx, sy };
+      if (rc) g.artCave.rc = 1;
+      g.en = g.en.filter((e: En) => !artInBlock(g, e.x, e.y));
+      return true;
+    }
+  }
+  return false;
+}
+function openArtifactDoor(g: Game): void {
+  const a = g.artCave; if (!a || a.open) return;
+  a.open = 1;
+  g.map[a.dy * MW + a.dx] = 1;
+  cracksOf(g)[a.dy * MW + a.dx] = 0;
+  g.wallVer = (g.wallVer || 0) + 1;
+  burst(g, a.dx * TS + 12, a.dy * TS + 12, 30, ["#ffe8a0", "#c0a060", "#ffffff"], 60, 40);
+  g.flash = 0.35; g.flashC = "#ffe0a0";
+  g.sfx("sparkle");
+  msg(g, "The glowing crack gives way - a hidden chamber!", "#ffe0a0");
+  if (a.rc) setBanner(g, "RESPLENDENT CHEST DISCOVERED!", "A hoard worth three act bosses waits inside", GOLD, 8, 3.5);
+  else setBanner(g, "HIDDEN CHAMBER!", "Something ancient rests on the pedestal", "#ffe0a0", 6, 3);
+  computeVis(g);
+  saveGame(g, true);
+}
+// Resplendent Chest: the reward of three act bosses with three overshields each (the act-boss loot fountain, run three times).
+function openResplendent(g: Game): number {
+  const a = g.artCave; if (!a || a.taken) return 0;
+  a.taken = 1;
+  const d0 = g.drops.length, gold0 = g.gold;
+  for (let i = 0; i < 3; i++) {
+    const e = mkEnemy(g, a.cx, a.cy, 2);
+    e.act = actOf(g.depth); e.ovm = 3; e.ovn = 0; e.ovhp = 0; e.bN = 3; e.hp = 0; e.ax = a.cx; e.ay = a.cy;
+    fountainActLoot(g, e, false, 1);
+  }
+  const items = g.drops.slice(d0).filter((d: Drop) => d.item).length;
+  RESP_OPEN.t = 2.5;
+  setBanner(g, "RESPLENDENT CHEST OPENED!", items + " treasures \u00b7 +" + (g.gold - gold0) + "g \u00b7 a triple act-boss hoard", GOLD, 9, 5);
+  msg(g, "The Resplendent Chest bursts open: the hoard of three act bosses with three overshields each (" + items + " items).", GOLD);
+  g.flash = 0.8; g.flashC = "#fff0a0"; g.shake = Math.max(g.shake, 8);
+  burst(g, a.cx * TS + 12, a.cy * TS + 12, 120, [GOLD, "#ffffff", "#fff0a0", "#ffb020"], 160, 60);
+  g.sfx("levelup"); g.sfx("sparkle");
+  saveGame(g, true);
+  return items;
+}
+const RESP_OPEN = { t: 0 };
+function discoverArtifact(g: Game): number {
+  const a = g.artCave; if (!a || a.taken) return -1;
+  const own = new Set(artsOf(g));
+  const left: number[] = [];
+  for (let i = 0; i < ART_N; i++) if (!own.has(i)) left.push(i);
+  if (a.rc || !left.length) { a.rc = 1; openResplendent(g); return -1; } // the cave's prize is the chest (or every artifact is owned)
+  a.taken = 1;
+  const idx = left[ri(left.length)];
+  g.arts = [...own, idx];
+  const n = g.arts.length;
+  const A = ARTIFACTS[idx];
+  ART_REVEAL.idx = idx; ART_REVEAL.t = 5;
+  setBanner(g, "ANCIENT ARTIFACT DISCOVERED: " + A.n.toUpperCase() + " (" + n + "/" + ART_N + ")", A.l, "#ffd870", 9, 5);
+  msg(g, "Ancient artifact discovered: " + A.n + " (" + n + "/" + ART_N + "). It joins your trophy case.", "#ffd870");
+  g.flash = 0.8; g.flashC = "#fff0c0"; g.shake = Math.max(g.shake, 6);
+  burst(g, a.cx * TS + 12, a.cy * TS + 12, 70, ["#ffd870", "#ffffff", "#ffb040", "#a0e0ff"], 120, 80);
+  g.sfx("levelup"); g.sfx("sparkle");
+  saveGame(g, true);
+  return idx;
+}
+const ART_REVEAL = { idx: -1, t: 0 };
+const ART_ICON = new Map<string, HTMLCanvasElement>();
+function artIcon(idx: number, size = 48, sil = false): HTMLCanvasElement {
+  const key = idx + ":" + size + ":" + (sil ? 1 : 0);
+  let c = ART_ICON.get(key); if (c) return c;
+  c = document.createElement("canvas"); c.width = size; c.height = size;
+  const x = c.getContext("2d")!;
+  x.scale(size / 48, size / 48);
+  drawArtifact(x, idx);
+  if (sil) { x.globalCompositeOperation = "source-in"; x.fillStyle = "#2a2632"; x.fillRect(0, 0, 48, 48); }
+  ART_ICON.set(key, c);
+  return c;
+}
+function drawArtifact(x: CanvasRenderingContext2D, idx: number): void {
+  const A = ARTIFACTS[idx];
+  const r = rng32(hash32(idx + 11, 4242, 9) | 1);
+  const MATS = [["#e8c060", "#a07820", "#fff0b0"], ["#c87840", "#7a4018", "#f0b080"], ["#50c890", "#1f6a48", "#b0ffd8"], ["#3a3448", "#141018", "#8a80a8"], ["#e8e0c8", "#a09880", "#ffffff"], ["#c0c8d8", "#6a7488", "#ffffff"], ["#80c8ff", "#2a5a90", "#e0f4ff"], ["#c03040", "#601018", "#ff9090"]];
+  const m = MATS[(idx * 3 + Math.floor(r() * 3)) % MATS.length];
+  const gem = ["#ff3050", "#40c0ff", "#60ff80", "#c060ff", "#ffd040"][idx % 5];
+  const [base, dark, lite] = m;
+  const v = idx % 5; // variant within the type
+  x.lineJoin = "round";
+  const poly = (pts: number[], fill: string): void => { x.fillStyle = fill; x.beginPath(); x.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) x.lineTo(pts[i], pts[i + 1]); x.closePath(); x.fill(); };
+  const glyphs = (x0: number, y0: number, w: number, h: number, col: string): void => { x.fillStyle = col; for (let i = 0; i < 7; i++) { const gx = x0 + r() * (w - 3), gy = y0 + r() * (h - 3); if (r() < 0.5) x.fillRect(gx, gy, 3, 1); else x.fillRect(gx, gy, 1, 3); } };
+  switch (A.t) {
+    case "Idol":
+      poly([24, 6 + v, 33, 14, 32, 30, 36, 42, 12, 42, 16, 30, 15, 14], base);
+      poly([24, 6 + v, 33, 14, 24, 16], lite);
+      x.fillStyle = dark; x.fillRect(19, 18, 3, 3); x.fillRect(26, 18, 3, 3); x.fillRect(21, 25, 6, 2 + (v % 2));
+      if (v >= 2) { x.fillStyle = gem; x.fillRect(23, 31, 3, 3); }
+      if (v === 4) { x.fillStyle = dark; for (let i = 0; i < 4; i++) x.fillRect(14 + i * 6, 36, 3, 6); }
+      break;
+    case "Mask":
+      x.fillStyle = base; x.beginPath(); x.ellipse(24, 24, 14, 17 - v, 0, 0, 6.2832); x.fill();
+      x.fillStyle = lite; x.beginPath(); x.ellipse(20, 16, 6, 4, -0.4, 0, 6.2832); x.fill();
+      x.fillStyle = v === 3 ? "#e0e8f0" : "#0a0808"; x.beginPath(); x.ellipse(18, 22, 4, 2.5, 0.2, 0, 6.2832); x.ellipse(30, 22, 4, 2.5, -0.2, 0, 6.2832); x.fill();
+      x.fillStyle = "#0a0808"; if (v === 0) { x.beginPath(); x.ellipse(24, 33, 4, 5, 0, 0, 6.2832); x.fill(); } else x.fillRect(19, 32, 10, 2);
+      if (v === 2) { x.strokeStyle = dark; x.lineWidth = 2; x.beginPath(); x.moveTo(14, 12); x.lineTo(8, 4); x.lineTo(5, 8); x.moveTo(34, 12); x.lineTo(40, 4); x.lineTo(43, 8); x.stroke(); }
+      if (v === 4) { x.fillStyle = gem; x.fillRect(13, 27, 3, 6); x.fillRect(32, 27, 3, 6); }
+      break;
+    case "Tablet":
+      poly([10, 8, 38, 6 + v, 40, 40, 8, 42], base);
+      x.fillStyle = dark; x.fillRect(10, 40, 30, 2);
+      glyphs(13, 11, 24, 26, dark);
+      if (v === 1) { x.fillStyle = lite; for (let i = 0; i < 5; i++) x.fillRect(14 + r() * 20, 12 + r() * 22, 2, 2); }
+      if (v >= 2) { x.strokeStyle = "#0a0808"; x.lineWidth = 1; x.beginPath(); x.moveTo(30, 6); x.lineTo(24, 20); x.lineTo(28, 28); x.stroke(); }
+      if (v === 4) { x.fillStyle = gem; x.globalAlpha = 0.6; x.fillRect(10, 8, 28, 32); x.globalAlpha = 1; glyphs(13, 11, 24, 26, "#ffffff"); }
+      break;
+    case "Coin":
+      if (v === 2) { x.fillStyle = dark; x.fillRect(9, 9, 30, 30); x.fillStyle = base; x.fillRect(11, 11, 26, 26); }
+      else { x.fillStyle = dark; x.beginPath(); x.arc(24, 24, 16, 0, 6.2832); x.fill(); x.fillStyle = base; x.beginPath(); x.arc(24, 24, 14, 0, 6.2832); x.fill(); }
+      x.strokeStyle = dark; x.lineWidth = 1; x.beginPath(); x.arc(24, 24, 10, 0, 6.2832); x.stroke();
+      x.fillStyle = dark; if (v === 0) { x.beginPath(); x.ellipse(24, 23, 4, 6, 0, 0, 6.2832); x.fill(); } else if (v === 1) { x.fillRect(22, 16, 4, 16); x.fillRect(18, 20, 12, 3); } else if (v === 3) { x.beginPath(); x.arc(24, 24, 5, 0.6, 5.7); x.fill(); } else { x.fillStyle = gem; x.fillRect(20, 20, 8, 8); }
+      x.fillStyle = lite; x.fillRect(15, 15, 4, 2);
+      break;
+    case "Crown":
+      poly([8, 36, 8, 18, 15, 26, 24, 12 + v, 33, 26, 40, 18, 40, 36], base);
+      x.fillStyle = dark; x.fillRect(8, 33, 32, 3);
+      x.fillStyle = gem; x.beginPath(); x.arc(24, 29, 3, 0, 6.2832); x.fill();
+      if (v >= 1) { x.fillStyle = ["#40c0ff", "#60ff80", "#ff60e0", "#ffffff"][v - 1]; x.fillRect(13, 29, 3, 3); x.fillRect(32, 29, 3, 3); }
+      if (v === 1) { x.strokeStyle = dark; for (let i = 0; i < 4; i++) { x.beginPath(); x.moveTo(10 + i * 9, 18); x.lineTo(12 + i * 9, 12); x.stroke(); } }
+      if (v === 4) { x.strokeStyle = "#7a5a30"; x.lineWidth = 2; x.beginPath(); x.moveTo(10, 18); x.lineTo(6, 6); x.moveTo(8, 10); x.lineTo(3, 8); x.moveTo(38, 18); x.lineTo(42, 6); x.moveTo(40, 10); x.lineTo(45, 8); x.stroke(); }
+      break;
+    case "Fossil":
+      if (v === 1) { x.strokeStyle = base; x.lineWidth = 4; x.beginPath(); for (let a = 0; a < 14; a += 0.2) { const rr = 2 + a * 1.3; x.lineTo(24 + Math.cos(a) * rr, 24 + Math.sin(a) * rr); } x.stroke(); x.strokeStyle = dark; x.lineWidth = 1; x.stroke(); }
+      else if (v === 0) { poly([18, 8, 30, 8, 26, 42, 23, 44], base); x.fillStyle = lite; x.fillRect(20, 10, 3, 20); }
+      else if (v === 2) { x.fillStyle = base; x.beginPath(); x.moveTo(24, 40); x.bezierCurveTo(4, 24, 14, 6, 24, 16); x.bezierCurveTo(34, 6, 44, 24, 24, 40); x.fill(); glyphs(16, 16, 16, 16, dark); }
+      else if (v === 3) { x.fillStyle = "rgba(255,170,40,0.85)"; x.beginPath(); x.ellipse(24, 24, 16, 13, 0.3, 0, 6.2832); x.fill(); x.fillStyle = "#5a3010"; x.fillRect(22, 18, 4, 12); x.fillStyle = "#e0c060"; x.beginPath(); x.ellipse(18, 22, 6, 3, -0.5, 0, 6.2832); x.ellipse(30, 22, 6, 3, 0.5, 0, 6.2832); x.fill(); }
+      else { x.fillStyle = base; x.beginPath(); x.ellipse(24, 20, 14, 13, 0, 0, 6.2832); x.fill(); x.fillRect(16, 28, 16, 10); x.fillStyle = "#0a0808"; x.fillRect(17, 18, 5, 5); x.fillRect(26, 18, 5, 5); x.fillRect(23, 26, 2, 3); for (let i = 0; i < 5; i++) x.fillRect(17 + i * 3, 34, 1, 4); x.fillStyle = dark; x.fillRect(21, 9, 6, 1); x.fillRect(23, 7, 2, 4); }
+      break;
+    case "Relic Blade":
+      x.save(); x.translate(24, 24); x.rotate(-0.78 + v * 0.1);
+      if (v === 2) { x.strokeStyle = base; x.lineWidth = 4; x.beginPath(); x.arc(0, -4, 14, 3.6, 6.2); x.stroke(); x.fillStyle = dark; x.fillRect(-2, 6, 4, 14); }
+      else if (v === 4) { poly([0, -20, 6, -8, 2, 6, -2, 6, -6, -8], base); x.fillStyle = dark; x.fillRect(-2, 6, 4, 14); }
+      else {
+        poly([-3, -20 + v * 3, 3, -22 + v * 3, 4, 6, -4, 6], v === 1 ? "rgba(40,30,50,0.9)" : base);
+        x.fillStyle = lite; x.fillRect(-1, -18 + v * 3, 1, 22);
+        x.fillStyle = dark; x.fillRect(-9, 6, 18, 3); x.fillRect(-2, 9, 4, 10);
+        x.fillStyle = gem; x.fillRect(-2, 19, 4, 3);
+        if (v === 3) { x.fillStyle = "#0a0808"; for (let i = 0; i < 6; i++) x.fillRect(-4, -14 + i * 3, 2, 1); }
+      }
+      x.restore();
+      break;
+    case "Amulet":
+      x.strokeStyle = dark; x.lineWidth = 1.5; x.beginPath(); x.moveTo(12, 4); x.quadraticCurveTo(24, 22, 36, 4); x.stroke();
+      if (v === 2) { x.strokeStyle = base; x.lineWidth = 5; x.beginPath(); x.arc(24, 28, 11, 0.4, 6.0); x.stroke(); x.fillStyle = gem; x.fillRect(33, 31, 3, 3); }
+      else if (v === 3) { x.fillStyle = "#3060c0"; x.beginPath(); x.ellipse(24, 29, 10, 13, 0, 0, 6.2832); x.fill(); x.fillStyle = GOLD; x.beginPath(); x.arc(24, 29, 4, 0, 6.2832); x.fill(); }
+      else {
+        x.fillStyle = base; x.beginPath(); if (v === 4) { x.moveTo(24, 16); x.lineTo(34, 30); x.lineTo(24, 44); x.lineTo(14, 30); } else x.arc(24, 30, 11, 0, 6.2832); x.fill();
+        x.fillStyle = v === 0 ? "#0a0808" : v === 4 ? "#0a0808" : lite;
+        if (v === 0) { x.beginPath(); x.ellipse(24, 30, 6, 2, 0, 0, 6.2832); x.fill(); x.fillStyle = "#ff3050"; x.fillRect(23, 29, 2, 2); }
+        else if (v === 1) { x.fillRect(23, 20, 2, 20); x.fillStyle = dark; x.fillRect(18, 26, 4, 6); x.fillRect(26, 26, 4, 6); }
+        else { x.beginPath(); x.arc(24, 28, 2.5, 0, 6.2832); x.fill(); x.fillRect(23, 29, 2, 6); }
+      }
+      break;
+    case "Chalice":
+      if (v === 1) { x.fillStyle = base; x.beginPath(); x.moveTo(8, 12); x.quadraticCurveTo(20, 46, 40, 30); x.lineTo(36, 26); x.quadraticCurveTo(22, 34, 14, 10); x.fill(); x.fillStyle = dark; x.fillRect(10, 12, 5, 2); }
+      else if (v === 3) { x.fillStyle = "#e8e0c8"; x.beginPath(); x.ellipse(24, 20, 13, 11, 0, 0, 6.2832); x.fill(); x.fillStyle = "#0a0808"; x.fillRect(17, 20, 5, 5); x.fillRect(26, 20, 5, 5); x.fillStyle = GOLD; x.fillRect(11, 10, 26, 3); x.fillRect(20, 31, 8, 10); x.fillRect(15, 40, 18, 3); }
+      else if (v === 4) { x.fillStyle = base; x.beginPath(); x.arc(24, 24, 11, 0, 6.2832); x.fill(); x.fillStyle = dark; x.fillRect(22, 35, 4, 6); x.fillRect(16, 40, 16, 3); x.fillStyle = "#fff8c0"; for (let i = 0; i < 6; i++) x.fillRect(14 + r() * 20, 14 + r() * 20, 2, 2); }
+      else {
+        poly([12, 8, 36, 8, 32, 22, 26, 26, 26, 36, 32, 40, 16, 40, 22, 36, 22, 26, 16, 22], base);
+        x.fillStyle = lite; x.fillRect(14, 9, 3, 10);
+        x.fillStyle = v === 0 ? "#3060a0" : "#ff3050"; x.fillRect(14, 8, 20, 3);
+        if (v === 2) { x.fillStyle = dark; x.fillRect(18, 14, 3, 2); x.fillRect(28, 16, 2, 2); }
+      }
+      break;
+    default: { // Orb
+      const cols = [["#a0e0ff", "#2050c0"], ["#d0d0e0", "#606880"], ["#ff8040", "#801808"], ["#f0f0ff", "#a0a0c0"], ["#2a1840", "#000000"]][v];
+      const gr = x.createRadialGradient(20, 18, 2, 24, 24, 16);
+      gr.addColorStop(0, cols[0]); gr.addColorStop(1, cols[1]);
+      x.fillStyle = gr; x.beginPath(); x.arc(24, 23, 15, 0, 6.2832); x.fill();
+      x.fillStyle = dark; x.fillRect(16, 37, 16, 5); x.fillStyle = base; x.fillRect(14, 41, 20, 3);
+      if (v === 0) { x.strokeStyle = "#ffffff"; x.lineWidth = 1.5; x.beginPath(); x.moveTo(22, 12); x.lineTo(27, 22); x.lineTo(21, 24); x.lineTo(26, 34); x.stroke(); }
+      if (v === 4) { x.strokeStyle = "#8a60ff"; x.lineWidth = 1; x.beginPath(); x.arc(24, 23, 17, 0, 6.2832); x.stroke(); }
+      x.fillStyle = "rgba(255,255,255,0.75)"; x.beginPath(); x.ellipse(19, 16, 4, 2.5, -0.6, 0, 6.2832); x.fill();
+    }
+  }
+}
+let SHOT_ART_VIS = false; // test/screenshot only
+function drawArtCave(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const a = g.artCave; if (!a) return;
+  // faint glowing crack in the hidden door (subtle, pulses slowly)
+  if (!a.open && g.seen[a.dy * MW + a.dx]) {
+    const sx = a.dx * TS - camX, sy = a.dy * TS - camY;
+    const p = 0.35 + 0.25 * Math.sin(t * 1.6);
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,220,140," + p.toFixed(2) + ")"; ctx.lineWidth = 1; ctx.shadowColor = "#ffd070"; ctx.shadowBlur = 4;
+    ctx.beginPath(); ctx.moveTo(sx + 11, sy + 2); ctx.lineTo(sx + 13, sy + 8); ctx.lineTo(sx + 10, sy + 13); ctx.lineTo(sx + 13, sy + 19); ctx.lineTo(sx + 12, sy + 23); ctx.stroke();
+    ctx.restore();
+  }
+  if (a.rc && (g.vis[a.cy * MW + a.cx] || SHOT_ART_VIS)) { drawResplendent(ctx, a.cx * TS - camX, a.cy * TS - camY, t, !!a.taken); return; }
+  if (!a.taken && (g.vis[a.cy * MW + a.cx] || SHOT_ART_VIS)) {
+    const sx = a.cx * TS - camX, sy = a.cy * TS - camY;
+    ctx.save();
+    const gl = ctx.createRadialGradient(sx + 12, sy + 8, 2, sx + 12, sy + 8, 30);
+    gl.addColorStop(0, "rgba(255,230,150,0.55)"); gl.addColorStop(1, "rgba(255,200,80,0)");
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(sx + 12, sy + 8, 30, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = "#6a6070"; ctx.fillRect(sx + 5, sy + 14, 14, 9); ctx.fillStyle = "#8a8098"; ctx.fillRect(sx + 4, sy + 13, 16, 2);
+    ctx.drawImage(artIcon(0, 16, true), sx + 4, sy - 2 + Math.sin(t * 2) * 1.5);
+    ctx.fillStyle = "#ffe8a0"; ctx.font = "8px monospace"; ctx.textAlign = "center"; ctx.fillText("?", sx + 12, sy + 8 + Math.sin(t * 2) * 1.5);
+    ctx.restore();
+  }
+}
+function drawResplendent(ctx: CanvasRenderingContext2D, sx: number, sy: number, t: number, open: boolean): void {
+  const cx = sx + 12, cy = sy + 13, p = 0.5 + 0.5 * Math.sin(t * 3.2);
+  ctx.save();
+  if (!open) {
+    const rad = 22 + p * 10;
+    const gl = ctx.createRadialGradient(cx, cy, 3, cx, cy, rad);
+    gl.addColorStop(0, "rgba(255,240,150," + (0.55 + 0.3 * p).toFixed(2) + ")"); gl.addColorStop(0.5, "rgba(255,190,40," + (0.3 + 0.2 * p).toFixed(2) + ")"); gl.addColorStop(1, "rgba(255,160,0,0)");
+    ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(cx, cy, rad, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = "rgba(255,240,170," + (0.6 * (1 - p)).toFixed(2) + ")"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, 8 + p * 16, 0, 6.2832); ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+  }
+  // chest body: vivid gold with white-gold trim
+  ctx.fillStyle = "#7a4a00"; ctx.fillRect(sx + 2, sy + 9, 20, 13);
+  const gb = ctx.createLinearGradient(0, sy + 9, 0, sy + 22); gb.addColorStop(0, "#fff27a"); gb.addColorStop(0.5, "#ffc81e"); gb.addColorStop(1, "#d48a00");
+  ctx.fillStyle = gb; ctx.fillRect(sx + 3, sy + 10, 18, 11);
+  if (open) { ctx.fillStyle = "#3a2000"; ctx.fillRect(sx + 3, sy + 4, 18, 6); ctx.fillStyle = "#ffe060"; ctx.fillRect(sx + 3, sy + 2, 18, 2); }
+  else { const gl2 = ctx.createLinearGradient(0, sy + 3, 0, sy + 10); gl2.addColorStop(0, "#fffbd0"); gl2.addColorStop(1, "#ffd030"); ctx.fillStyle = gl2; ctx.beginPath(); ctx.moveTo(sx + 3, sy + 10); ctx.quadraticCurveTo(cx, sy + 1, sx + 21, sy + 10); ctx.fill(); }
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(sx + 3, sy + 10, 18, 1); ctx.fillRect(sx + 11, sy + 9, 2, 12);
+  ctx.fillStyle = "#ff40c0"; ctx.fillRect(sx + 10, sy + 12, 4, 4); ctx.fillStyle = "#40e0ff"; ctx.fillRect(sx + 5, sy + 15, 2, 2); ctx.fillRect(sx + 17, sy + 15, 2, 2);
+  if (!open) for (let i = 0; i < 6; i++) { // sparkles orbiting the chest
+    const ph = (t * 0.9 + i / 6) % 1, ang = i * 1.047 + t * 1.3, r = 9 + ph * 9;
+    const x = cx + Math.cos(ang) * r, y = cy + Math.sin(ang) * r * 0.75, z = 1 + 1.5 * Math.sin(ph * Math.PI);
+    ctx.fillStyle = i % 2 ? "#ffffff" : "#fff0a0"; ctx.fillRect(x - z, y - 0.5, z * 2, 1); ctx.fillRect(x - 0.5, y - z, 1, z * 2);
+  }
+  ctx.font = "5px monospace"; ctx.textAlign = "center"; ctx.fillStyle = open ? "#a08040" : "#fff0a0"; ctx.fillText(open ? "EMPTY" : "RESPLENDENT", cx, sy - 3);
+  ctx.restore();
+}
+function drawArtReveal(ctx: CanvasRenderingContext2D, dt: number, t: number): void {
+  if (ART_REVEAL.t <= 0 || ART_REVEAL.idx < 0) return;
+  ART_REVEAL.t -= Math.min(0.05, dt);
+  const a = Math.min(1, ART_REVEAL.t * 1.2, (5 - ART_REVEAL.t) * 3);
+  const cx = VW / 2, cy = HUD + VIEWH / 2 + 6;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = "rgba(10,6,2,0.55)"; ctx.fillRect(0, HUD, VW, VIEWH);
+  ctx.translate(cx, cy); ctx.rotate(t * 0.4);
+  for (let i = 0; i < 12; i++) { ctx.rotate(0.5236); const gr = ctx.createLinearGradient(0, 0, 0, -90); gr.addColorStop(0, "rgba(255,230,150,0.55)"); gr.addColorStop(1, "rgba(255,230,150,0)"); ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(4, 0); ctx.lineTo(12, -90); ctx.lineTo(-12, -90); ctx.fill(); }
+  ctx.restore();
+  ctx.save(); ctx.globalAlpha = a;
+  const s = 64 + Math.sin(t * 3) * 3;
+  ctx.drawImage(artIcon(ART_REVEAL.idx, 96), cx - s / 2, cy - s / 2, s, s);
+  ctx.restore();
+}
+
+// ---------- Item 17: water, lava and ice hazards (depth 26+), item 18: gib reactions, item 19: obsidian ----------
+// g.hz per tile: 0 none, 1 water, 2 lava, 3 ice (walkable, slippery), 4 obsidian (walkable, lava hit by Paramount), 5 dry pit (walkable, water/ice hit by Paramount).
+const HZ_NONE = 0, HZ_WATER = 1, HZ_LAVA = 2, HZ_ICE = 3, HZ_OBS = 4, HZ_PIT = 5;
+const HZ_MIN_DEPTH = 26, HZ_WATER_CH = 0.32, HZ_LAVA_CH = 0.26;
+const WW_NAME = "Waterwalker / Lavastrider", WW_DESC = "walk across water and lava unharmed";
+const WW_CH_GEAR = [0, 0, 0.003, 0.006, 0.012, 0.02, 0.03, 0.045]; // per item, by rarity (Common..Prismatic)
+const WW_CH_PET = [0, 0, 0.005, 0.01, 0.018, 0.03, 0.045, 0.065];
+let HZ_FORCE: "" | "water" | "lava" | "both" = "";
+function rollWW(it: Item, pet: boolean): void { if (R() < (pet ? WW_CH_PET : WW_CH_GEAR)[Math.max(0, Math.min(7, it.rar))]) it.ww = 1; }
+function hzAt(g: Game, x: number, y: number): number { const a = g.hz; return a && a.length === MW * MH && inb(x, y) ? a[y * MW + x] : 0; }
+function hzSolid(g: Game, x: number, y: number): boolean { const v = hzAt(g, x, y); return v === HZ_WATER || v === HZ_LAVA; }
+function heroWW(g: Game): boolean { for (const k of EQK) { const it = g.eq[k]; if (it && it.ww) return true; } return false; }
+// Water/lava stop the hero unless the lava-walking affix is equipped. Escape rule (never a way in): a hero already standing
+// on water/lava, or inside the artifact pocket, may always walk over it to get back out (e.g. after unequipping the affix).
+function hzBlocksHero(g: Game, x: number, y: number): boolean {
+  if (!hzSolid(g, x, y) || heroWW(g)) return false;
+  const h = g.hero;
+  if (hzSolid(g, h.x, h.y) || artInside(g, h.x, h.y)) return false;
+  return true;
+}
+function hzAllowed(g: Game): boolean { return g.area !== "camp" && !g.vault && (g.area ?? "dungeon") === "dungeon" && g.mode !== "title"; }
+// Lava is only allowed on clear or wind-only floors (never with rain, snow, thunderstorm, lightning or ice/frost).
+function lavaWxOk(k: WxKind | ""): boolean { return k === "" || k === "wind"; }
+function hzBfs(g: Game, hz: Uint8Array, sx: number, sy: number): Uint8Array {
+  const seen = new Uint8Array(MW * MH);
+  if (!inb(sx, sy)) return seen;
+  const q: number[] = [sy * MW + sx]; seen[q[0]] = 1;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i], x = c % MW, y = (c / MW) | 0;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), ny = y + (d === 2 ? 1 : d === 3 ? -1 : 0);
+      if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue;
+      const k = ny * MW + nx;
+      if (seen[k] || g.map[k] === 0 || hz[k] === HZ_WATER || hz[k] === HZ_LAVA) continue;
+      seen[k] = 1; q.push(k);
+    }
+  }
+  return seen;
+}
+// Tiles that must never hold water/lava (plus a 1-tile ring around each).
+function hzReservedMask(g: Game): Uint8Array {
+  const m = new Uint8Array(MW * MH);
+  const mark = (x: number, y: number, r: number): void => { for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (inb(xx, yy)) m[yy * MW + xx] = 1; };
+  for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) mark(k % MW, (k / MW) | 0, 1);
+  for (const p of allPortals(g)) for (const c of portalCells(p)) mark(c.x, c.y, 1);
+  for (const c of g.chests) mark(c.x, c.y, 1);
+  for (const d of g.drops) mark(d.x, d.y, 0);
+  if (g.shrine) mark(g.shrine.x, g.shrine.y, 1);
+  if (g.artCave) { for (let k = 0; k < MW * MH; k++) if (artInBlock(g, k % MW, (k / MW) | 0)) m[k] = 1; }
+  if (g.trader) mark(g.trader.x, g.trader.y, 1);
+  if (g.merchant) mark(g.merchant.x, g.merchant.y, 1);
+  mark(g.hero.x, g.hero.y, 1);
+  if (g.campSpot) mark(g.campSpot.x, g.campSpot.y, 1);
+  return m;
+}
+type HzStats = { water: number; lava: number; ice: number; pools: number; rejected: number };
+const HZ_LAST: HzStats = { water: 0, lava: 0, ice: 0, pools: 0, rejected: 0 };
+function genHazards(g: Game): HzStats {
+  const st: HzStats = { water: 0, lava: 0, ice: 0, pools: 0, rejected: 0 };
+  g.hz = null;
+  if (!hzAllowed(g)) return st;
+  if (!HZ_FORCE && (g.depth < HZ_MIN_DEPTH || isActFloor(g.depth))) return st;
+  const r = rng32(hash32(floorSeed(g), g.depth, 0x1a7a) | 1);
+  const wx = floorWx(g);
+  const cold = wxCold(wx);
+  const rW = r(), rL = r();
+  let wantW = rW < HZ_WATER_CH, wantL = rL < HZ_LAVA_CH && lavaWxOk(wx);
+  if (HZ_FORCE === "water") { wantW = true; wantL = false; }
+  if (HZ_FORCE === "lava") { wantW = false; wantL = lavaWxOk(wx); }
+  if (HZ_FORCE === "both") { wantW = true; wantL = lavaWxOk(wx); }
+  if (!wantW && !wantL) return st;
+  const hz = new Uint8Array(MW * MH);
+  const res = hzReservedMask(g);
+  const base = hzBfs(g, hz, g.hero.x, g.hero.y);
+  const areaK = (MW * MH) / (BASE_MAP * BASE_MAP);
+  const cand: number[] = [];
+  for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) { const k = y * MW + x; if (base[k] && g.map[k] === 1 && !res[k] && !isCorridorCell(g.map, x, y)) cand.push(k); }
+  if (!cand.length) return st;
+  const jobs: number[] = [];
+  if (wantW) { const n = Math.max(1, Math.round((1 + Math.floor(r() * 3)) * areaK)); for (let i = 0; i < n; i++) jobs.push(HZ_WATER); }
+  if (wantL) { const n = Math.max(1, Math.round((1 + Math.floor(r() * 2)) * areaK)); for (let i = 0; i < n; i++) jobs.push(HZ_LAVA); }
+  for (const kind of jobs) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const seed = cand[Math.floor(r() * cand.length)];
+      if (hz[seed] || res[seed]) continue;
+      const size = kind === HZ_WATER ? 5 + Math.floor(r() * 12) : 3 + Math.floor(r() * 8);
+      const pool: number[] = [seed];
+      const inPool = new Set<number>([seed]);
+      for (let guard = 0; pool.length < size && guard < size * 12; guard++) {
+        const from = pool[Math.floor(r() * pool.length)];
+        const d = Math.floor(r() * 4);
+        const nx = (from % MW) + (d === 0 ? 1 : d === 1 ? -1 : 0), ny = ((from / MW) | 0) + (d === 2 ? 1 : d === 3 ? -1 : 0);
+        if (nx < 2 || ny < 2 || nx >= MW - 2 || ny >= MH - 2) continue;
+        const k = ny * MW + nx;
+        if (inPool.has(k) || hz[k] || res[k] || g.map[k] !== 1 || isCorridorCell(g.map, nx, ny) || !base[k]) continue;
+        inPool.add(k); pool.push(k);
+      }
+      if (pool.length < 3) continue;
+      // cold floors: big water pools freeze (whole, or a frozen rim around open water)
+      const vals = new Map<number, number>();
+      let iceN = 0;
+      if (kind === HZ_WATER && cold && pool.length >= 8) {
+        const whole = r() < 0.5;
+        for (const k of pool) {
+          const x = k % MW, y = (k / MW) | 0;
+          const inner = inPool.has(k - 1) && inPool.has(k + 1) && inPool.has(k - MW) && inPool.has(k + MW);
+          const v = whole || !inner ? HZ_ICE : HZ_WATER;
+          vals.set(k, v); if (v === HZ_ICE) iceN++;
+          void x; void y;
+        }
+      } else for (const k of pool) vals.set(k, kind);
+      for (const [k, v] of vals) hz[k] = v;
+      // connectivity: every tile reachable before must stay reachable (unless it is now water/lava)
+      const reach = hzBfs(g, hz, g.hero.x, g.hero.y);
+      let ok = true;
+      for (let k = 0; k < MW * MH && ok; k++) if (base[k] && !reach[k] && hz[k] !== HZ_WATER && hz[k] !== HZ_LAVA) ok = false;
+      if (!ok) { for (const k of pool) hz[k] = 0; st.rejected++; continue; }
+      st.pools++;
+      for (const v of vals.values()) { if (v === HZ_WATER) st.water++; else if (v === HZ_LAVA) st.lava++; else if (v === HZ_ICE) st.ice++; }
+      void iceN;
+      break;
+    }
+  }
+  if (st.pools) { g.hz = hz; hzCleanEnemies(g); }
+  Object.assign(HZ_LAST, st);
+  return st;
+}
+function hzCleanEnemies(g: Game): void {
+  if (!g.hz && !g.artCave) return;
+  g.en = g.en.filter((e: En) => !hzSolid(g, e.x, e.y) && !artInBlock(g, e.x, e.y));
+  g.pend = g.pend.filter((e: En) => !hzSolid(g, e.x, e.y) && !artInBlock(g, e.x, e.y));
+}
+function packHz(g: Game): string | undefined { return g.hz && g.hz.length === MW * MH && g.hz.some((v: number) => v > 0) ? packMapBits(g.hz, 3) : undefined; }
+function unpackHz(s: unknown, len: number): Uint8Array | null {
+  if (typeof s !== "string" || !s) return null;
+  const a = unpackMapBits(s, 3, len);
+  for (let i = 0; i < a.length; i++) if (a[i] > 5) a[i] = 0;
+  return a.some((v: number) => v > 0) ? a : null;
+}
+// After a load: hazards only ever sit on plain floor.
+function hzSanitize(g: Game): void {
+  const a = g.hz; if (!a) return;
+  if (a.length !== MW * MH) { g.hz = null; return; }
+  for (let k = 0; k < a.length; k++) if (a[k] && g.map[k] !== 1) a[k] = 0;
+}
+// ---- ice sliding ----
+// Stepping onto ice gives the hero momentum: the next tiles in the same direction are taken automatically while the hero
+// stays on ice (max 8). Any new input steers (it replaces the slide), and the slide stops at anything solid, a portal,
+// stairs, an enemy or chest, or where the ice ends. Ice is normal floor for pathing, so it can never trap the player.
+const SLIDE_STEP = 0.075, SLIDE_MAX = 8;
+function hzAfterStep(g: Game, dx: number, dy: number, fromSlide: boolean): void {
+  const h = g.hero;
+  if (hzAt(g, h.x, h.y) === HZ_ICE && (dx || dy)) {
+    if (!fromSlide || !g.slide) g.slide = { dx, dy, t: SLIDE_STEP };
+    if (!fromSlide) g.sfx("skate");
+  } else g.slide = null;
+}
+function slideBlocked(g: Game, x: number, y: number): boolean {
+  if (!inb(x, y) || g.map[y * MW + x] === 0) return true;
+  const t = g.map[y * MW + x];
+  if (t === 2 || t === TILE_UP || portalAt(g, x, y) || enemyAt(g, x, y) || chestAt(g, x, y) || campBlocked(g, x, y) || shrineAt(g, x, y)) return true;
+  if (hzBlocksHero(g, x, y)) return true;
+  return false;
+}
+function slideTick(g: Game, dt: number): void {
+  const S = g.slide;
+  if (!S || g.mode !== "play" || g.paused) return;
+  const h = g.hero;
+  if (hzAt(g, h.x, h.y) !== HZ_ICE) { g.slide = null; return; }
+  S.t -= dt;
+  if (S.t > 0) return;
+  const nx = h.x + S.dx, ny = h.y + S.dy;
+  if (slideBlocked(g, nx, ny) || (S.dx && S.dy && (slideBlocked(g, h.x + S.dx, h.y) || slideBlocked(g, h.x, h.y + S.dy)))) { g.slide = null; h.bump = 0.3; h.bdx = S.dx; h.bdy = S.dy; return; }
+  const n = ((S as { n?: number }).n ?? 0) + 1;
+  h.x = nx; h.y = ny;
+  pickup(g);
+  computeVis(g);
+  if (n >= SLIDE_MAX || hzAt(g, nx, ny) !== HZ_ICE) { g.slide = null; g.notify(); return; }
+  (S as { n?: number }).n = n;
+  S.t = SLIDE_STEP + n * 0.012; // slows down a little each tile
+  g.notify();
+}
+// ---- item 19: terrain reactions to ultimates ----
+// Single (Prismatic) ultimate: ice in range melts back into water (water and lava unchanged). Melting never traps
+// the player: the tile under the hero and any ice that keeps a path open stays frozen.
+// Paramount: ice and water in range boil away into a dry, walkable pit; lava hardens into walkable obsidian.
+function hzReachOk(g: Game, hz: Uint8Array, base: Uint8Array): boolean {
+  const reach = hzBfs(g, hz, g.hero.x, g.hero.y);
+  for (let k = 0; k < MW * MH; k++) if (base[k] && !reach[k] && hz[k] !== HZ_WATER && hz[k] !== HZ_LAVA) return false;
+  return true;
+}
+function ultTerrain(g: Game, para: boolean): { melted: number; kept: number; pits: number; obs: number } {
+  const out = { melted: 0, kept: 0, pits: 0, obs: 0 };
+  const a = g.hz; if (!a || !hzAllowed(g)) return out;
+  const h = g.hero, rad = para ? paraObsRadius(g) : ultObsRadius(g), R0 = Math.ceil(rad);
+  const cells: number[] = [];
+  for (let y = h.y - R0; y <= h.y + R0; y++) for (let x = h.x - R0; x <= h.x + R0; x++) {
+    if (!inb(x, y) || (x - h.x) * (x - h.x) + (y - h.y) * (y - h.y) > rad * rad + 0.5) continue;
+    cells.push(y * MW + x);
+  }
+  if (para) {
+    for (const k of cells) {
+      const v = a[k], px = (k % MW) * TS + 12, py = ((k / MW) | 0) * TS + 12;
+      if (v === HZ_WATER || v === HZ_ICE) { a[k] = HZ_PIT; out.pits++; if (out.pits % 2 === 0 || out.pits < 12) hzFx(g, "steam", px, py); }
+      else if (v === HZ_LAVA) { a[k] = HZ_OBS; out.obs++; if (out.obs % 2 === 0 || out.obs < 12) hzFx(g, "steam", px, py); }
+    }
+    if (out.pits || out.obs) {
+      g.sfx("hiss", Math.min(1, (out.pits + out.obs) / 20));
+      if (out.pits) { setBannerSoft(g, "STEAM BURST!", out.pits + " tiles of water and ice boiled away"); msg(g, "Paramount boils away " + out.pits + " tiles of water and ice - only a dry pit remains.", "#d0e8ff"); }
+      if (out.obs) msg(g, out.obs + " tiles of lava hiss and harden into black obsidian.", "#c8b0ff");
+      g.wallVer = (g.wallVer || 0) + 1;
+    }
+    return out;
+  }
+  const base = hzBfs(g, a, h.x, h.y);
+  const hk = h.y * MW + h.x;
+  cells.sort((p: number, q: number) => { const dp = Math.abs(p % MW - h.x) + Math.abs(((p / MW) | 0) - h.y), dq = Math.abs(q % MW - h.x) + Math.abs(((q / MW) | 0) - h.y); return dq - dp; });
+  for (const k of cells) {
+    if (a[k] !== HZ_ICE) continue;
+    if (k === hk) { out.kept++; continue; } // the tile under the hero stays frozen
+    a[k] = HZ_WATER;
+    if (!hzReachOk(g, a, base)) { a[k] = HZ_ICE; out.kept++; continue; }
+    out.melted++;
+    if (out.melted < 14 || out.melted % 3 === 0) hzFx(g, "ripple", (k % MW) * TS + 12, ((k / MW) | 0) * TS + 12);
+  }
+  if (out.melted) {
+    g.sfx("hiss", 0.25);
+    msg(g, "The ultimate's heat melts " + out.melted + " tiles of ice back into water" + (out.kept ? " (" + out.kept + " stay frozen so you are never cut off)" : "") + ".", "#a0e0ff");
+    g.wallVer = (g.wallVer || 0) + 1;
+    if (g.slide) g.slide = null;
+  }
+  return out;
+}
+function setBannerSoft(g: Game, txt: string, sub: string): void { if (!g.banner || (g.banner.t ?? 0) <= 0.3) setBanner(g, txt, sub, "#d0f0ff", 3, 2); }
+function ultObsRadius(g: Game): number { return 3 + Math.round(3 * Math.max(0.3, wallPower(g))); } // 4..6 tiles (wall-crack radius + 1)
+function paraObsRadius(g: Game): number { return paraRadius(g) + 4; } // about 9..10 tiles
+// ---- FX: hazard particles (steam, splashes, embers, ripples) + gib reactions ----
+type HzP = { k: number; x: number; y: number; vx: number; vy: number; life: number; max: number; s: number };
+const HZFX: HzP[] = [];
+const HZFX_CAP = 140;
+function hzFx(g: Game, kind: "steam" | "splash" | "ripple" | "ember" | "flare" | "smoke" | "bubble" | "spark", x: number, y: number): void {
+  const red = reducedFx();
+  const push = (p: HzP): void => { if (HZFX.length >= HZFX_CAP) HZFX.shift(); HZFX.push(p); };
+  const K = { steam: 0, splash: 1, ripple: 2, ember: 3, flare: 4, smoke: 5, bubble: 6, spark: 7 }[kind];
+  if (kind === "steam") { const n = red ? 2 : 5; for (let i = 0; i < n; i++) push({ k: 0, x: x + (R() - 0.5) * 18, y: y + (R() - 0.5) * 12, vx: (R() - 0.5) * 10, vy: -18 - R() * 22, life: 0.9 + R() * 0.6, max: 1.5, s: 3 + R() * 4 }); return; }
+  if (kind === "splash") { const n = red ? 3 : 7; for (let i = 0; i < n; i++) { const a = R() * 6.28; push({ k: 1, x, y, vx: Math.cos(a) * (20 + R() * 25), vy: Math.sin(a) * 14 - 28, life: 0.45, max: 0.45, s: 1 + R() }); } push({ k: 2, x, y, vx: 0, vy: 0, life: 0.8, max: 0.8, s: 2 }); return; }
+  if (kind === "flare") { push({ k: 4, x, y, vx: 0, vy: 0, life: 0.35, max: 0.35, s: 7 }); const n = red ? 2 : 6; for (let i = 0; i < n; i++) push({ k: 3, x: x + (R() - 0.5) * 6, y, vx: (R() - 0.5) * 30, vy: -20 - R() * 40, life: 0.6 + R() * 0.5, max: 1.1, s: 1 }); push({ k: 5, x, y: y - 3, vx: (R() - 0.5) * 6, vy: -12, life: 1.1, max: 1.1, s: 4 }); return; }
+  push({ k: K, x, y, vx: kind === "ember" ? (R() - 0.5) * 10 : 0, vy: kind === "ember" ? -14 - R() * 16 : kind === "bubble" ? 0 : -8, life: kind === "ripple" ? 0.8 : kind === "bubble" ? 0.7 : 1, max: kind === "ripple" ? 0.8 : kind === "bubble" ? 0.7 : 1, s: kind === "bubble" ? 1.5 + R() * 1.5 : 2 });
+}
+function hzFxTick(dt: number): void {
+  if (!HZFX.length) return;
+  for (const p of HZFX) {
+    p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.k === 1) p.vy += 140 * dt;
+    if (p.k === 0 || p.k === 5) { p.vx *= 0.98; p.s += dt * 6; }
+  }
+  for (let i = HZFX.length - 1; i >= 0; i--) if (HZFX[i].life <= 0) HZFX.splice(i, 1);
+}
+function drawHzFx(ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+  if (!HZFX.length) return;
+  ctx.save();
+  for (const p of HZFX) {
+    const a = Math.max(0, Math.min(1, p.life / p.max)), x = p.x - camX, y = p.y - camY;
+    switch (p.k) {
+      case 0: ctx.globalAlpha = a * 0.45; ctx.fillStyle = "#e8eef8"; ctx.beginPath(); ctx.arc(x, y, p.s, 0, 6.2832); ctx.fill(); break;
+      case 1: ctx.globalAlpha = a; ctx.fillStyle = "#b8e8ff"; ctx.fillRect(x - p.s / 2, y - p.s / 2, p.s, p.s); break;
+      case 2: { const rr = 2 + (1 - a) * 9; ctx.globalAlpha = a * 0.8; ctx.strokeStyle = "#d0f0ff"; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, rr, rr * 0.5, 0, 0, 6.2832); ctx.stroke(); if (rr > 5) { ctx.globalAlpha = a * 0.4; ctx.beginPath(); ctx.ellipse(x, y, rr * 0.55, rr * 0.28, 0, 0, 6.2832); ctx.stroke(); } break; }
+      case 3: ctx.globalAlpha = a; ctx.fillStyle = a > 0.5 ? "#ffe060" : "#ff6020"; ctx.fillRect(x, y, 1.5, 1.5); break;
+      case 4: { const gl = ctx.createRadialGradient(x, y, 0, x, y, p.s * (1.4 - a * 0.4)); gl.addColorStop(0, "rgba(255,240,160," + a.toFixed(2) + ")"); gl.addColorStop(0.5, "rgba(255,120,20," + (a * 0.7).toFixed(2) + ")"); gl.addColorStop(1, "rgba(255,60,0,0)"); ctx.globalAlpha = 1; ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y, p.s * 1.4, 0, 6.2832); ctx.fill(); break; }
+      case 5: ctx.globalAlpha = a * 0.35; ctx.fillStyle = "#504848"; ctx.beginPath(); ctx.arc(x, y, p.s, 0, 6.2832); ctx.fill(); break;
+      case 6: ctx.globalAlpha = a; ctx.strokeStyle = "#ffb040"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, p.s * (1.2 - a * 0.4), 0, 6.2832); ctx.stroke(); break;
+      default: ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  ctx.restore();
+}
+// Item 18: gib pieces react to the tile they land on.
+const GIB_LAND_T = 0.28;
+function shardHz(g: Game, s: Shard, dt: number): void {
+  if (!g.hz) return;
+  s.age = (s.age ?? 0) + dt;
+  const tx = Math.floor(s.x / TS), ty = Math.floor(s.y / TS);
+  const v = hzAt(g, tx, ty);
+  if (s.hzs === 1) { // sinking
+    s.vx *= 0.8; s.vy *= 0.8; s.g = 0; s.sc = Math.max(0.2, (s.sc ?? 1) - dt * 1.4);
+    if ((s.ht = (s.ht ?? 0) + dt) > 0.12) { s.ht = 0; if (R() < 0.5) hzFx(g, "bubble", s.x + (R() - 0.5) * 4, s.y); }
+    return;
+  }
+  if (s.hzs === 2) { // burning away
+    s.vx *= 0.85; s.vy *= 0.85; s.g = 0; s.sc = Math.max(0.15, (s.sc ?? 1) - dt * 1.7); s.burn = Math.min(1, (s.burn ?? 0) + dt * 3);
+    if ((s.ht = (s.ht ?? 0) + dt) > 0.09) { s.ht = 0; hzFx(g, "ember", s.x + (R() - 0.5) * 6, s.y - 2); if (R() < 0.3) hzFx(g, "smoke", s.x, s.y - 4); }
+    return;
+  }
+  if (s.hzs === 3) { // sliding on ice: almost no friction, stop at the ice edge
+    if (v !== HZ_ICE) { s.vx = 0; s.vy = 0; s.vr = 0; s.hzs = 4; s.life = Math.min(s.life, 0.6); s.max = Math.max(0.6, s.max); return; }
+    s.vx *= Math.pow(0.6, dt); s.vy *= Math.pow(0.6, dt); s.vr *= Math.pow(0.5, dt); s.g = 0;
+    s.life = Math.max(s.life, 0.4); if (Math.hypot(s.vx, s.vy) < 4) { s.hzs = 4; s.life = Math.min(s.life, 0.8); }
+    return;
+  }
+  if (s.hzs === 4) { s.vx = 0; s.vy = 0; s.g = 0; return; }
+  // lava reacts the moment a piece touches it; water and ice when it lands
+  if (v === HZ_LAVA && s.age > 0.06) { s.hzs = 2; s.life = 0.55; s.max = 0.55; hzFx(g, "flare", s.x, s.y); g.sfx("hiss", 0.15); return; }
+  if (s.age < GIB_LAND_T) return;
+  if (v === HZ_WATER) { s.hzs = 1; s.life = 0.7; s.max = 0.7; hzFx(g, "splash", s.x, s.y); return; }
+  if (v === HZ_ICE) {
+    s.hzs = 3; s.rest = 0; s.g = 0;
+    const sp = Math.hypot(s.vx, s.vy), keep = Math.max(45, sp * 0.9);
+    const a = Math.atan2(s.vy, s.vx);
+    s.vx = Math.cos(a) * keep; s.vy = Math.sin(a) * keep * 0.8;
+    s.life = Math.max(s.life, 1.6); s.max = Math.max(s.max, 1.6);
+  }
+}
+// ---- hazard tile art (pre-rendered animation frames, cheap to draw) ----
+const HZ_FR = 8;
+const HZ_TILES = new Map<string, HTMLCanvasElement>();
+function hzTile(v: number, fr: number, var4: number): HTMLCanvasElement {
+  const key = v + ":" + fr + ":" + var4;
+  let c = HZ_TILES.get(key); if (c) return c;
+  c = document.createElement("canvas"); c.width = TS; c.height = TS;
+  const x = c.getContext("2d")!;
+  const r = rng32(hash32(v * 31 + var4, 77, 5) | 1);
+  const ph = fr / HZ_FR * 6.2832;
+  if (v === HZ_WATER) {
+    const gr = x.createLinearGradient(0, 0, 0, TS); gr.addColorStop(0, "#1a4f86"); gr.addColorStop(1, "#123a68");
+    x.fillStyle = gr; x.fillRect(0, 0, TS, TS);
+    x.fillStyle = "rgba(10,30,60,0.35)"; for (let i = 0; i < 3; i++) x.fillRect(Math.floor(r() * 20), Math.floor(r() * 20), 4, 3);
+    for (let i = 0; i < 4; i++) { // shimmer lines that drift with the frame
+      const yy = 3 + i * 6 + Math.sin(ph + i * 1.7) * 1.5, x0 = (r() * 14 + fr * 1.5 + i * 5) % 20;
+      x.fillStyle = "rgba(160,220,255," + (0.25 + 0.25 * Math.sin(ph + i)).toFixed(2) + ")"; x.fillRect(x0, yy, 5, 1);
+    }
+    if ((fr + var4) % 4 === 0) { x.fillStyle = "rgba(230,250,255,0.85)"; x.fillRect(Math.floor(r() * 20) + 2, Math.floor(r() * 20) + 2, 1, 1); }
+  } else if (v === HZ_LAVA) {
+    const gl = 0.5 + 0.5 * Math.sin(ph);
+    const gr = x.createRadialGradient(12, 12, 2, 12, 12, 17); gr.addColorStop(0, gl > 0.5 ? "#ffb030" : "#ff9a20"); gr.addColorStop(1, "#d23a08");
+    x.fillStyle = gr; x.fillRect(0, 0, TS, TS);
+    for (let i = 0; i < 4; i++) { // dark crust plates that drift
+      const cx = (r() * 24 + fr * 0.8) % 24, cy = (r() * 24 + fr * 0.4) % 24, w = 4 + r() * 5, h = 3 + r() * 4;
+      x.fillStyle = "rgba(80,14,4,0.75)"; x.beginPath(); x.ellipse(cx, cy, w / 2, h / 2, r() * 3, 0, 6.2832); x.fill();
+      x.strokeStyle = "rgba(255,230,120,0.7)"; x.lineWidth = 0.6; x.stroke();
+    }
+    x.fillStyle = "rgba(255,250,200," + (0.25 + 0.35 * gl).toFixed(2) + ")"; x.fillRect(Math.floor(r() * 18) + 3, Math.floor(r() * 18) + 3, 2, 2);
+    if ((fr + var4 * 3) % HZ_FR < 3) { const bx = 5 + r() * 14, by = 5 + r() * 14, br = 1 + ((fr + var4 * 3) % HZ_FR); x.strokeStyle = "rgba(255,220,120,0.9)"; x.lineWidth = 1; x.beginPath(); x.arc(bx, by, br, 0, 6.2832); x.stroke(); }
+  } else if (v === HZ_ICE) {
+    const gr = x.createLinearGradient(0, 0, TS, TS); gr.addColorStop(0, "#d8f4ff"); gr.addColorStop(0.5, "#9fd8f0"); gr.addColorStop(1, "#7cbfe0");
+    x.fillStyle = gr; x.fillRect(0, 0, TS, TS);
+    x.strokeStyle = "rgba(255,255,255,0.75)"; x.lineWidth = 1; // glossy streak
+    x.beginPath(); x.moveTo(2, 14 - var4); x.lineTo(14 - var4, 2); x.stroke();
+    x.strokeStyle = "rgba(60,110,150,0.6)"; x.lineWidth = 0.7; // cracks
+    x.beginPath(); let px = r() * 24, py = r() * 24; x.moveTo(px, py);
+    for (let i = 0; i < 4; i++) { px += (r() - 0.5) * 12; py += (r() - 0.5) * 12; x.lineTo(px, py); }
+    x.stroke();
+    const gl = (fr + var4 * 2) % HZ_FR; if (gl < 2) { x.fillStyle = "#ffffff"; const gx = 6 + var4 * 4, gy = 6 + var4 * 3; x.fillRect(gx - 2 + gl, gy, 3, 1); x.fillRect(gx, gy - 1, 1, 3); }
+  } else if (v === HZ_PIT) { // dry sunken basin
+    x.fillStyle = "#3a3026"; x.fillRect(0, 0, TS, TS);
+    x.fillStyle = "#2a2219"; x.fillRect(2, 2, TS - 4, TS - 4);
+    x.strokeStyle = "rgba(20,14,8,0.8)"; x.lineWidth = 0.7;
+    for (let i = 0; i < 3; i++) { x.beginPath(); let px = r() * 24, py = r() * 24; x.moveTo(px, py); for (let j = 0; j < 3; j++) { px += (r() - 0.5) * 10; py += (r() - 0.5) * 10; x.lineTo(px, py); } x.stroke(); }
+    x.fillStyle = "rgba(200,190,170,0.25)"; for (let i = 0; i < 5; i++) x.fillRect(Math.floor(r() * 22), Math.floor(r() * 22), 2, 1);
+  } else { // obsidian
+    x.fillStyle = "#120c18"; x.fillRect(0, 0, TS, TS);
+    for (let i = 0; i < 5; i++) { x.fillStyle = r() < 0.5 ? "#1e1628" : "#0a0610"; x.beginPath(); x.moveTo(r() * 24, r() * 24); x.lineTo(r() * 24, r() * 24); x.lineTo(r() * 24, r() * 24); x.fill(); }
+    const sh = 0.5 + 0.5 * Math.sin(ph + var4);
+    const gr = x.createLinearGradient(0, 0, TS, TS); gr.addColorStop(0, "rgba(140,100,220,0)"); gr.addColorStop(0.5, "rgba(160,120,255," + (0.12 + 0.14 * sh).toFixed(2) + ")"); gr.addColorStop(1, "rgba(140,100,220,0)");
+    x.fillStyle = gr; x.fillRect(0, 0, TS, TS);
+    if ((fr + var4 * 2) % HZ_FR === 0) { x.fillStyle = "#e8d8ff"; const gx = 4 + r() * 16, gy = 4 + r() * 16; x.fillRect(gx - 2, gy, 5, 1); x.fillRect(gx, gy - 2, 1, 5); }
+  }
+  HZ_TILES.set(key, c);
+  return c;
+}
+let HZ_GLOW: HTMLCanvasElement | null = null;
+function hzGlowSprite(): HTMLCanvasElement {
+  if (HZ_GLOW) return HZ_GLOW;
+  const c = document.createElement("canvas"); c.width = 72; c.height = 72;
+  const x = c.getContext("2d")!;
+  const gr = x.createRadialGradient(36, 36, 4, 36, 36, 36); gr.addColorStop(0, "rgba(255,120,30,0.38)"); gr.addColorStop(1, "rgba(255,60,0,0)");
+  x.fillStyle = gr; x.fillRect(0, 0, 72, 72);
+  return (HZ_GLOW = c);
+}
+function drawHzTile(ctx: CanvasRenderingContext2D, g: Game, tx: number, ty: number, sx: number, sy: number, v: number, t: number): void {
+  const var4 = ((tx * 13 + ty * 7) >>> 0) % 4;
+  const fr = Math.floor(t * (v === HZ_LAVA ? 5 : v === HZ_WATER ? 6 : 3) + var4 * 2) % HZ_FR;
+  ctx.drawImage(hzTile(v, fr, var4), sx, sy);
+  // rims where the pool meets plain floor
+  const same = (x: number, y: number): boolean => { const o = hzAt(g, x, y); return o === v || (v === HZ_WATER && o === HZ_ICE) || (v === HZ_ICE && o === HZ_WATER) || !inb(x, y) || g.map[y * MW + x] === 0; };
+  const rim = v === HZ_WATER ? "#0a2440" : v === HZ_LAVA ? "#3a1004" : v === HZ_ICE ? "#e8faff" : v === HZ_PIT ? "#5a4a38" : "#2a2034";
+  ctx.fillStyle = rim;
+  if (!same(tx, ty - 1)) ctx.fillRect(sx, sy, TS, 2);
+  if (!same(tx, ty + 1)) ctx.fillRect(sx, sy + TS - 1, TS, 1);
+  if (!same(tx - 1, ty)) ctx.fillRect(sx, sy, 1, TS);
+  if (!same(tx + 1, ty)) ctx.fillRect(sx + TS - 1, sy, 1, TS);
+}
+// Lava light + heat haze + embers, drawn above the floor; bubbles/embers are spawned from visible lava tiles.
+let HZ_EMIT = 0;
+function drawHzOverlay(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number, dt: number): void {
+  const a = g.hz; if (!a) return;
+  const tx0 = Math.max(0, Math.floor(camX / TS) - 1), ty0 = Math.max(0, Math.floor((camY + HUD) / TS) - 1);
+  const tx1 = Math.min(MW - 1, Math.ceil((camX + VW) / TS) + 1), ty1 = Math.min(MH - 1, Math.ceil((camY + HUD + VIEWH) / TS) + 1);
+  const lava: number[] = [];
+  for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) if (a[y * MW + x] === HZ_LAVA && g.seen[y * MW + x]) lava.push(y * MW + x);
+  if (!lava.length) return;
+  const red = reducedFx();
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const glow = hzGlowSprite(), pulse = 0.85 + 0.15 * Math.sin(t * 2.2);
+  ctx.globalAlpha = pulse;
+  for (let i = 0; i < lava.length && i < 90; i++) { const k = lava[i]; ctx.drawImage(glow, (k % MW) * TS + 12 - 36 - camX, ((k / MW) | 0) * TS + 12 - 36 - camY); }
+  ctx.globalCompositeOperation = "source-over";
+  if (!red) { // heat haze: faint wavy bands rising over lava
+    ctx.globalAlpha = 0.09; ctx.fillStyle = "#ffd0a0";
+    for (let i = 0; i < lava.length && i < 60; i += 2) { const k = lava[i], x = (k % MW) * TS - camX, y = ((k / MW) | 0) * TS - camY; for (let j = 0; j < 3; j++) { const yy = y - 4 - ((t * 14 + j * 8 + k) % 22); ctx.fillRect(x + 3 + Math.sin(t * 5 + yy * 0.4) * 2, yy, 18, 1); } }
+  }
+  ctx.restore();
+  if (dt > 0) {
+    HZ_EMIT += dt * Math.min(12, lava.length * (red ? 0.15 : 0.4));
+    while (HZ_EMIT >= 1) {
+      HZ_EMIT -= 1;
+      const k = lava[ri(lava.length)], px = (k % MW) * TS + 4 + R() * 16, py = ((k / MW) | 0) * TS + 4 + R() * 16;
+      hzFx(g, R() < 0.55 ? "ember" : "bubble", px, py);
+    }
+  }
+}
+
+let HZ_MSG_T = 0;
+function hzBlockedMsg(g: Game, v: number): void {
+  const now = Date.now(); if (now - HZ_MSG_T < 1800) return; HZ_MSG_T = now;
+  msg(g, v === HZ_LAVA ? "Boiling lava blocks the way. Only a " + WW_NAME + " item - or a Paramount - gets you across." : "Deep water blocks the way. A " + WW_NAME + " item lets you walk across.", v === HZ_LAVA ? "#ff9040" : "#80c8ff");
+}
+// gib particles (small bits) react to hazards too, cheaply: they vanish into water/lava with a rare tiny effect, and glide on ice
+function partHz(g: Game, p: Part, dt: number): void {
+  p.age = (p.age ?? 0) + dt;
+  if (p.hzs === 3) { if (hzAt(g, Math.floor(p.x / TS), Math.floor(p.y / TS)) !== HZ_ICE) { p.vx = 0; p.vy = 0; p.hzs = 4; p.life = Math.min(p.life, 0.4); } else { p.g = 0; p.drag = 1; p.vx *= Math.pow(0.6, dt); p.vy *= Math.pow(0.6, dt); } return; }
+  if (p.hzs === 4) { p.vx = 0; p.vy = 0; p.g = 0; return; }
+  const v = hzAt(g, Math.floor(p.x / TS), Math.floor(p.y / TS));
+  if (v === HZ_LAVA && p.age > 0.06) { if (R() < 0.25) hzFx(g, "ember", p.x, p.y); p.life = 0; return; }
+  if (p.age < GIB_LAND_T) return;
+  if (v === HZ_WATER) { if (R() < 0.2) hzFx(g, "ripple", p.x, p.y); p.life = 0; return; }
+  if (v === HZ_ICE) { p.hzs = 3; p.rest = 0; p.g = 0; p.drag = 1; p.life = Math.max(p.life, 1.0); p.max = Math.max(p.max, 1.0); }
+}
+let FRAME_VDT = 0; // visual dt for draw-time effects (0 while paused)
+const ART_URL = new Map<string, string>();
+function artIconUrl(i: number, sil: boolean): string {
+  const k = i + (sil ? "s" : "");
+  let u = ART_URL.get(k);
+  if (!u) { try { u = artIcon(i, 48, sil).toDataURL(); } catch { u = ""; } ART_URL.set(k, u); }
+  return u;
+}
+function drawTrophyCase(ctx: CanvasRenderingContext2D, sx: number, sy: number, t: number, n: number): void {
+  ctx.save();
+  ctx.fillStyle = "#3a2410"; ctx.fillRect(sx + 2, sy + 4, 20, 19);
+  ctx.fillStyle = "#6a4420"; ctx.fillRect(sx + 3, sy + 5, 18, 17);
+  ctx.fillStyle = "rgba(160,220,255,0.25)"; ctx.fillRect(sx + 4, sy + 6, 16, 9);
+  ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fillRect(sx + 5, sy + 7, 1, 6);
+  ctx.fillStyle = GOLD; ctx.fillRect(sx + 9, sy + 9, 6, 4); ctx.fillRect(sx + 11, sy + 13, 2, 2); ctx.fillRect(sx + 10, sy + 15, 4, 1);
+  ctx.fillStyle = "#2a1a08"; ctx.fillRect(sx + 4, sy + 16, 16, 1);
+  const p = 0.5 + 0.5 * Math.sin(t * 2);
+  ctx.fillStyle = "rgba(255,220,120," + (0.4 + 0.4 * p).toFixed(2) + ")"; ctx.fillRect(sx + 7 + Math.round(p * 8), sy + 8, 1, 1);
+  ctx.font = "5px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd870"; ctx.fillText("TROPHIES " + n + "/" + ART_N, sx + 12, sy + 1);
+  ctx.restore();
+}
+// Item 22: socket repair bookkeeping. validItem trims any item to SOCK_MAX sockets (counted in SOCK_FIXED); gems that sat in
+// surplus sockets are parked on the item (skx) and moved into the gem bag here, so no socketed gem is ever lost.
+const SOCK_FIXED = { n: 0, spilled: 0 };
+function repairSocketSpill(g: Game): number {
+  let n = 0;
+  const visit = (it: Item | null | undefined): void => {
+    const x = it as (Item & { skx?: { typ: number; rar: number; s?: number }[] }) | null | undefined;
+    if (!x || !Array.isArray(x.skx)) return;
+    for (const z of x.skx) { try { ensureGemBag(g).push(gemFromSock(z, x.ilvl)); n++; } catch { /* ignore */ } }
+    delete x.skx;
+    bustIcon(x);
+  };
+  for (const k of EQK) visit(g.eq[k]);
+  for (const it of g.bag) visit(it);
+  for (const d of g.drops) visit(d.item);
+  for (const it of g.stash || []) visit(it);
+  if (n) { SOCK_FIXED.spilled += n; msg(g, n + " gem" + (n > 1 ? "s" : "") + " from invalid extra sockets moved to your gem bag.", "#80e0ff"); }
+  return n;
+}
+function hash32(a: number, b: number, c = 0): number {
+  let h = (a * 374761393 + b * 668265263 + c * 2246822519) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+// Every floor has a stable seed (saved with the floor); old saves fall back to depth + theme so it is still stable.
+function floorSeed(g: Game): number { return typeof g.wxs === "number" && isFinite(g.wxs) ? g.wxs >>> 0 : hash32(g.depth, g.theme | 0, 7); }
+function wxPickFor(depth: number, seed: number): WxKind | "" {
+  if (depth < WX_MIN_DEPTH) return "";
+  const r = rng32(hash32(seed, depth, 0x5eed) | 1);
+  if (r() < WX_NONE_CH) return "";
+  let tot = 0; for (const w of WX_LIST) tot += w.w;
+  let x = r() * tot;
+  for (const w of WX_LIST) { x -= w.w; if (x <= 0) return w.k; }
+  return "wind";
+}
+function floorWx(g: Game): WxKind | "" {
+  if (g.mode === "title" || (g.area ?? "dungeon") !== "dungeon" || g.vault) return "";
+  if (WX_FORCE !== null) return WX_FORCE;
+  return wxPickFor(g.depth, floorSeed(g));
+}
+function wxInfo(k: WxKind | ""): { k: WxKind; n: string; w: number; icon: string } | null { return k ? WX_LIST.find((w) => w.k === k) || null : null; }
+function reducedFx(): boolean {
+  try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch { return false; }
+}
+type WxP = { x: number; y: number; vx: number; vy: number; s: number; ph: number; life: number };
+const WX = { key: "", kind: "" as WxKind | "", ps: [] as WxP[], splash: [] as WxP[], wind: 0, gust: 0, flash: 0, bolt: null as number[] | null, boltT: 0, nextBolt: 4, amb: 2, label: 0, labelTxt: "", thunderAt: -1, thunderV: 0, tiles: new Map<string, HTMLCanvasElement>() };
+const WX_CAP: Record<WxKind, number> = { snow: 90, blizzard: 170, drift: 70, frost: 40, drizzle: 90, rain: 170, lightning: 0, storm: 180, wind: 60 };
+function wxCold(k: WxKind | ""): boolean { return k === "snow" || k === "blizzard" || k === "drift" || k === "frost"; }
+function wxWet(k: WxKind | ""): boolean { return k === "drizzle" || k === "rain" || k === "storm"; }
+function wxTile(kind: string, v: number): HTMLCanvasElement {
+  const key = kind + v;
+  let c = WX.tiles.get(key);
+  if (c) return c;
+  c = document.createElement("canvas"); c.width = TS; c.height = TS;
+  const x = c.getContext("2d")!;
+  const r = rng32(hash32(v + 1, kind.length * 97, 3) | 1);
+  if (kind === "frostF") { // frosted floor: pale crust patches + crystal flecks
+    for (let i = 0; i < 5; i++) { x.fillStyle = "rgba(225,240,255," + (0.18 + r() * 0.2).toFixed(2) + ")"; x.beginPath(); x.ellipse(r() * TS, r() * TS, 3 + r() * 6, 2 + r() * 4, r() * 3, 0, 6.2832); x.fill(); }
+    for (let i = 0; i < 6; i++) { x.fillStyle = i % 3 ? "rgba(255,255,255,0.75)" : "rgba(120,240,255,0.9)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 1); }
+  } else if (kind === "iceF") { // ice sheet: glossy streaks + hairline cracks
+    x.fillStyle = "rgba(150,210,255,0.22)"; x.fillRect(0, 0, TS, TS);
+    x.strokeStyle = "rgba(255,255,255,0.45)"; x.lineWidth = 1;
+    for (let i = 0; i < 2; i++) { const o = r() * TS; x.beginPath(); x.moveTo(o - 6, 0); x.lineTo(o + 6, TS); x.stroke(); }
+    x.strokeStyle = "rgba(60,140,200,0.55)";
+    x.beginPath(); let px = r() * TS, py = r() * TS; x.moveTo(px, py); for (let i = 0; i < 4; i++) { px += (r() - 0.5) * 12; py += (r() - 0.5) * 12; x.lineTo(px, py); } x.stroke();
+    x.fillStyle = "rgba(120,255,255,0.9)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 1);
+  } else if (kind === "snowW") { // snow cap on a wall top edge + icicles
+    x.fillStyle = "rgba(240,248,255,0.92)"; x.fillRect(0, 0, TS, 3);
+    for (let i = 0; i < TS; i += 3) x.fillRect(i, 3, 3, Math.floor(r() * 3));
+    x.fillStyle = "rgba(180,230,255,0.85)";
+    for (let i = 0; i < 3; i++) { const ix = 2 + Math.floor(r() * (TS - 4)), L = 3 + Math.floor(r() * 6); x.beginPath(); x.moveTo(ix - 1.5, 3); x.lineTo(ix + 1.5, 3); x.lineTo(ix, 3 + L); x.fill(); }
+  } else if (kind === "rimeW") { // frost rime over a wall face
+    x.fillStyle = "rgba(200,230,255,0.28)"; x.fillRect(0, 0, TS, TS);
+    x.strokeStyle = "rgba(255,255,255,0.5)";
+    for (let i = 0; i < 3; i++) { const cx = r() * TS, cy = r() * TS; for (let a = 0; a < 6; a++) { x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + Math.cos(a) * 3, cy + Math.sin(a) * 3); x.stroke(); } }
+  } else if (kind === "wetF") { // rain puddle with a highlight
+    x.fillStyle = "rgba(20,40,70,0.35)"; x.beginPath(); x.ellipse(TS / 2 + (r() - 0.5) * 6, TS / 2 + (r() - 0.5) * 6, 6 + r() * 4, 3 + r() * 2, 0, 0, 6.2832); x.fill();
+    x.strokeStyle = "rgba(190,220,255,0.35)"; x.beginPath(); x.ellipse(TS / 2, TS / 2, 4, 1.5, 0, 3.4, 5.6); x.stroke();
+  } else if (kind === "wetW") { // dark wet streaks down a wall
+    for (let i = 0; i < 4; i++) { const sx = r() * TS; x.fillStyle = "rgba(10,20,40,0.28)"; x.fillRect(Math.floor(sx), 0, 1 + Math.floor(r() * 2), Math.floor(8 + r() * 16)); }
+    x.fillStyle = "rgba(200,230,255,0.3)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * 8), 1, 4);
+  } else if (kind === "dustF") {
+    for (let i = 0; i < 6; i++) { x.fillStyle = "rgba(170,140,100," + (0.15 + r() * 0.2).toFixed(2) + ")"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 2 + Math.floor(r() * 3), 1); }
+  }
+  WX.tiles.set(key, c);
+  return c;
+}
+function wxSpawn(k: WxKind, initial: boolean): WxP {
+  const W = VW, H = VIEWH, wind = WX.wind;
+  const x = initial ? Math.random() * W : (wind > 40 && Math.random() < 0.5 ? -10 : Math.random() * (W + 40) - 20);
+  const y = initial ? HUD + Math.random() * H : (wind > 40 && x < 0 ? HUD + Math.random() * H : HUD - 10);
+  if (k === "snow") return { x, y, vx: 0, vy: 14 + Math.random() * 12, s: Math.random() < 0.3 ? 2 : 1, ph: Math.random() * 6, life: 1 };
+  if (k === "blizzard") return { x, y, vx: 0, vy: 50 + Math.random() * 40, s: Math.random() < 0.4 ? 2 : 1, ph: Math.random() * 6, life: 1 };
+  if (k === "drift") return { x, y, vx: 0, vy: 9 + Math.random() * 8, s: 2 + (Math.random() < 0.3 ? 1 : 0), ph: Math.random() * 6, life: 1 };
+  if (k === "frost") return { x: Math.random() * W, y: HUD + Math.random() * H, vx: 0, vy: 3, s: 1, ph: Math.random() * 6, life: 0.6 + Math.random() * 1.6 };
+  if (k === "drizzle") return { x, y, vx: 0, vy: 170 + Math.random() * 50, s: 4, ph: 0, life: 1 };
+  if (k === "rain" || k === "storm") return { x, y, vx: 0, vy: 260 + Math.random() * 90, s: 6 + Math.random() * 3, ph: 0, life: 1 };
+  return { x, y: HUD + Math.random() * H, vx: 0, vy: (Math.random() - 0.5) * 10, s: 8 + Math.random() * 14, ph: Math.random() * 6, life: 1 }; // wind streak/debris
+}
+function wxReset(k: WxKind | ""): void {
+  WX.kind = k; WX.ps = []; WX.splash = []; WX.flash = 0; WX.bolt = null; WX.nextBolt = 2 + Math.random() * 4; WX.amb = 1;
+  WX.wind = k === "blizzard" ? 70 : k === "storm" ? 80 : k === "wind" ? 120 : k === "drift" ? 22 : k === "rain" ? 25 : 0;
+}
+function drawWeather(ctx: CanvasRenderingContext2D, g: Game, t: number, dt: number, camX: number, camY: number): void {
+  const k = floorWx(g);
+  const key = k ? g.depth + ":" + floorSeed(g) : "";
+  if (key !== WX.key) {
+    const prevKey = WX.key;
+    WX.key = key; wxReset(k);
+    if (k && prevKey.split(":")[0] !== String(g.depth) || (k && !prevKey)) { WX.label = 4.5; WX.labelTxt = "Depth " + g.depth + " \u00b7 " + wxInfo(k)!.n; msg(g, WX.labelTxt, wxCold(k) ? "#bfe8ff" : wxWet(k) ? "#a0c0ff" : k === "wind" ? "#e0c8a0" : "#d0c0ff"); }
+  }
+  if (!k) return;
+  const red = reducedFx();
+  const step = Math.min(0.05, Math.max(0, dt));
+  // wind with gusts; everything else drifts with it
+  WX.gust += step;
+  const baseW = k === "blizzard" ? 70 : k === "storm" ? 80 : k === "wind" ? 120 : k === "drift" ? 22 : k === "rain" ? 25 : 0;
+  WX.wind = baseW * (0.75 + 0.35 * Math.sin(WX.gust * 0.7) + 0.15 * Math.sin(WX.gust * 2.3));
+  const cold = wxCold(k), wet = wxWet(k);
+  const tx0 = Math.floor(camX / TS), ty0 = Math.floor((camY + HUD) / TS), tx1 = Math.ceil((camX + VW) / TS), ty1 = Math.ceil((camY + HUD + VIEWH) / TS);
+  // 1. tint + per-tile overlays
+  ctx.save();
+  if (cold) { ctx.fillStyle = k === "frost" ? "rgba(90,170,255,0.20)" : "rgba(130,180,255,0.15)"; ctx.fillRect(0, HUD, VW, VIEWH); }
+  else if (k === "storm") { ctx.fillStyle = "rgba(4,8,22,0.42)"; ctx.fillRect(0, HUD, VW, VIEWH); }
+  else if (wet) { ctx.fillStyle = k === "rain" ? "rgba(10,22,45,0.28)" : "rgba(20,32,55,0.18)"; ctx.fillRect(0, HUD, VW, VIEWH); }
+  else if (k === "lightning") { ctx.fillStyle = "rgba(20,10,40,0.18)"; ctx.fillRect(0, HUD, VW, VIEWH); }
+  else if (k === "wind") { ctx.fillStyle = "rgba(120,90,50,0.10)"; ctx.fillRect(0, HUD, VW, VIEWH); }
+  for (let ty = Math.max(0, ty0); ty <= Math.min(MH - 1, ty1); ty++) for (let tx = Math.max(0, tx0); tx <= Math.min(MW - 1, tx1); tx++) {
+    const i = ty * MW + tx;
+    if (!g.seen[i]) continue;
+    const v = g.map[i], h = hash32(tx, ty, g.depth);
+    const sx = tx * TS - camX, sy = ty * TS - camY;
+    if (v === 0) {
+      const face = ty + 1 < MH && g.map[i + MW] !== 0;
+      if (cold && face) ctx.drawImage(wxTile(k === "frost" ? "rimeW" : "snowW", h % 4), sx, sy);
+      else if (cold && h % 3 === 0) ctx.drawImage(wxTile("rimeW", h % 4), sx, sy);
+      else if (wet && face && h % 2 === 0) ctx.drawImage(wxTile("wetW", h % 4), sx, sy);
+    } else {
+      if (k === "frost") ctx.drawImage(wxTile(h % 3 ? "iceF" : "frostF", h % 4), sx, sy);
+      else if (cold && h % (k === "drift" ? 2 : 3) === 0) ctx.drawImage(wxTile("frostF", h % 4), sx, sy);
+      else if (wet && h % (k === "drizzle" ? 7 : 4) === 0) ctx.drawImage(wxTile("wetF", h % 4), sx, sy);
+      else if (k === "wind" && h % 5 === 0) ctx.drawImage(wxTile("dustF", h % 4), sx, sy);
+    }
+  }
+  if (wet) { // glossy wet sheen band that slowly moves
+    const gy = HUD + ((t * 18) % (VIEWH + 80)) - 40;
+    const gr = ctx.createLinearGradient(0, gy - 40, 0, gy + 40);
+    gr.addColorStop(0, "rgba(160,200,255,0)"); gr.addColorStop(0.5, "rgba(160,200,255," + (k === "drizzle" ? 0.05 : 0.08) + ")"); gr.addColorStop(1, "rgba(160,200,255,0)");
+    ctx.fillStyle = gr; ctx.fillRect(0, HUD, VW, VIEWH);
+  }
+  // 2. particles (screen space, capped)
+  const cap = Math.round(WX_CAP[k] * (red ? 0.35 : 1));
+  if (WX.ps.length > cap) WX.ps.length = cap;
+  while (WX.ps.length < cap) WX.ps.push(wxSpawn(k, WX.ps.length < cap && WX.ps.length < 10 || t < 0.5 ? true : Math.random() < 0.5));
+  const wind = WX.wind;
+  const vertical = wet || k === "drizzle";
+  ctx.lineCap = "round";
+  for (let n = 0; n < WX.ps.length; n++) {
+    const p = WX.ps[n];
+    if (k === "frost") {
+      p.life -= step; p.ph += step * 3;
+      if (p.life <= 0) { WX.ps[n] = wxSpawn(k, true); continue; }
+      const a = Math.max(0, Math.sin(p.ph)) * 0.9;
+      ctx.fillStyle = "rgba(160,255,255," + a.toFixed(2) + ")";
+      ctx.fillRect(Math.round(p.x) - 1, Math.round(p.y), 3, 1); ctx.fillRect(Math.round(p.x), Math.round(p.y) - 1, 1, 3);
+      continue;
+    }
+    if (k === "wind") {
+      p.x += (wind * 1.6 + 40) * step; p.y += p.vy * step; p.ph += step * 8;
+      if (p.x > VW + 30) { WX.ps[n] = wxSpawn(k, false); WX.ps[n].x = -30; continue; }
+      if (n % 4 === 0) { ctx.fillStyle = "rgba(140,110,70,0.8)"; const sz = 2; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.ph); ctx.fillRect(-sz / 2, -sz / 2, sz, sz); ctx.restore(); }
+      else { ctx.strokeStyle = "rgba(220,200,160,0.35)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.s, p.y - p.s * 0.18); ctx.stroke(); }
+      continue;
+    }
+    const sway = k === "drift" ? Math.sin(t * 1.3 + p.ph) * 14 : k === "snow" ? Math.sin(t * 2 + p.ph) * 6 : 0;
+    p.x += (wind + sway) * step; p.y += p.vy * step;
+    if (p.y > HUD + VIEWH + 6 || p.x > VW + 30 || p.x < -30) {
+      if (wet && WX.splash.length < (red ? 10 : 36) && Math.random() < 0.6) WX.splash.push({ x: p.x, y: HUD + 20 + Math.random() * (VIEWH - 30), vx: 0, vy: 0, s: 0, ph: 0, life: 0.25 });
+      WX.ps[n] = wxSpawn(k, false); continue;
+    }
+    if (vertical) {
+      const len = p.s, ang = Math.atan2(p.vy, wind);
+      ctx.strokeStyle = k === "drizzle" ? "rgba(170,200,255,0.45)" : "rgba(180,210,255,0.55)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - Math.cos(ang) * len, p.y - Math.sin(ang) * len); ctx.stroke();
+    } else {
+      ctx.fillStyle = k === "blizzard" ? "rgba(245,250,255,0.85)" : "rgba(255,255,255,0.9)";
+      if (k === "blizzard" && wind > 30) { ctx.strokeStyle = "rgba(240,248,255,0.55)"; ctx.lineWidth = p.s; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - wind * 0.06, p.y - p.vy * 0.06); ctx.stroke(); }
+      else { ctx.fillRect(Math.round(p.x), Math.round(p.y), p.s, p.s); if (p.s >= 2 && n % 5 === 0) { ctx.fillStyle = "rgba(170,230,255,0.9)"; ctx.fillRect(Math.round(p.x) + 1, Math.round(p.y) - 1, 1, 1); } }
+    }
+  }
+  // splashes
+  for (let n = WX.splash.length - 1; n >= 0; n--) {
+    const s = WX.splash[n]; s.life -= step;
+    if (s.life <= 0) { WX.splash.splice(n, 1); continue; }
+    const q = 1 - s.life / 0.25;
+    ctx.strokeStyle = "rgba(190,220,255," + (0.6 * (1 - q)).toFixed(2) + ")"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(s.x, s.y, 1 + q * 4, 0.5 + q * 1.5, 0, 0, 6.2832); ctx.stroke();
+  }
+  if (k === "blizzard" || k === "drift") { // whiteout haze at the edges
+    const vg = ctx.createRadialGradient(VW / 2, HUD + VIEWH / 2, VW * 0.25, VW / 2, HUD + VIEWH / 2, VW * 0.75);
+    vg.addColorStop(0, "rgba(230,240,255,0)"); vg.addColorStop(1, "rgba(230,240,255," + (k === "blizzard" ? 0.32 : 0.18) + ")");
+    ctx.fillStyle = vg; ctx.fillRect(0, HUD, VW, VIEWH);
+  }
+  // 3. lightning
+  if (k === "storm" || k === "lightning") {
+    WX.nextBolt -= step;
+    if (WX.nextBolt <= 0) {
+      const near = k === "storm";
+      WX.nextBolt = near ? 3.5 + Math.random() * 6 : 5 + Math.random() * 9;
+      WX.flash = near ? 1 : 0.45;
+      if (near) {
+        const pts: number[] = []; let x = 20 + Math.random() * (VW - 40), y = HUD;
+        pts.push(x, y);
+        while (y < HUD + VIEWH * (0.55 + Math.random() * 0.35)) { x += (Math.random() - 0.5) * 22; y += 8 + Math.random() * 12; pts.push(x, y); }
+        WX.bolt = pts; WX.boltT = 0.22;
+      }
+      WX.thunderAt = near ? 0.15 + Math.random() * 0.4 : 0.8 + Math.random() * 1.2; WX.thunderV = near ? 0 : 1;
+    }
+    if (WX.thunderAt > 0) { WX.thunderAt -= step; if (WX.thunderAt <= 0) { try { g.sfx("thunder", WX.thunderV); } catch { /* ignore */ } } }
+    if (WX.bolt && WX.boltT > 0) {
+      WX.boltT -= step;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 2; ctx.shadowColor = "#a0c0ff"; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.moveTo(WX.bolt[0], WX.bolt[1]); for (let i = 2; i < WX.bolt.length; i += 2) ctx.lineTo(WX.bolt[i], WX.bolt[i + 1]); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    if (WX.flash > 0) {
+      const near = k === "storm";
+      const a = WX.flash * (near ? (red ? 0.18 : 0.55) : (red ? 0.06 : 0.16));
+      if (near) { ctx.fillStyle = "rgba(235,240,255," + a.toFixed(3) + ")"; ctx.fillRect(0, HUD, VW, VIEWH); }
+      else { const gr = ctx.createLinearGradient(0, HUD, 0, HUD + VIEWH * 0.6); gr.addColorStop(0, "rgba(210,190,255," + (a * 2.2).toFixed(3) + ")"); gr.addColorStop(1, "rgba(210,190,255,0)"); ctx.fillStyle = gr; ctx.fillRect(0, HUD, VW, VIEWH * 0.6); }
+      WX.flash = Math.max(0, WX.flash - step * (near ? 3.2 : 2.2));
+      if (near && WX.flash < 0.55 && WX.flash > 0.5 && Math.random() < 0.5) WX.flash = 0.8; // double-flicker
+    }
+  }
+  // 4. ambient sound (quiet, uses the normal SFX path so mute/volume apply)
+  if (wet || k === "wind" || k === "blizzard") {
+    WX.amb -= step;
+    if (WX.amb <= 0) { WX.amb = 1.4 + Math.random() * 1.2; try { g.sfx("wxamb", wet ? 0 : 1); } catch { /* ignore */ } }
+  }
+  // 5. floor-entry label
+  if (WX.label > 0) {
+    WX.label -= step;
+    const info = wxInfo(k)!;
+    const a = Math.min(1, WX.label * 1.5);
+    ctx.globalAlpha = a;
+    ctx.font = "7px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const txt = info.icon + " " + WX.labelTxt;
+    const w = ctx.measureText(txt).width + 12;
+    ctx.fillStyle = "rgba(8,12,24,0.82)"; ctx.fillRect(VW / 2 - w / 2, HUD + VIEWH - 22, w, 13);
+    ctx.strokeStyle = cold ? "#9fdcff" : wet ? "#7fa8ff" : k === "wind" ? "#d8b880" : "#c0a0ff"; ctx.lineWidth = 1; ctx.strokeRect(VW / 2 - w / 2 + 0.5, HUD + VIEWH - 21.5, w - 1, 12);
+    ctx.fillStyle = "#ffffff"; ctx.fillText(txt, VW / 2, HUD + VIEWH - 15);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+// ---- Floor cracks (cosmetic only: never changes walkability, never saved) ----
+// Stand in about one spot and keep fighting: cracks start under you and spread outward. More Prismatics and
+// more gear power = faster spread and a wider crater. Walk away and they stop growing and fade out.
+type FloorCrack = { k: number; p: number; a: number; s: number };
+const FC = { key: "", ax: -99, ay: -99, heat: 0, last: 0, cells: new Map<number, FloorCrack>() };
+const FLOOR_CRACK_CAP = 64;
+function floorCrackKey(g: Game): string { return g.depth + ":" + (g.area ?? "dungeon") + ":" + (g.vault ? "v" : ""); }
+function floorCrackOnStrike(g: Game): void {
+  if (g.mode !== "play" || g.area === "camp") return;
+  const key = floorCrackKey(g);
+  if (FC.key !== key) { FC.key = key; FC.cells.clear(); FC.heat = 0; FC.ax = -99; }
+  const h = g.hero;
+  if (Math.abs(h.x - FC.ax) + Math.abs(h.y - FC.ay) > 1) { FC.ax = h.x; FC.ay = h.y; FC.heat = 0; }
+  const np = prisEquippedCount(g), wp = wallPower(g);
+  FC.heat += 1 + 0.35 * np + 1.5 * wp;
+  FC.last = performance.now();
+  const maxR = Math.min(4.6, 0.8 + 0.42 * np + 1.6 * wp);
+  const rad = Math.min(maxR, 0.25 + FC.heat * 0.045);
+  const R0 = Math.ceil(rad);
+  for (let dy = -R0; dy <= R0; dy++) for (let dx = -R0; dx <= R0; dx++) {
+    const x = FC.ax + dx, y = FC.ay + dy;
+    if (!inb(x, y) || g.map[y * MW + x] === 0) continue;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > rad) continue;
+    const k = y * MW + x;
+    let c = FC.cells.get(k);
+    if (!c) {
+      if (FC.cells.size >= FLOOR_CRACK_CAP) continue;
+      c = { k, p: 0, a: 1, s: ((x * 73856093) ^ (y * 19349663) ^ (g.depth * 83492791)) >>> 0 };
+      FC.cells.set(k, c);
+    }
+    c.a = 1;
+    c.p = Math.min(1, Math.max(c.p, Math.min(1, (rad - d) / 1.4 + 0.15)));
+  }
+}
+function floorCrackTick(g: Game, dt: number): void {
+  if (!FC.cells.size) return;
+  if (FC.key !== floorCrackKey(g)) { FC.cells.clear(); FC.heat = 0; return; }
+  const h = g.hero;
+  const away = Math.abs(h.x - FC.ax) + Math.abs(h.y - FC.ay) > 1;
+  const idle = performance.now() - FC.last > 5000;
+  if (!away && !idle) return;
+  FC.heat = Math.max(0, FC.heat - dt * 20);
+  for (const [k, c] of FC.cells) { c.a -= dt / (away ? 3.5 : 9); if (c.a <= 0) FC.cells.delete(k); }
+}
+function drawFloorCrack(ctx: CanvasRenderingContext2D, sx: number, sy: number, c: FloorCrack, cx: number, cy: number): void {
+  // Fissures radiate away from the crater centre; deeper stages add more branches and a dark core.
+  const st = Math.min(4, 1 + Math.floor(c.p * 4));
+  let s = c.s;
+  const rnd = (): number => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, c.a)) * (0.45 + 0.13 * st);
+  ctx.strokeStyle = "rgba(14,10,8,0.95)";
+  ctx.lineWidth = st >= 3 ? 1.4 : 1;
+  const ang0 = Math.atan2(sy + 12 - cy, sx + 12 - cx);
+  const n = 1 + st;
+  for (let i = 0; i < n; i++) {
+    let x = sx + 12 + (rnd() - 0.5) * 10, y = sy + 12 + (rnd() - 0.5) * 10;
+    let a = (isFinite(ang0) ? ang0 : rnd() * 6.28) + (rnd() - 0.5) * 2.2;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    const segs = 2 + st;
+    for (let j = 0; j < segs; j++) {
+      a += (rnd() - 0.5) * 1.1;
+      x += Math.cos(a) * (3 + rnd() * 3); y += Math.sin(a) * (3 + rnd() * 3);
+      x = Math.max(sx, Math.min(sx + 24, x)); y = Math.max(sy, Math.min(sy + 24, y));
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  if (st >= 4) { ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(sx + 9, sy + 10, 5, 3); ctx.fillRect(sx + 11, sy + 8, 2, 7); }
+  if (st >= 3) { ctx.strokeStyle = "rgba(255,240,210,0.18)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx + 5, sy + 6); ctx.lineTo(sx + 9, sy + 9); ctx.stroke(); }
+  ctx.restore();
+}
+// Each equipped Prismatic adds wall-crack chance and crack size on top of the gear-power chipping.
+const PRIS_WALL_CH = [0.035, 0.05, 0.08], PRIS_WALL_ADD = 0.025;
 function wallHitChip(g: Game, tg: En, k: number): number {
+  floorCrackOnStrike(g);
   if (!wallDmgOk(g)) return 0;
   const wp = wallPower(g);
-  const chance = wp * (k >= 2 ? 0.7 : k === 1 ? 0.4 : 0.05);
+  const np = prisEquippedCount(g);
+  const chance = Math.min(0.97, wp * (k >= 2 ? 0.7 : k === 1 ? 0.4 : 0.05) + np * PRIS_WALL_CH[Math.min(2, k)]);
   if (!(R() < chance)) return 0;
   const h = g.hero;
   const dx = Math.sign(tg.x - h.x), dy = Math.sign(tg.y - h.y);
   const cand: number[][] = [[tg.x + dx, tg.y + dy], [tg.x + dx, tg.y], [tg.x, tg.y + dy]];
   for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) cand.push([tg.x + ox, tg.y + oy]);
-  const add = wp * (k >= 2 ? 0.3 : k === 1 ? 0.18 : 0.08);
+  const add = wp * (k >= 2 ? 0.3 : k === 1 ? 0.18 : 0.08) + np * PRIS_WALL_ADD;
+  if (np >= 3) for (let oy = -2; oy <= 2; oy++) for (let ox = -2; ox <= 2; ox++) if (Math.abs(ox) === 2 || Math.abs(oy) === 2) cand.push([tg.x + ox, tg.y + oy]);
   for (const [x, y] of cand) if (crackWall(g, x, y, add, WALL_N_CAP, h.ax * TS + 12, h.ay * TS + 12, wp * 0.5)) return add;
   return 0;
 }
@@ -12575,7 +15052,7 @@ function castUlt(g: Game, slot?: EqKey): boolean {
   const h = g.hero;
   const targets = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x] === 1);
   const hx = h.ax * TS + 12, hy = h.ay * TS + 12;
-  ultFx(g, u, hx, hy, targets, !!w.golden, 1, 220, 1, 0);
+  ultShowStart(g, u, hx, hy, targets, !!w.golden);
   let killed = 0;
   for (const e of targets) {
     const dmg = ultDamage(g, st, w, e);
@@ -12589,6 +15066,7 @@ function castUlt(g: Game, slot?: EqKey): boolean {
   }
   setUltCd(g, pick.slot, now + ultCdLen(g));
   wallUltCrack(g);
+  ultTerrain(g, false);
   g.flash = w.golden ? 0.9 : 0.55;
   g.flashC = w.golden ? GOLD : ELC[u.el];
   g.shake = w.golden ? 16 : 10;
@@ -12626,7 +15104,7 @@ function merchBuy(g: Game, id: MerchId, sub?: Kind): string {
 function polishCost(_it?: Item): number { return 0; }
 function polishItem(_g?: Game, _bi?: number): string { return "Gem polishing has been removed."; }
 function tileNotWall(g: Game, x: number, y: number): boolean {
-  return inb(x, y) && g.map[y * MW + x] !== 0;
+  return inb(x, y) && g.map[y * MW + x] !== 0 && !hzBlocksHero(g, x, y);
 }
 // Last analog stick offset (pixels). Used only to break ties when a blocked
 // diagonal can slide on either axis. Keyboard diagonals have equal |dx|,|dy|.
@@ -12712,13 +15190,23 @@ function act(g: Game, dx: number, dy: number): void {
     }
   }
   if (fired && g.rt) g.acd = Math.max(g.acd ?? 0, RT_ATK);
-  if (slid.blocked || !inb(nx, ny) || g.map[ny * MW + nx] === 0) { h.bump = 0.5; h.bdx = wantDx; h.bdy = wantDy; if (g.wallBreak) tryWallDig(g, wantDx, wantDy); return; }
+  if (g.artCave && !g.artCave.open && g.artCave.dx === h.x + wantDx && g.artCave.dy === h.y + wantDy && artInside(g, h.x, h.y)) { h.bump = 0.6; h.bdx = wantDx; h.bdy = wantDy; openArtifactDoor(g); g.notify(); return; }
+  if (slid.blocked || !inb(nx, ny) || g.map[ny * MW + nx] === 0) {
+    h.bump = 0.5; h.bdx = wantDx; h.bdy = wantDy;
+    const hx = h.x + wantDx, hy = h.y + wantDy;
+    if (hzBlocksHero(g, hx, hy)) { hzBlockedMsg(g, hzAt(g, hx, hy)); return; }
+    if (g.wallBreak) tryWallDig(g, wantDx, wantDy);
+    return;
+  }
   if (enemyAt(g, nx, ny)) { h.bump = 0.8; h.bdx = dx; h.bdy = dy; return; }
   const ch = chestAt(g, nx, ny);
   if (ch) { h.bump = 1; h.bdx = dx; h.bdy = dy; openChest(g, ch); endTurn(g); return; }
   if (g.merchant && g.merchant.x === nx && g.merchant.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; g.shopOpen = true; g.sfx("chest"); msg(g, "Chest Merchant: \"A chest for every kind of gear. Each holds one item.\"", "#ffd080"); g.notify(); return; }
   if (g.stashAt && g.stashAt.x === nx && g.stashAt.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; openStash(g); return; }
   if (g.restAt && g.restAt.x === nx && g.restAt.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; restAtCamp(g); return; }
+  if (g.shrine && g.shrine.x === nx && g.shrine.y === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; if (g.shrine.used) msg(g, "The shrine is cracked and silent - its power is spent.", "#a09090"); else if (!g.swarm) startSwarm(g); g.notify(); return; }
+  if (g.artCave && !g.artCave.taken && g.artCave.cx === nx && g.artCave.cy === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; discoverArtifact(g); g.notify(); return; }
+  if (g.trophyAt && g.trophyAt.x === nx && g.trophyAt.y === ny) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; g.trophyOpen = true; g.notify(); return; }
   if (g.fireAt && g.fireAt.x === nx && g.fireAt.y === ny) { h.bump = 0.4; h.bdx = dx; h.bdy = dy; msg(g, "The campfire warms you.", "#ffb040"); g.notify(); return; }
   const px = h.x, py = h.y;
   h.x = nx; h.y = ny;
@@ -12726,6 +15214,7 @@ function act(g: Game, dx: number, dy: number): void {
   for (const p of allPassives(g.eq)) if (p.ty === "steps") { addGround(g, px, py, p.el, 3 + (p.mod === 4 ? 2 : 0), Math.max(1, Math.round(st.atk * p.pw * 0.6 * (p.mod === 3 ? 1.6 : 1)))); if (g.turn % 3 === 0) g.sfx("mx", pasSnd(p)); }
   g.sfx("step");
   pickup(g);
+  hzAfterStep(g, dx, dy, false);
   if (g.map[ny * MW + nx] === 2) msg(g, "Stairs down! Tap \u2B07 Stairs (or tap yourself).", "#80ffff");
   if (g.map[ny * MW + nx] === TILE_UP) msg(g, "Stairs up! Tap \u25B2 Back (or the Back button) to farm the floor above.", "#80ffd0");
   if (portalAt(g, nx, ny)) { /* handled above */ }
@@ -12898,6 +15387,10 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
   background-size: 140% 140%;
   animation: prisSpark 1.1s linear infinite;
   mix-blend-mode: screen; opacity: 1; }
+.dc-cell.gemhi { position: relative; overflow: hidden; }
+.dc-cell.gemhi::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: radial-gradient(circle at 22% 22%, #fff 0 1.1px, transparent 1.7px), radial-gradient(circle at 78% 70%, #fff 0 1.1px, transparent 1.7px);
+  background-size: 140% 140%; animation: prisSpark 1.6s linear infinite; mix-blend-mode: screen; }
 @keyframes prisSpark { 0% { background-position: 0 0, 20% 40%, 80% 10%; } 100% { background-position: 110% 90%, 90% -10%, -10% 100%; } }
 @keyframes pr { 0%, 100% { border-color: #ff3040; box-shadow: 0 0 16px #ff3040, 0 0 4px #fff; } 17% { border-color: #ffd020; box-shadow: 0 0 16px #ffd020, 0 0 4px #fff; } 33% { border-color: #20ff60; box-shadow: 0 0 16px #20ff60, 0 0 4px #fff; } 50% { border-color: #20d0ff; box-shadow: 0 0 16px #20d0ff, 0 0 4px #fff; } 67% { border-color: #a040ff; box-shadow: 0 0 16px #a040ff, 0 0 4px #fff; } 83% { border-color: #ff40c8; box-shadow: 0 0 16px #ff40c8, 0 0 4px #fff; } }
 @keyframes hue { from { filter: hue-rotate(0deg) saturate(1.85) brightness(1.12); } to { filter: hue-rotate(360deg) saturate(1.85) brightness(1.12); } }
@@ -12965,7 +15458,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-cell img { width: 100%; height: 100%; image-rendering: pixelated; display: block; pointer-events: none; }
 .dc-cell.sel { outline: 2px solid #ffffff; outline-offset: 1px; }
 .dc-cell .lb { position: absolute; left: 0; right: 0; bottom: 1px; font-size: 8px; color: #888; text-align: center; }
-.dc-pips { position: absolute; left: 2px; right: 2px; bottom: 11px; display: flex; justify-content: center; gap: 2px; pointer-events: none; z-index: 6; }
+.dc-pips { position: absolute; left: 2px; right: 2px; bottom: 11px; display: flex; flex-wrap: wrap-reverse; justify-content: center; gap: 1px 2px; max-width: 44px; margin: 0 auto; pointer-events: none; z-index: 6; }
 .dc-pips i { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #888; display: block; box-sizing: border-box; box-shadow: 0 0 0 1px #000, 0 0 2px #fff; background: transparent; }
 .dc-sm { font-size: 10px; color: #a8a0b8; }
 .dc-chip { background: #1e1a2a; border-radius: 6px; padding: 3px 5px; font-size: 10px; }
@@ -13693,6 +16186,408 @@ try {
   };
 } catch { /* ignore */ }
 
+
+function caveSpawnTest(n: number, kinds?: string[]): Record<string, unknown> {
+  const g = LIVE; if (!g) return { ok: false, error: "no game" };
+  const ks = kinds && kinds.length ? kinds : ["vault", "svault", "goblin", "sgoblin", "secret"];
+  const out = { ok: true, floors: 0, spawned: 0, skipped: 0, announced: 0, alerts: 0, bad: [] as Record<string, unknown>[], missed: [] as Record<string, unknown>[], placeFail: 0, oldRuleOffscreen: 0, oldRuleOffscreenOldAlert: 0, byKind: {} as Record<string, number>, view: { vw: VW, viewH: VIEWH } };
+  const prevSave = GIB_SKIP_SAVE; GIB_SKIP_SAVE = true;
+  try {
+    for (let i = 0; i < n; i++) {
+      const kind = ks[i % ks.length];
+      let d = 3 + ((i * 7) % 70); if (isActFloor(d)) d++;
+      g.depth = d; g.front = Math.max(floorFront(g), d); g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null;
+      CAVE_FORCE = kind;
+      try { genFloor(g); } finally { CAVE_FORCE = ""; }
+      out.floors++;
+      const p = kind === "vault" || kind === "svault" ? (g.portal && g.portal.kind === "vault" ? g.portal : null) : kind === "secret" ? g.secret : g.gobPort;
+      if (!p) { if ((GENINFO.rooms || []).length <= 2 && (kind === "vault" || kind === "svault" || kind === "goblin" || kind === "sgoblin")) out.skipped++; else out.placeFail++; continue; }
+      out.spawned++;
+      out.byKind[kind] = (out.byKind[kind] || 0) + 1;
+      const wantSup = kind === "svault" || kind === "sgoblin";
+      if (!!p.sup !== wantSup) out.bad.push({ i, kind, why: "sup flag", sup: p.sup });
+      if (!portalCells(p).every((t) => g.map[t.y * MW + t.x] === 1) || !portalReachable(g, p)) out.bad.push({ i, kind, why: "not on floor / unreachable", p: { ...p } });
+      // Walk the hero to the portal one tile at a time, exactly as sight + camera would update in play.
+      g.warnPort = ""; g.warn = undefined; g.warnGobs = g.en.map((e: En) => e.id);
+      g.hero.x = g.hero.ax = g.hero.x; // keep spawn tile
+      CAVE_ALERT_LOG = [];
+      // restart from spawn: recompute sight once (may already announce)
+      computeVis(g);
+      const target = portalCells(p)[0];
+      const prev = new Int32Array(MW * MH).fill(-1);
+      const st = g.hero.y * MW + g.hero.x; prev[st] = st;
+      const q = [st];
+      for (let k = 0; k < q.length; k++) {
+        const c = q[k], x = c % MW, y = (c / MW) | 0;
+        if (x === target.x && y === target.y) break;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy; if (!inb(nx, ny)) continue;
+          const kk = ny * MW + nx; if (prev[kk] >= 0 || g.map[kk] === 0) continue;
+          prev[kk] = c; q.push(kk);
+        }
+      }
+      const path: number[] = [];
+      let cur = target.y * MW + target.x;
+      if (prev[cur] < 0) { out.bad.push({ i, kind, why: "no path" }); CAVE_ALERT_LOG = null; continue; }
+      while (cur !== st) { path.push(cur); cur = prev[cur]; }
+      path.reverse();
+      let sawOld = false;
+      for (const c of path) {
+        const onP = anyPortalAt(g, c % MW, (c / MW) | 0);
+        if (onP === p) break; // stepping on it would enter the cave
+        if (onP) continue;    // another portal on the way: walk around it
+        g.hero.x = g.hero.ax = c % MW; g.hero.y = g.hero.ay = (c / MW) | 0;
+        computeVis(g);
+        if (!sawOld && portalVisOf(p, g.vis)) { sawOld = true; if (!portalOnScreen(g, p)) out.oldRuleOffscreen++; }
+      }
+      const log = CAVE_ALERT_LOG || [];
+      CAVE_ALERT_LOG = null;
+      out.alerts += log.length;
+      const mine = log.filter((a: Record<string, unknown>) => a.px === p.x && a.py === p.y);
+      if (mine.length) out.announced++; else out.missed.push({ i, kind, d, p: { x: p.x, y: p.y }, steps: path.length });
+      for (const a of log) if (!(a.exists && a.onScreen && a.drawn && a.reachable && a.onFloor)) out.bad.push({ i, kind, why: "bad alert", a });
+    }
+  } finally { GIB_SKIP_SAVE = prevSave; CAVE_FORCE = ""; CAVE_ALERT_LOG = null; }
+  out.ok = out.bad.length === 0 && out.missed.length === 0 && out.placeFail === 0;
+  return out;
+}
+function caveState(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false };
+  const pp = (p: PortalSpot | null | undefined): Record<string, unknown> | null => p ? { x: p.x, y: p.y, kind: p.kind || "", sup: p.sup ? 1 : 0, cs: p.cs ? JSON.parse(JSON.stringify(p.cs, (k: string, v: unknown) => (k === "item" && v ? "item" : v))) : null, label: portalLabelFor(g, p) } : null;
+  return {
+    ok: true, depth: g.depth, area: g.area ?? "dungeon", inVault: !!g.vault, sup: inSuperCave(g), hx: g.hero.x, hy: g.hero.y, wallOk: wallDmgOk(g),
+    portal: pp(g.portal), secret: pp(g.secret), gobPort: pp(g.gobPort),
+    chests: g.chests.length, closed: g.chests.filter((c: Chest) => !c.open).length, chestRar: g.chests.map((c: Chest) => c.rar),
+    drops: g.drops.length, goblins: g.en.filter((e: En) => e.hp > 0).length, royal: g.en.filter((e: En) => e.hp > 0 && e.sgc).length,
+    king: g.en.filter((e: En) => e.hp > 0 && e.sgc === 2).map((e: En) => ({ hp: e.mhp, atk: e.atk, name: e.name })),
+    warn: g.warn ? g.warn.txt : "", banner: g.banner ? (g.banner as { txt?: string }).txt ?? "" : "",
+  };
+}
+try {
+  (window as unknown as { __ED16_CAVES?: object }).__ED16_CAVES = {
+    rates: { LOOT_CAVE_CH, SUPER_LOOT_CH, GOBLIN_CAVE_CH: 0.04, SUPER_GOB_CH, SECRET_PORTAL_CH },
+    spawnTest: (n: number, kinds?: string[]) => caveSpawnTest(n | 0, kinds),
+    state: () => caveState(LIVE),
+    // Generate a floor with the given cave forced on it (real genFloor path) and stand the hero 3 tiles from it.
+    floor: (kind: string, depth = 12): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      for (let tries = 0; tries < 30; tries++) {
+        let d = depth + tries; if (isActFloor(d)) d++;
+        g.depth = d; g.front = Math.max(floorFront(g), d); g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null;
+        CAVE_FORCE = kind;
+        try { genFloor(g); } finally { CAVE_FORCE = ""; }
+        const p = kind === "vault" || kind === "svault" ? g.portal : kind === "secret" ? g.secret : g.gobPort;
+        if (!p) continue;
+        g.en = g.en.filter((e: En) => Math.abs(e.x - p.x) + Math.abs(e.y - p.y) > 6);
+        const spots = [[p.x - 3, p.y], [p.x + 4, p.y], [p.x, p.y + 4], [p.x, p.y - 3], [p.x - 2, p.y + 2]];
+        for (const [x, y] of spots) if (walkable(g, x, y) && !anyPortalAt(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; break; }
+        g.warnPort = ""; g.warn = undefined;
+        IP.camOk = false;
+        computeVis(g);
+        return caveState(g);
+      }
+      return { ok: false, error: "could not place" };
+    },
+    use: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const p = g.vault || g.area === "goblin" || g.area === "arena" ? g.portal : (g.portal && g.portal.kind === "vault" ? g.portal : g.gobPort || g.secret);
+      if (!p) return { ok: false, error: "no portal" };
+      tryUsePortal(g, p.x, p.y);
+      IP.camOk = false;
+      return caveState(g);
+    },
+    usePortal: (which: string): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const p = which === "secret" ? g.secret : which === "goblin" ? g.gobPort : g.portal;
+      if (!p) return { ok: false, error: "no portal " + which };
+      tryUsePortal(g, p.x, p.y);
+      IP.camOk = false;
+      return caveState(g);
+    },
+    openChests: (k: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const before = { gold: g.gold, drops: g.drops.length };
+      const rars: number[] = [];
+      const seenIds = new Set<number>();
+      for (const it of g.bag) seenIds.add(it.id);
+      for (const k2 of EQK) { const it = g.eq[k2]; if (it) seenIds.add(it.id); }
+      for (const d of g.drops) if (d.item) seenIds.add(d.item.id);
+      const autoEq = g.autoEq; g.autoEq = false;
+      let n = 0;
+      for (const c of g.chests) { if (n >= k) break; if (!c.open) { openChest(g, c); n++; } }
+      g.autoEq = autoEq;
+      for (const d of g.drops) if (d.item && !seenIds.has(d.item.id) && !isGem(d.item)) rars.push(d.item.rar);
+      for (const it of g.bag) if (!seenIds.has(it.id) && !isGem(it)) rars.push(it.rar);
+      for (const k2 of EQK) { const it = g.eq[k2]; if (it && !seenIds.has(it.id)) rars.push(it.rar); }
+      g.bag = g.bag.filter((it: Item) => seenIds.has(it.id));
+      return { ...caveState(g), opened: n, goldGain: g.gold - before.gold, itemRars: rars };
+    },
+    killGoblins: (k: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const before = g.gold;
+      let n = 0;
+      for (const e of g.en) { if (n >= k) break; if (e.hp > 0) { e.hp = 0; kill(g, e); n++; } }
+      g.en = g.en.filter((e: En) => e.hp > 0);
+      const rars: number[] = []; for (const d of g.drops) if (d.item) rars.push(d.item.rar);
+      return { ...caveState(g), killed: n, goldGain: g.gold - before, itemRars: rars };
+    },
+    killBosses: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      for (const e of g.en) if (e.hp > 0) { e.hp = 0; kill(g, e); }
+      g.en = g.en.filter((e: En) => e.hp > 0);
+      return caveState(g);
+    },
+    lootAll: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.drops = []; return caveState(g); },
+    code: (): string => { const g = LIVE; return g && g.mode === "play" ? makeCode(g) : ""; },
+    load: (code: string): Record<string, unknown> => { const g = decodeCode(String(code || ""), LIVE); if (g && installTestGame) installTestGame(g); IP.camOk = false; return caveState(LIVE); },
+    // Leave this floor for the next one and come back (the snapshot path players use with stairs).
+    downAndBack: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      descend(g); const mid = caveState(g); goBack(g, true);
+      IP.camOk = false;
+      return { mid, back: caveState(LIVE) };
+    },
+    shotSetup: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.banner = null; IP.camOk = false; return caveState(g); },
+  };
+} catch { /* ignore */ }
+
+
+// ---------- test hooks for items 12-22 ----------
+let WX_FORCE: WxKind | "" | null = null;
+function hzCounts(g: Game): Record<string, number> {
+  const o: Record<string, number> = { water: 0, lava: 0, ice: 0, obs: 0, pit: 0 };
+  if (g.hz) for (const v of g.hz) { if (v === HZ_WATER) o.water++; else if (v === HZ_LAVA) o.lava++; else if (v === HZ_ICE) o.ice++; else if (v === HZ_OBS) o.obs++; else if (v === HZ_PIT) o.pit++; }
+  return o;
+}
+// Every required target reachable from the hero without the affix (water/lava blocked; ice/obsidian/pit walkable).
+function hzRequiredOk(g: Game): { ok: boolean; bad: string[] } {
+  const hz = g.hz || new Uint8Array(MW * MH);
+  const r = hzBfs(g, hz, g.hero.x, g.hero.y);
+  const bad: string[] = [];
+  const adjOk = (x: number, y: number): boolean => { if (inb(x, y) && r[y * MW + x]) return true; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (inb(x + dx, y + dy) && r[(y + dy) * MW + x + dx]) return true; return false; };
+  for (let k = 0; k < MW * MH; k++) if ((g.map[k] === 2 || g.map[k] === TILE_UP) && !r[k] && !adjOk(k % MW, (k / MW) | 0)) bad.push("stairs@" + (k % MW) + "," + ((k / MW) | 0));
+  for (const p of allPortals(g)) if (!portalCells(p).some((c) => adjOk(c.x, c.y))) bad.push("portal@" + p.x + "," + p.y);
+  for (const c of g.chests) if (!c.open && !adjOk(c.x, c.y)) bad.push("chest@" + c.x + "," + c.y);
+  if (g.shrine && !adjOk(g.shrine.x, g.shrine.y)) bad.push("shrine");
+  for (let k = 0; k < MW * MH; k++) if (hz[k] === HZ_WATER || hz[k] === HZ_LAVA) { if (g.map[k] !== 1) bad.push("haz-on-nonfloor"); }
+  if (g.artCave && g.artCave.ox !== undefined) { const a = g.artCave; const fx = a.ox! - a.sx!, fy = a.oy! - a.sy!; if (!r[fy * MW + fx]) bad.push("art-front"); }
+  return { ok: bad.length === 0, bad: bad.slice(0, 8) };
+}
+// Artifact pocket access proof.
+function artAccessTest(g: Game): Record<string, unknown> {
+  const a = g.artCave; if (!a || a.ox === undefined) return { ok: false, error: "no cave" };
+  const at = (s0: number, q0: number): number[] => [a.ox! + s0 * a.sx! - q0 * a.sy!, a.oy! + s0 * a.sy! + q0 * a.sx!];
+  const [lx, ly] = at(3, 0), [fx, fy] = at(-1, 0);
+  const hz0 = g.hz ? g.hz.slice() : new Uint8Array(MW * MH), map0 = g.map.slice(), cr0 = g.cracks ? g.cracks.slice() : null, hx = g.hero.x, hy = g.hero.y, ch0 = g.chests.slice();
+  const restore = (): void => { g.hz = hz0.slice(); g.map = map0.slice(); g.cracks = cr0 ? cr0.slice() : undefined; g.hero.x = g.hero.ax = hx; g.hero.y = g.hero.ay = hy; g.chests = ch0.slice(); };
+  const reachNo = (): boolean => !!hzBfs(g, g.hz || new Uint8Array(MW * MH), g.hero.x, g.hero.y)[ly * MW + lx];
+  const reachWW = (): boolean => { const hz = (g.hz || new Uint8Array(MW * MH)).map((v: number) => (v === HZ_LAVA || v === HZ_WATER ? 0 : v)); return !!hzBfs(g, hz, g.hero.x, g.hero.y)[ly * MW + lx]; };
+  const out: Record<string, unknown> = { ok: true, front: [fx, fy], landing: [lx, ly], door: [a.dx, a.dy], pedestal: [a.cx, a.cy], prize: a.rc ? "chest" : "artifact" };
+  out.noAffix = reachNo();
+  out.withAffix = reachWW();
+  // hero-move check: step by step without the affix from the front tile into the moat must be refused
+  g.hero.x = g.hero.ax = fx; g.hero.y = g.hero.ay = fy;
+  out.moveBlockedNoAffix = hzBlocksHero(g, at(0, 0)[0], at(0, 0)[1]);
+  // every wall-destruction path against every tile of the pocket block
+  let broke = 0, total = 0;
+  const wb = g.wallBreak; g.wallBreak = true;
+  for (let s0 = 0; s0 <= ART_POCKET_S; s0++) for (let q0 = -ART_POCKET_Q; q0 <= ART_POCKET_Q; q0++) {
+    const [x, y] = at(s0, q0); if (g.map[y * MW + x] !== 0) continue;
+    total++;
+    crackWall(g, x, y, 5, 99, x * TS, y * TS, 1); ripWall(g, x, y, x * TS, y * TS, 1, 10); breakWallTile(g, x, y);
+    for (let i = 0; i < 40; i++) pushDig(g, x, y, 0.2);
+    if (g.map[y * MW + x] !== 0) broke++;
+  }
+  // Paramount wall rip + single ult crack from right in front of the moat
+  paraRipTo(g, 30, 4000); wallUltCrack(g);
+  for (let s0 = 0; s0 <= ART_POCKET_S; s0++) for (let q0 = -ART_POCKET_Q; q0 <= ART_POCKET_Q; q0++) { const [x, y] = at(s0, q0); if (map0[y * MW + x] === 0 && g.map[y * MW + x] !== 0) broke++; }
+  g.wallBreak = wb;
+  out.lockedWalls = total; out.wallsBroken = broke;
+  g.hero.x = g.hero.ax = hx; g.hero.y = g.hero.ay = hy;
+  out.noAffixAfterWallAttacks = reachNo();
+  // single ultimate (melts ice only) must not open it
+  g.hero.x = g.hero.ax = fx; g.hero.y = g.hero.ay = fy;
+  ultTerrain(g, false);
+  out.noAffixAfterUlt = reachNo();
+  // Paramount from the front tile turns the moat into obsidian -> reachable
+  const pr = ultTerrain(g, true);
+  out.paramountObsidian = pr.obs;
+  out.reachAfterParamount = reachNo();
+  restore();
+  return out;
+}
+try {
+  (window as unknown as { __ED16_HZ?: object }).__ED16_HZ = {
+    rates: { HZ_MIN_DEPTH, HZ_WATER_CH, HZ_LAVA_CH, WW_CH_GEAR, WW_CH_PET, ART_CH, SHRINE_CH, SHRINE_MIN_DEPTH, SWARM_TIERS, BURIED_CH, BURIED_CAP, WX_NONE_CH, WX_LIST: WX_LIST.map((w) => ({ k: w.k, w: w.w })) },
+    wx: (k: string | null): void => { WX_FORCE = k === null ? null : (k as WxKind | ""); },
+    force: (o: { haz?: string; art?: boolean; prize?: string; shrine?: boolean; buried?: boolean }): void => { HZ_FORCE = (o.haz || "") as "" | "water" | "lava" | "both"; ART_FORCE = !!o.art; ART_PRIZE = (o.prize || "") as "" | "art" | "chest"; SHRINE_FORCE = !!o.shrine; BURIED_FORCE = !!o.buried; },
+    gen: (depth: number, tier?: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      g.depth = depth; g.front = Math.max(floorFront(g), depth); g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null; g.mode = "play";
+      FLOOR_TIER_FORCE = typeof tier === "number" ? tier : null;
+      try { genFloor(g); } finally { FLOOR_TIER_FORCE = null; }
+      IP.camOk = false; computeVis(g);
+      return { ok: true, depth: g.depth, size: MW, wx: floorWx(g), hz: hzCounts(g), stats: { ...HZ_LAST }, req: hzRequiredOk(g), art: g.artCave ? { ...g.artCave } : null, shrine: g.shrine ? { ...g.shrine } : null, hero: [g.hero.x, g.hero.y] };
+    },
+    sim: (n: number, depth: number, tierMax?: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const res = { floors: 0, eligible: 0, water: 0, lava: 0, ice: 0, any: 0, tiles: { water: 0, lava: 0, ice: 0 }, rejected: 0, reqFail: 0, reqBad: [] as string[], art: 0, artChest: 0, shrine: 0, bySize: {} as Record<string, number> };
+      for (let i = 0; i < n; i++) {
+        let d = depth + (i % 40); if (isActFloor(d)) d++;
+        g.depth = d; g.area = "dungeon"; g.vault = null; g.mode = "play";
+        if (typeof tierMax === "number") FLOOR_TIER_FORCE = i % (tierMax + 1);
+        try { genFloor(g); } finally { FLOOR_TIER_FORCE = null; }
+        res.floors++;
+        res.bySize[String(MW)] = (res.bySize[String(MW)] || 0) + 1;
+        if (!isActFloor(d) && d >= HZ_MIN_DEPTH) res.eligible++;
+        const c = hzCounts(g);
+        if (c.water) res.water++; if (c.lava - (g.artCave ? 9 : 0) > 0) res.lava++; if (c.ice) res.ice++; if (c.water || c.lava || c.ice) res.any++;
+        res.tiles.water += c.water; res.tiles.lava += c.lava; res.tiles.ice += c.ice; res.rejected += HZ_LAST.rejected;
+        const rq = hzRequiredOk(g); if (!rq.ok) { res.reqFail++; if (res.reqBad.length < 6) res.reqBad.push(d + ":" + rq.bad.join("/")); }
+        if (g.artCave) { res.art++; if (g.artCave.rc) res.artChest++; }
+        if (g.shrine) res.shrine++;
+      }
+      return res;
+    },
+    state: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; return { hz: hzCounts(g), art: g.artCave ? { ...g.artCave } : null, arts: artsOf(g).length, hero: [g.hero.x, g.hero.y], ww: heroWW(g), slide: g.slide ? { ...g.slide } : null, onHz: hzAt(g, g.hero.x, g.hero.y), swarm: g.swarm ? { t: g.swarm.t, kills: g.swarm.kills, live: g.en.filter((e: En) => e.sw && e.hp > 0).length } : null, shrine: g.shrine ? { ...g.shrine } : null, chests: g.chests.length, buried: g.chests.filter((c: Chest) => c.bur).length, gems: ensureGemBag(g).length, bag: g.bag.length, drops: g.drops.length, gold: g.gold, size: MW }; },
+    artAccess: (): Record<string, unknown> => { const g = LIVE; return g ? artAccessTest(g) : { ok: false }; },
+    goto: (x: number, y: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.slide = null; IP.camOk = false; computeVis(g); return { ok: true }; },
+    gotoFront: (back = 1): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a || a.ox === undefined) return { ok: false }; const x = a.ox - a.sx! * back, y = a.oy - a.sy! * back; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); return { ok: true, x, y, dir: [a.sx, a.sy] }; },
+    ww: (on: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (!g.eq.chest) g.eq.chest = makeItem(g.depth, 3, "chest" as Kind); if (on) g.eq.chest.ww = 1; else { for (const k of EQK) { const it = g.eq[k]; if (it) delete it.ww; } } bustIcon(g.eq.chest); return { ok: true, ww: heroWW(g) }; },
+    step: (dx: number, dy: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.pcd = 0; g.acd = 0; g.qd = undefined; g.paused = false; g.mode = "play"; const fx = g.hero.x, fy = g.hero.y; act(g, dx, dy); return { ok: true, from: [fx, fy], to: [g.hero.x, g.hero.y], onHz: hzAt(g, g.hero.x, g.hero.y), slide: !!g.slide }; },
+    ult: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; prisArm(g); g.ultAts = {}; g.ultAt = 0; g.ultAtA = 0; const before = hzCounts(g); const ok = castUlt(g); return { ok, before, after: hzCounts(g) }; },
+    para: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; prisArm(g); g.ultAts = {}; g.paraAt = 0; g.para = null; const ok = castParamount(g); return { ok, before: hzCounts(g) }; },
+    terrain: (para: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const before = hzCounts(g); const r = ultTerrain(g, para); return { ok: true, before, r, after: hzCounts(g), req: hzRequiredOk(g) }; },
+    swarmStart: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; startSwarm(g); return { ok: true, live: g.en.filter((e: En) => e.sw).length }; },
+    swarmKill: (n: number): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; let k = 0; for (let i = 0; i < n * 3 && k < n; i++) { const e = g.en.find((q: En) => q.sw && q.hp > 0); if (!e) { swarmSpawnOne(g); continue; } e.hp = 0; kill(g, e); g.en = g.en.filter((q: En) => q.hp > 0); k++; } return { ok: true, killed: k, kills: g.swarm ? g.swarm.kills : -1 }; },
+    swarmEnd: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; const kills = g.swarm.kills; const d0 = g.drops.length, b0 = g.bag.length, gold0 = g.gold; const ae = g.autoEq; g.autoEq = false; endSwarm(g, false); g.autoEq = ae; const its = g.bag.slice(b0).concat(g.drops.slice(d0).map((d: Drop) => d.item).filter((x: Item | null): x is Item => !!x)); return { ok: true, kills, tier: swarmTierOf(kills), items: its.length, rars: its.map((x: Item) => x.rar), gold: g.gold - gold0, banner: g.banner ? g.banner.txt : "" }; },
+    swarmDie: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; heroDie(g); return { ok: true, swarm: !!g.swarm, used: g.shrine ? !!g.shrine.used : null }; },
+    openPedestal: (): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a) return { ok: false }; const arts0 = artsOf(g).length, d0 = g.drops.length, gold0 = g.gold; const idx = discoverArtifact(g); return { ok: true, idx, artsGained: artsOf(g).length - arts0, chestItems: g.drops.slice(d0).filter((d: Drop) => d.item).length, gold: g.gold - gold0, taken: !!a.taken, rc: !!a.rc, banner: g.banner ? g.banner.txt : "" }; },
+    openDoor: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.artCave) return { ok: false }; openArtifactDoor(g); return { ok: true }; },
+    setArts: (n: number): void => { const g = LIVE; if (g) g.arts = Array.from({ length: Math.max(0, Math.min(ART_N, n)) }, (_: unknown, i: number) => i); },
+    trophy: (open: boolean): void => { const g = LIVE; if (g) { g.trophyOpen = open; g.notify(); } },
+    buried: (n: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; let broken = 0, made = 0; for (let k = 0; k < MW * MH && broken < n; k++) { const x = k % MW, y = (k / MW) | 0; if (g.map[k] === 0 && canBreakWall(g, x, y) && Math.abs(x - g.hero.x) + Math.abs(y - g.hero.y) < 12) { const c0 = g.chests.length; breakWallTile(g, x, y); if (g.map[k] === 1) broken++; if (g.chests.length > c0) made++; } } return { ok: true, broken, made, buried: g.chests.filter((c: Chest) => c.bur).length }; },
+    petChestTarget: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const t = petLootTarget(g); return { ok: true, kind: t ? t.kind : null }; },
+    sockTest: (): Record<string, unknown> => {
+      const rows: Record<string, unknown>[] = [];
+      for (let n = 0; n <= 8; n++) for (const pat of ["none", "alt", "all", "first"]) {
+        const it = makeItem(60, 6, "chest" as Kind);
+        it.sk = Array.from({ length: n }, (_: unknown, i: number) => { const z: { c: number; g?: { typ: number; rar: number } } = { c: i % 7 }; const fill = pat === "all" || (pat === "alt" && i % 2 === 0) || (pat === "first" && i === 0); if (fill) z.g = { typ: i % 7, rar: 2 + (i % 5) }; return z; });
+        SOCK_DRAW_LOG.on = true; SOCK_DRAW_LOG.calls = [];
+        bustIcon(it); iconCanvas(it, true); const withP = SOCK_DRAW_LOG.calls.slice();
+        SOCK_DRAW_LOG.calls = []; iconCanvas(it, false); const noP = SOCK_DRAW_LOG.calls.slice();
+        SOCK_DRAW_LOG.on = false;
+        const want = it.sk.map((z: { g?: unknown }) => (z.g ? 1 : 0));
+        const drawn = withP.length ? withP[0].filled : [];
+        rows.push({ n, pat, calls: withP.length, circles: withP.length ? withP[0].n : 0, statesMatch: JSON.stringify(drawn) === JSON.stringify(want), pipFreeCalls: noP.length, layout: socketPipLayout(n, ICON, SOCK_PIP_ICON, 2).length });
+      }
+      const bad = rows.filter((r) => (r.n as number) > 0 ? (r.calls !== 1 || r.circles !== r.n || !r.statesMatch || r.pipFreeCalls !== 0 || r.layout !== r.n) : (r.calls !== 0 || r.pipFreeCalls !== 0));
+      return { ok: bad.length === 0, rows: rows.length, bad };
+    },
+    sockItems: (counts: number[]): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.autoEq = false; g.autoCombine = false; const ids: number[] = []; for (const n of counts) { const it = makeItem(Math.max(1, g.depth), 6, "chest" as Kind); it.sk = Array.from({ length: n }, (_: unknown, i: number) => (i % 2 === 0 || n > 8 ? { c: i % 7, g: { typ: i % 7, rar: 3 + (i % 4) } } : { c: (i + 2) % 7 })); g.bag.unshift(it); ids.push(it.id); } return { ok: true, ids }; },
+    sockFixed: (): Record<string, number> => ({ ...SOCK_FIXED }),
+    hzFx: (): number => HZFX.length,
+    near: (kind: string): Record<string, unknown> => hzNear(kind),
+    prisReport: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const row = (where: string, it: Item | null | undefined) => it && it.rar >= 7 ? { where, name: it.name, stars: it.st ? it.st.length : 0, mul: +prisStarMul(it).toFixed(3), oldMul: +prisStarMulOld(it.st ? it.st.length : 0).toFixed(3), rawAtk: it.atk, atk: itemAtk(it), rawDef: it.def, def: itemDef(it), sockets: it.sk ? it.sk.length : 0, gems: it.sk ? it.sk.filter((z: { g?: unknown }) => !!z.g).length : 0 } : null;
+      const out: unknown[] = [];
+      for (const k of Object.keys(g.eq) as EqKey[]) { const r = row("equipped:" + k, g.eq[k]); if (r) out.push(r); }
+      g.bag.forEach((it: Item) => { const r = row("bag", it); if (r) out.push(r); });
+      (g.stash || []).forEach((it: Item) => { const r = row("stash", it); if (r) out.push(r); });
+      const sk = { maxSockets: 0, over4: 0 };
+      for (const it of [...Object.values(g.eq), ...g.bag, ...(g.stash || [])] as (Item | null)[]) { if (it && it.sk) { sk.maxSockets = Math.max(sk.maxSockets, it.sk.length); if (it.sk.length > SOCK_MAX) sk.over4++; } }
+      return { ok: true, lvl: g.lvl, depth: g.depth, pris: out, sockFixed: { ...SOCK_FIXED }, sk, gemBag: ensureGemBag(g).length, arts: artsOf(g).length };
+    },
+    sizeSim: (n: number, depth: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const out: Record<string, unknown>[] = [];
+      for (let t = 0; t < FLOOR_SIZES.length; t++) {
+        FLOOR_TIER_FORCE = t;
+        let walk = 0, sc = 0, portals = 0, vault = 0, gob = 0, sec = 0, extra = 0;
+        for (let i = 0; i < n; i++) {
+          g.depth = depth + (isActFloor(depth) ? 1 : 0); genFloor(g);
+          let w = 0; for (let k = 0; k < g.map.length; k++) if (g.map[k] !== 0) w++;
+          walk += w; sc += floorPortalScale(g);
+          const ps = allPortals(g); portals += ps.length; extra += (g.xps || []).length;
+          for (const p of ps) { const k = (p as { kind?: string }).kind; if (k === "vault") vault++; else if (k === "goblin") gob++; else if (k === "secret") sec++; }
+          if (g.portal && g.portal.kind === "vault") { /* counted above */ }
+        }
+        out.push({ tier: t, name: FLOOR_SIZE_NAMES[t], size: FLOOR_SIZES[t], avgWalk: Math.round(walk / n), avgScale: +(sc / n).toFixed(2), cavePortalsPerFloor: +(portals / n).toFixed(3), extraPerFloor: +(extra / n).toFixed(3) });
+      }
+      FLOOR_TIER_FORCE = null;
+      return { ok: true, depth, n, probs: floorTierProbs(depth).map((x: number) => +x.toFixed(3)), rows: out };
+    },
+    ultCast: (id: number, crowd = 8): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      prisArm(g);
+      const w = g.eq.rh; if (!w) return { ok: false, error: "no rh" };
+      w.ult = Math.max(0, Math.min(49, id | 0)); w.golden = false;
+      // stage a crowd of sturdy foes in view so every impact has a target
+      const h = g.hero; let placed = 0;
+      for (const e of g.en) { if (placed >= crowd) break; for (let tries = 0; tries < 30; tries++) { const x = h.x + ri(11) - 5, y = h.y + ri(9) - 4; if ((x !== h.x || y !== h.y) && inb(x, y) && g.map[y * MW + x] === 1 && !enemyAt(g, x, y)) { e.x = e.ax = x; e.y = e.ay = y; e.hp = e.mhp = 1e15; e.awake = false; e.stun = 99; placed++; break; } } }
+      computeVis(g);
+      g.ultAts = {}; g.ultAt = 0; g.ultAtA = 0; g.paraAt = 0; g.banner = null; USHOWS.length = 0;
+      const nv = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x] === 1).length;
+      const ok = castUlt(g, "rh");
+      const u = ULTS[w.ult];
+      return { ok, id: w.ult, name: u.n, pat: u.pat, el: u.el, visible: nv, shows: USHOWS.length,  targets: USHOWS.length ? USHOWS[USHOWS.length - 1].tg.length : 0 };
+    },
+    ultNames: (): string[] => ULTS.map((u: Ult) => u.n),
+    revealArt: (on = true): number => { SHOT_ART_VIS = !!on; const g = LIVE; if (!g || !g.artCave) return 0; let n = 0; for (let k = 0; k < MW * MH; k++) if (artInBlock(g, k % MW, (k / MW) | 0)) { g.seen[k] = 1; g.vis[k] = 1; n++; } return n; },
+    cam: (x: number | null, y?: number): void => { CAM_FOCUS = x === null ? null : [x, y ?? 0]; IP.camOk = false; },
+    clean: (keep?: string): void => { const g = LIVE; if (!g) return; g.en = g.en.filter((e: En) => Math.abs(e.x - g.hero.x) + Math.abs(e.y - g.hero.y) > 14 && !e.sw); if (g.mode === "dead") g.mode = "play"; g.hero.hp = calc(g.lvl, g.eq).maxHp; HZFX.length = 0; if (keep !== "reveal") ART_REVEAL.t = 0; if (keep !== "banner" && keep !== "reveal") g.banner = null; g.msgs = []; g.warn = undefined; g.para = null; IP.camOk = false; g.notify && g.notify(); },
+    lootSim: (n: number, depth: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const ae = g.autoEq, ac = g.autoCombine; g.autoEq = false; g.autoCombine = false;
+      let floors = 0, items = 0, pris = 0, prisFloors = 0, art = 0;
+      const bag0 = g.bag; const hp0 = g.hero.hp;
+      for (let i = 0; i < n; i++) {
+        g.depth = depth + (isActFloor(depth) ? 1 : 0); g.bag = []; g.drops = [];
+        genFloor(g); floors++;
+        if (g.artCave) art++;
+        for (const e of g.en.slice()) { if (e.hp > 0) { e.hp = 0; kill(g, e); } }
+        g.en = [];
+        for (const c of g.chests) if (!c.open && !c.starter) openChest(g, c);
+        const its = g.bag.concat(g.drops.map((d: Drop) => d.item).filter((x: Item | null): x is Item => !!x)).filter((x: Item) => !isGem(x));
+        const p = its.filter((x: Item) => x.rar >= 7).length;
+        items += its.length; pris += p; if (p) prisFloors++;
+        g.hero.hp = hp0;
+      }
+      g.bag = bag0; g.drops = []; g.autoEq = ae; g.autoCombine = ac;
+      return { ok: true, depth, floors, itemsPerFloor: items / floors, prisPerFloor: pris / floors, floorsWithPris: prisFloors / floors, artCaves: art };
+    },
+    shards: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const l = shardsOf(g); return { n: l.length, states: l.map((s: Shard) => s.hzs ?? 0) }; },
+    gib: (x: number, y: number, n = 3): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (let i = 0; i < n; i++) { const e = mkEnemy(g, x, y, i === 0 ? 2 : 0); e.ax = x; e.ay = y; e.hp = 1; spawnShatter(g, e, (R() - 0.5) * 2, (R() - 0.5) * 2, 3); burstGib(g, x * TS + 12, y * TS + 12, 18, [e.pal[0], e.pal[1], e.pal[2]], 60, 80, 0, 0, 3); } return { ok: true, shards: shardsOf(g).length }; },
+  };
+} catch { /* ignore */ }
+// Stand the hero on plain reachable floor 1-2 tiles from the biggest patch of the given hazard (test/screenshot helper).
+function hzNear(kind: string): Record<string, unknown> {
+  const g = LIVE; if (!g || !g.hz) return { ok: false };
+  const v = kind === "water" ? HZ_WATER : kind === "lava" ? HZ_LAVA : kind === "ice" ? HZ_ICE : kind === "obs" ? HZ_OBS : HZ_PIT;
+  const reach = hzBfs(g, g.hz, g.hero.x, g.hero.y);
+  let best = -1, bs = -1, bh = -1;
+  for (let k = 0; k < MW * MH; k++) {
+    if (g.hz[k] !== v) continue;
+    if (g.artCave && artInBlock(g, k % MW, (k / MW) | 0)) continue;
+    let dens = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const x = k % MW + dx, y = ((k / MW) | 0) + dy; if (inb(x, y) && g.hz[y * MW + x] === v) dens++; }
+    for (const [dx, dy] of [[0, 2], [2, 0], [-2, 0], [0, -2], [0, 1], [1, 0], [-1, 0], [0, -1]]) {
+      const x = k % MW + dx, y = ((k / MW) | 0) + dy; if (!inb(x, y)) continue; const q = y * MW + x;
+      if (reach[q] && g.map[q] === 1 && !g.hz[q] && !enemyAt(g, x, y) && !chestAt(g, x, y) && !portalAt(g, x, y) && dens > bs) { bs = dens; best = q; bh = k; }
+    }
+  }
+  if (best < 0) return { ok: false };
+  g.hero.x = g.hero.ax = best % MW; g.hero.y = g.hero.ay = (best / MW) | 0;
+  g.en = g.en.filter((e: En) => Math.abs(e.x - g.hero.x) + Math.abs(e.y - g.hero.y) > 5);
+  IP.camOk = false; computeVis(g);
+  return { ok: true, hero: [g.hero.x, g.hero.y], hz: [bh % MW, (bh / MW) | 0], dens: bs };
+}
+try { (window as unknown as { __ED16_HZ_NEAR?: (k: string) => Record<string, unknown> }).__ED16_HZ_NEAR = hzNear; } catch { /* ignore */ }
+function prisArm(g: Game): void {
+  const slots: [EqKey, "wep" | "armor", AK | undefined][] = [["head", "armor", "head"], ["chest", "armor", "chest"], ["arms", "armor", "arms"], ["legs", "armor", "legs"], ["rh", "wep", undefined], ["lh", "wep", undefined]];
+  for (const [slot, kind, ak] of slots) { const cur = g.eq[slot]; if (cur && cur.rar >= 7 && cur.ult !== undefined) continue; const it = prisMake(kind, kind === "armor" ? { armor: ak } : {}); if (!equipIntoSlot(g, it, slot)) g.eq[slot] = it; }
+  enforceHandRules(g);
+}
 
 function inspectRun(g: Game | null): Record<string, unknown> {
   if (!g) return { ok: false, error: "no game" };
@@ -14563,7 +17458,92 @@ function wallShot(step: string): Record<string, unknown> {
     return { ok: true, walls: wallCount(g, 8) };
   });
 }
-try { (window as unknown as { __ED16_WALL?: object }).__ED16_WALL = { test: wallTest, shot: wallShot }; } catch { /* ignore */ }
+// Item 11 test: same fight (strikes from one spot next to walls) with 0..8 Prismatics equipped, the rest Legendary 2*.
+function crackShot(np: number, strikes: number, install = true): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = wallGame(3, 2, 3);
+    let i = 0;
+    for (const k of PARA_GEAR) { const it = g.eq[k]; if (!it) continue; if (i < np) { it.rar = 7; it.st = []; } i++; }
+    g.hero.x = g.hero.ax = 24; computeVis(g);
+    const e = mkEnemy(g, 25, 22, 0); e.hp = e.mhp = 1e12; g.en = [e];
+    FC.cells.clear(); FC.key = ""; FC.heat = 0;
+    let chips = 0;
+    for (let n = 0; n < strikes; n++) if (wallHitChip(g, e, n % 6 === 0 ? 1 : 0) > 0) chips++;
+    let cracked = 0, sum = 0;
+    for (let k = 0; k < MW * MH; k++) if ((g.cracks[k] || 0) > 0) { cracked++; sum += g.cracks[k]; }
+    let fsum = 0, frad = 0;
+    for (const c of FC.cells.values()) { fsum += c.p; frad = Math.max(frad, Math.hypot(c.k % MW - FC.ax, ((c.k / MW) | 0) - FC.ay)); }
+    if (install) { g.en = []; g.fx = []; g.echo = []; g.shots = []; g.banner = null; g.warn = undefined; g.flash = 0; g.shake = 0; g.shards = []; g.parts = []; g.floats = []; if (installTestGame) installTestGame(g); IP.camOk = false; }
+    return { ok: true, prisEquipped: prisEquippedCount(g), gearPower: +gearPower(g.eq).toFixed(3), wallPower: +wallPower(g).toFixed(3), strikes, chips, wallsCracked: cracked, wallCrackSum: +sum.toFixed(2), floorCells: FC.cells.size, floorSum: +fsum.toFixed(2), floorRadius: +frad.toFixed(2) };
+  });
+}
+try { (window as unknown as { __ED16_WALL?: object }).__ED16_WALL = { test: wallTest, shot: wallShot, cracks: crackShot }; } catch { /* ignore */ }
+// ---------- test hooks: Prismatic star scaling ----------
+function starsInspect(code?: string): Record<string, unknown> {
+  const curve = { prismatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n: number) => +prisStarMulN(n).toFixed(4)), normalStatMul: 1 };
+  if (!code) return { curve };
+  const g = decodeCode(code.trim(), null);
+  if (!g) return { curve, err: "decode failed" };
+  const st = calc(g.lvl, g.eq);
+  const dummy = mkEnemy(g, 3, 3, 0); dummy.def = 0; dummy.res = undefined as unknown as En["res"];
+  const slots = EQK.map((k: EqKey) => { const it = g.eq[k]; return it ? { slot: k, name: it.name, rar: it.rar, stars: it.st ? it.st.length : 0, golden: !!it.golden, ult: it.ult !== undefined, starMul: +prisStarMul(it).toFixed(4), atk: itemAtk(it), def: itemDef(it), ultDmg: it.ult !== undefined && it.rar >= 7 ? ultDamage(g, st, it, dummy, 1) : null } : { slot: k, empty: true }; });
+  const ps = paraPieces(g);
+  const pd = ps ? paraDamage(g, st, ps, dummy, 1) : null;
+  return { curve, lvl: g.lvl, depth: g.depth, hero: { atk: st.atk, def: st.def, maxHp: st.maxHp, ward: st.ward, block: st.block }, slots, paramount: pd ? { each: pd.each, sum: pd.sum, total: pd.total } : null, dummyHp: dummy.mhp };
+}
+try { (window as unknown as { __ED16_STARS?: object }).__ED16_STARS = { inspect: starsInspect }; } catch { /* ignore */ }
+// ---------- test hooks: gem tiers / stars ----------
+function gemGallery(typ: number, scale = 3): string {
+  const cols = 9, cell = ICON + 12;
+  const c = document.createElement("canvas");
+  c.width = cols * cell * scale; c.height = (cell + 16) * scale;
+  const x = c.getContext("2d") as CanvasRenderingContext2D;
+  x.imageSmoothingEnabled = false;
+  x.fillStyle = "#120c1c"; x.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < cols; i++) {
+    const gem = i < 8 ? makeGem(i, typ, 10, 0) : makeGem(7, typ, 10, 10);
+    const ic = iconCanvas(gem);
+    const ox = (i * cell + 6) * scale, oy = 6 * scale;
+    x.fillStyle = "#1e1830"; x.fillRect(ox - 2 * scale, oy - 2 * scale, (ICON + 4) * scale, (ICON + 4) * scale);
+    x.strokeStyle = gem.golden ? GOLD : RC[gem.rar]; x.lineWidth = 2 * scale; x.strokeRect(ox - 2 * scale, oy - 2 * scale, (ICON + 4) * scale, (ICON + 4) * scale);
+    x.drawImage(ic, ox, oy, ICON * scale, ICON * scale);
+    x.fillStyle = gem.golden ? GOLD : RC[gem.rar]; x.font = "bold " + (7 * scale) + "px monospace"; x.textAlign = "center";
+    x.fillText(gem.golden ? "GOLDEN" : RT[gem.rar], ox + ICON * scale / 2, oy + (ICON + 12) * scale);
+  }
+  return c.toDataURL();
+}
+function gemsTest(): Record<string, unknown> {
+  const res: Record<string, unknown> = {};
+  // combine ladder for one type: 3 same rarity+stars -> +1 star, cap -> next rarity
+  const ladder: string[] = [];
+  let cur = makeGem(0, 1, 50, 0);
+  for (let i = 0; i < 40; i++) {
+    const out = makeCombined([makeGem(cur.rar, 1, 50, gemStarsOf(cur)), makeGem(cur.rar, 1, 50, gemStarsOf(cur)), makeGem(cur.rar, 1, 50, gemStarsOf(cur))], 50);
+    if (!out) break;
+    ladder.push(RT[out.rar] + " " + gemStarsOf(out) + "*" + (out.golden ? " GOLDEN" : ""));
+    cur = out;
+  }
+  res.ladder = ladder;
+  res.goldenCombinesFurther = !!combineKey(cur);
+  res.mixedStarsCombine = !!makeCombined([makeGem(7, 1, 50, 2), makeGem(7, 1, 50, 2), makeGem(7, 1, 50, 3)], 50);
+  res.starMul = [0, 1, 2, 3, 4, 5, 6, 7].map((r: number) => ({ rar: RT[r], max: gemStarMax(r), perStar: [0, 1, 3, 5, 10].filter((n: number) => n <= gemStarMax(r)).map((n: number) => [n, +gemStarMul(r, n).toFixed(3), +(gemQ(r) * gemStarMul(r, n)).toFixed(3)]) }));
+  // save round trips: Save Code (packItem) and the full-save item validator, plus a socketed starred gem
+  const gm = makeGem(7, 2, 80, 10);
+  const back = unpackItem(packItem(gm));
+  res.packRoundTrip = back ? { name: back.name, stars: gemStarsOf(back), golden: !!back.golden } : null;
+  const old = packItem(makeGem(4, 3, 20, 0)) as unknown[];
+  const oldBack = unpackItem(old.slice(0, 23));
+  res.oldCodeGem = oldBack ? { name: oldBack.name, stars: gemStarsOf(oldBack) } : null;
+  const host = makeItem(80, 6, "chest"); host.sk = [{ c: 2 }, { c: 2 }];
+  socketGem(host, 0, makeGem(6, 2, 80, 3));
+  const hb = unpackItem(packItem(host));
+  res.socketRoundTrip = hb && hb.sk ? hb.sk.map((z: { c: number; g?: { typ: number; rar: number; s?: number } }) => z.g || null) : null;
+  const js = JSON.parse(JSON.stringify(host));
+  res.fullSaveSock = js.sk;
+  res.popped = popSocketGems(hb as Item).map((x: Item) => x.name + " *" + gemStarsOf(x));
+  return res;
+}
+try { (window as unknown as { __ED16_GEMS?: object }).__ED16_GEMS = { gallery: gemGallery, test: gemsTest }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
 
 function withPetsTest<T>(fn: () => T): T {
@@ -14927,7 +17907,18 @@ function prisInspect(kind: "pet" | "wep" | "armor"): Record<string, unknown> {
     }
     frames.push({ t, hasRect, outside, tight: b });
   }
-  return { ok: true, kind, rar: it.rar, hasRect: anyRect, outsidePx: maxOutside, shimmer, frames: frames.length, isWep: isPrisWep(it) };
+  // A few chest-plate shapes are themselves a solid block; only a rectangle the Prismatic effect ADDS counts.
+  let baseRect = false;
+  if (anyRect) {
+    const base: Item = { ...it, rar: 6, st: undefined, golden: undefined };
+    const bp = prisPaint(base, 0.15);
+    const bimg = bp.ctx.getImageData(0, 0, bp.w, bp.h);
+    const bb = prisTight(bimg.data, bp.w, bp.h);
+    baseRect = !!(bb && prisHasRect(bimg.data, bp.w, bb, bp.s));
+  }
+  const rawRect = anyRect;
+  anyRect = anyRect && !baseRect;
+  return { ok: true, kind, rar: it.rar, hasRect: anyRect, rawRect, baseRect, outsidePx: maxOutside, shimmer, frames: frames.length, rectAt: frames.filter((f: Record<string, unknown>) => f.hasRect).map((f: Record<string, unknown>) => f.t), d: it.d.join(""), akind: it.kind, isWep: isPrisWep(it) };
 }
 function prisPortrait(): Record<string, unknown> {
   const g = PRIS_TEST_G;
@@ -16006,11 +18997,54 @@ export default function App() {
         case "mx": playMagic(v); break;
         case "para": try { paraSfx(); (window as unknown as { __ED16_PARA_SFX?: string }).__ED16_PARA_SFX = "ok"; } catch (err) { (window as unknown as { __ED16_PARA_SFX?: string }).__ED16_PARA_SFX = "err: " + String(err); console.error("Paramount sfx error", err); } break;
         case "ult": {
+          // Item 23: each pattern has its own sound design; the element sets the pitch, and the per-ult magic voice
+          // (playMagic) keeps every one of the 50 ultimates unique.
           const u = ULTS[v] ?? ULTS[0];
-          const b = 90 + (v % 10) * 18 + Math.floor(v / 10) * 7;
-          tone(b * 2, b / 2, 1.4, "sawtooth", 0.07); tone(b * 3, b, 1.2, "square", 0.03, 0.05); nz(1.4, 0.16, "lowpass", 3000, 60);
-          for (let i = 0; i < 6; i++) tone(b * (2 + i * 0.5), b * (2 + i * 0.5), 0.12, i % 2 ? "triangle" : "square", 0.04, 0.2 + i * 0.07 * (1 + (v % 3)));
-          playMagic(ultSnd(v + (u ? 0 : 0)));
+          const pat = u ? u.pat : 0, eli = Math.max(0, ELS.indexOf(u ? u.el : "holy")), row = Math.floor(v / 10);
+          const b = [262, 147, 330, 220, 98, 73, 123][eli] * (1 + row * 0.06);
+          const sw = (f0: number, f1: number, d: number, vol: number, t0: number): void => nz(d, vol, "bandpass", f0, f1, t0);
+          switch (pat) {
+            case 0: // Starfall: whistling descents, then a rolling barrage of impacts
+              for (let i = 0; i < 9; i++) { const t0 = i * 0.09 + Math.random() * 0.05; tone(b * 8 - i * 30, b * 1.5, 0.42, "sine", 0.018, t0); nz(0.35, 0.08, "lowpass", 900, 60, t0 + 0.42); tone(b * 0.5, b * 0.25, 0.3, "triangle", 0.04, t0 + 0.42); }
+              break;
+            case 1: // Supernova: a rising stellar swell, a huge detonation, then a shimmering tail
+              tone(b * 0.5, b * 4, 0.55, "sawtooth", 0.035); tone(b * 0.75, b * 6, 0.55, "triangle", 0.025, 0.02); sw(400, 4000, 0.55, 0.05, 0);
+              nz(1.2, 0.2, "lowpass", 2400, 50, 0.55); tone(b * 0.5, b * 0.12, 1.1, "sine", 0.1, 0.55);
+              for (let i = 0; i < 8; i++) tone(b * (6 + i), b * (6.2 + i), 0.18, "sine", 0.012, 0.7 + i * 0.07);
+              break;
+            case 2: // Collapse: a reversed suction rush into silence, then a deep implosion boom
+              sw(5000, 200, 0.9, 0.08, 0); tone(b * 4, b * 0.3, 0.9, "sawtooth", 0.03); tone(b * 2, b * 0.2, 0.9, "square", 0.015, 0.05);
+              tone(b * 0.35, 30, 1.0, "sine", 0.13, 0.95); nz(0.9, 0.22, "lowpass", 1500, 40, 0.95); tone(b * 3, b * 3.05, 0.6, "triangle", 0.02, 1.0);
+              break;
+            case 3: // Tempest: rolling thunder with sharp cracks scattered through the storm
+              nz(2.0, 0.07, "lowpass", 300, 120, 0);
+              for (let i = 0; i < 8; i++) { const t0 = 0.25 + i * 0.22 + Math.random() * 0.06; nz(0.08, 0.12, "highpass", 4000, 2500, t0); nz(0.7, 0.1, "lowpass", 800, 60, t0 + 0.03); tone(b * 6, b * 2, 0.05, "square", 0.02, t0); }
+              break;
+            case 4: // Cataclysm: a grinding quake, splitting rock cracks and erupting geysers
+              tone(45, 38, 1.8, "sawtooth", 0.07); nz(1.8, 0.12, "lowpass", 260, 80, 0);
+              for (let i = 0; i < 6; i++) { const t0 = 0.1 + i * 0.12; nz(0.06, 0.1, "bandpass", 2500, 1200, t0); }
+              for (let i = 0; i < 5; i++) { const t0 = 0.55 + i * 0.16; sw(300, 2600, 0.45, 0.06, t0); tone(b, b * 2, 0.3, "triangle", 0.02, t0); }
+              break;
+            case 5: // Lances: humming sky beams switching on one by one, sizzling where they land
+              for (let i = 0; i < 5; i++) { const t0 = 0.15 + i * 0.14, f = b * (2 + i * 0.25); tone(f, f * 1.01, 0.9, "sawtooth", 0.016, t0); tone(f * 1.5, f * 1.49, 0.9, "sine", 0.014, t0); nz(0.8, 0.04, "highpass", 6000, 5000, t0 + 0.05); }
+              break;
+            case 6: // Reaping: a huge whoosh of the scythe, a ringing blade and ghostly wails
+              sw(200, 3000, 0.65, 0.12, 0.05); tone(b * 4, b * 4.02, 0.9, "triangle", 0.03, 0.15); tone(b * 6, b * 6.03, 0.7, "sine", 0.02, 0.17);
+              for (let i = 0; i < 3; i++) tone(b * 2.5, b * 1.6, 0.8, "sine", 0.02, 0.5 + i * 0.25);
+              break;
+            case 7: // Judgement: a choir-like chord, then bell-struck pillars slamming down
+              [1, 1.25, 1.5, 2].forEach((m: number, i: number) => tone(b * 2 * m, b * 2 * m, 1.6, "sine", 0.018, i * 0.04));
+              for (let i = 0; i < 6; i++) { const t0 = 0.5 + i * 0.1; tone(b * 8, b * 7.8, 0.5, "triangle", 0.025, t0); nz(0.15, 0.08, "lowpass", 1500, 80, t0); }
+              break;
+            case 8: // Crossfire: charging emitters and criss-crossing laser zaps
+              for (let i = 0; i < 8; i++) { const t0 = 0.08 + i * 0.12; tone(b * 10, b * 2, 0.18, "square", 0.022, t0); tone(b * 12, b * 3, 0.16, "sawtooth", 0.012, t0 + 0.01); nz(0.12, 0.04, "highpass", 5000, 3000, t0); }
+              break;
+            default: // Maelstrom: a howling, swirling cyclone that rises and falls as it sweeps
+              for (let i = 0; i < 6; i++) sw(300 + i * 200, 1800 - i * 150, 0.6, 0.07, i * 0.35);
+              nz(2.4, 0.08, "lowpass", 500, 200, 0); tone(b * 1.5, b * 3, 1.2, "triangle", 0.02, 0.2); tone(b * 3, b * 1.5, 1.2, "triangle", 0.02, 1.2);
+              break;
+          }
+          playMagic(ultSnd(v));
           break;
         }
         case "spell":
@@ -16072,6 +19106,18 @@ export default function App() {
         case "shatter":
           nz(0.16, 0.07, "highpass", 5000, 1800); tone(900, 240, 0.12, "square", 0.03);
           nz(0.2, 0.05, "bandpass", 2000, 500, 0.04); tone(1400, 400, 0.1, "triangle", 0.02, 0.05);
+          break;
+        case "hiss": nz(0.5 + v * 0.6, 0.05 + 0.04 * Math.min(1, v), "highpass", 3000, 1800); nz(0.3, 0.03, "bandpass", 900, 300, 0.05); break;
+        case "skate": tone(1800, 1400, 0.12, "triangle", 0.012); nz(0.12, 0.015, "highpass", 5000, 3000); break;
+        case "thunder":
+          // v=0 close strike: crack + rumble; v=1 distant rumble only
+          if (!v) { nz(0.12, 0.09, "highpass", 2500, 900); tone(70, 30, 1.2, "sawtooth", 0.05, 0.05); nz(1.6, 0.08, "lowpass", 400, 40, 0.06); }
+          else { nz(1.8, 0.045, "lowpass", 220, 35); tone(48, 30, 1.4, "sine", 0.03, 0.1); }
+          break;
+        case "wxamb":
+          // ambient weather texture: v=0 rain hiss, v=1 wind gust
+          if (!v) nz(1.6, 0.018, "highpass", 3200, 2600);
+          else nz(1.8, 0.022, "bandpass", 500, 260);
           break;
         case "boom":
           tone(90, 28, 0.45, "sawtooth", 0.07); nz(0.4, 0.12, "lowpass", 900, 50); tone(160, 40, 0.3, "sine", 0.04, 0.05);
@@ -16372,13 +19418,14 @@ export default function App() {
     const update = (dt: number): void => {
       const g = gRef.current;
       if (!g) return;
-      if (g.mode === "play" && !LOAD_COMBINED.has(g)) { clampBossPowerAll(g); loadCombinePass(g); }
+      if (g.mode === "play" && !LOAD_COMBINED.has(g)) { repairSocketSpill(g); clampBossPowerAll(g); loadCombinePass(g); }
       if (PRIS_T_FREEZE != null) g.time = PRIS_T_FREEZE;
       else g.time += dt;
       RC[7] = "hsl(" + Math.floor((g.time * 140) % 360) + ",100%,62%)";
       g.toast = Math.max(0, g.toast - dt);
       if (g.lootToast) g.lootToast = Math.max(0, g.lootToast - dt);
       const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
+      FRAME_VDT = (g.mode !== "title" && !paused) ? dt : 0;
       if (g.para) dt *= paraTick(g, paused ? 0 : dt); // Paramount: real-time timeline, slowed game time until detonation
       if (g.mode === "play" && !paused) { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
       if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); portalFxTick(g, dt); }
@@ -16423,7 +19470,8 @@ export default function App() {
       if (hd && g.mode === "play" && !paused && (g.rt ? (g.pcd ?? 0) <= 1e-6 : now - hd.last > 165 / MVMUL)) { hd.last = now; lastAuto = now; act(g, hd.dx, hd.dy); publishPad(true, hd.dx, hd.dy, true); }
       if (g.mode === "play" && !paused && calc(g.lvl, g.eq).range > 0) autoTurn(g);
       else if (!hd && g.mode === "play" && !paused && now - lastAuto > 330) { lastAuto = now; autoTurn(g); }
-      visTick(g, (g.mode !== "title" && !paused) ? dt : 0);
+      syncMapSize(g);
+      visTick(g, FRAME_VDT);
     };
 
     const drawTitle = (g: Game): void => {
@@ -16469,13 +19517,16 @@ export default function App() {
         else if (v === 3) img = g.tiles[7] || g.tiles[5];
         else img = g.tiles[(tx * 7 + ty * 13) % 3];
         ctx.drawImage(img, sx, sy);
+        if (v !== 0 && g.hz) { const hv = g.hz[i]; if (hv) drawHzTile(ctx, g, tx, ty, sx, sy, hv, t); }
         if (v === 0) { const cp = g.cracks ? g.cracks[i] : 0; if (cp > 0) drawWallCracks(ctx, sx, sy, crackStage(cp)); }
         if (v === 1 && g.tiles[6] && (((tx * 31 + ty * 57) * 2654435761) >>> 0) % 29 === 0) ctx.drawImage(g.tiles[6], sx, sy);
+        if (v !== 0 && FC.cells.size) { const fc = FC.cells.get(i); if (fc) drawFloorCrack(ctx, sx, sy, fc, FC.ax * TS + 12 - camX, FC.ay * TS + 12 - camY); }
         if ((v === 1 || v === 3) && THDREAD > 0.04) {
           const hsh = (((tx * 31 + ty * 57 + g.depth * 13) * 2654435761) >>> 0);
           if ((hsh % 1000) / 1000 < THDREAD * 0.55) drawDreadDecal(ctx, sx, sy, hsh, THDREAD);
         }
       }
+      drawArtCave(ctx, g, camX, camY, t);
       for (const tch of (g.torches ?? [])) {
         const tsx = tch.x * TS - camX, tsy = tch.y * TS - camY;
         if (tsx < -TS || tsy < HUD - TS || tsx > VW + TS || tsy > HUD + VIEWH + TS) continue;
@@ -16493,6 +19544,8 @@ export default function App() {
         drawLootChest(painter(ctx, csx, csy, 2, false, 0), c.open, c.rar ?? 0);
         if (!c.open && Math.abs(c.x - h.x) + Math.abs(c.y - h.y) <= 1) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], csx + 12, csy - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
       }
+      drawShrine(ctx, g, camX, camY, t);
+      if (g.trophyAt) drawTrophyCase(ctx, g.trophyAt.x * TS - camX, g.trophyAt.y * TS - camY, t, artsOf(g).length);
       for (const dr of g.drops) {
         if (!g.vis[dr.y * MW + dr.x]) continue;
         const sx = dr.x * TS - camX, sy = dr.y * TS - camY;
@@ -16503,14 +19556,24 @@ export default function App() {
           aura(ctx, sx + 12, sy + 12, 11, it.rar, t);
           ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(sx + 5, sy + 19, 14, 3);
           const diconY = sy + 1 + Math.round(Math.sin(t * 3 + dr.x) * 1.5);
-          ctx.drawImage(iconCanvas(it), sx + 2, diconY, 20, 20);
+          ctx.drawImage(iconCanvas(it, false), sx + 2, diconY, 20, 20);
+          if (isGem(it) && it.rar >= 4) {
+            // animated glints on high-tier gems lying on the ground
+            const n = it.rar >= 7 ? 3 : it.rar >= 6 ? 2 : 1;
+            for (let k = 0; k < n; k++) {
+              const ph = (t * (1.3 + k * 0.4) + dr.x * 0.37 + k * 0.33) % 1;
+              if (ph > 0.45) continue;
+              const a = (k * 2.3 + Math.floor(t * (1.3 + k * 0.4) + dr.x * 0.37 + k * 0.33) * 1.7) % 6.283;
+              const gx = sx + 12 + Math.cos(a) * 7, gy = diconY + 10 + Math.sin(a) * 7, z = 1 + 2 * Math.sin(ph / 0.45 * Math.PI);
+              ctx.fillStyle = it.golden ? "#fff0a0" : "#ffffff"; ctx.fillRect(gx - z, gy - 0.5, z * 2, 1); ctx.fillRect(gx - 0.5, gy - z, 1, z * 2);
+            }
+          }
           if (it.sk && it.sk.length) {
             const pip = SOCK_PIP_DROP, gap = 1;
-            const layout = socketPipLayout(it.sk.length, 20, pip, gap);
-            if (layout.length) drawSocketPips(ctx, sx + 2 + layout[0].x, diconY + layout[0].y, it, pip, gap);
+            drawSocketPips(ctx, sx + 2, diconY, it, pip, gap, 20);
           }
           ctx.fillStyle = RC[it.rar]; ctx.fillRect(sx + 3, sy + 22, 18, 1);
-          if (it.st && it.st.length) { ctx.font = "bold 6px monospace"; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillStyle = "#000000"; ctx.fillText("\u2605" + it.st.length, sx + 22, sy - 1); ctx.fillStyle = GOLD; ctx.fillText("\u2605" + it.st.length, sx + 21, sy - 2); }
+          if (starCount(it)) { ctx.font = "bold 6px monospace"; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillStyle = "#000000"; ctx.fillText("\u2605" + starCount(it), sx + 22, sy - 1); ctx.fillStyle = GOLD; ctx.fillText("\u2605" + starCount(it), sx + 21, sy - 2); }
         } else if (dr.pot) {
           const p = painter(ctx, sx, sy, 2, false, 0);
           p(5, 3, 2, 2, "#c0a080"); p(4, 5, 4, 5, "#ff3060"); p(4, 5, 1, 2, "#ff9ab0"); p(4, 10, 4, 1, "#a01030");
@@ -16676,11 +19739,17 @@ export default function App() {
         ctx.restore();
       }
       for (const p of g.parts) drawPart(ctx, p, camX, camY);
+      drawHzOverlay(ctx, g, camX, camY, t, FRAME_VDT);
       drawShards(ctx, g, camX, camY);
+      drawHzFx(ctx, camX, camY);
+      drawUltShows(ctx, camX, camY);
       ctx.globalAlpha = 1;
+      drawWeather(ctx, g, t, FRAME_VDT, camX, camY);
       for (const f of g.floats) { ctx.globalAlpha = Math.min(1, f.life * 2); text(f.txt, f.x - camX, f.y - camY, f.c, "center", 8); }
       ctx.globalAlpha = 1;
       ctx.restore();
+      drawSwarmHud(ctx, g, t);
+      drawArtReveal(ctx, FRAME_VDT, t);
 
       // boss bar (n===1 keeps the raw60 height / placement; n>1 stacks copies)
       if (bosses.length === 1 && boss) {
@@ -16720,8 +19789,8 @@ export default function App() {
         }
       }
       // minimap
-      if (!mmCv) { mmCv = document.createElement("canvas"); mmCv.width = MW; mmCv.height = MH; }
-      const mkey = g.depth + ":" + g.turn + ":" + g.kills + ":" + g.floorTurn + ":" + (g.vault ? 1 : 0) + ":" + (g.wallVer || 0);
+      if (!mmCv || mmCv.width !== MW || mmCv.height !== MH) { mmCv = document.createElement("canvas"); mmCv.width = MW; mmCv.height = MH; mmKey = ""; }
+      const mkey = MW + ":" + g.depth + ":" + g.turn + ":" + g.kills + ":" + g.floorTurn + ":" + (g.vault ? 1 : 0) + ":" + (g.wallVer || 0);
       if (mmKey !== mkey) {
         mmKey = mkey; stairsL = [];
         const mc = mmCv.getContext("2d");
@@ -16731,14 +19800,15 @@ export default function App() {
             const k = y * MW + x;
             if (!g.seen[k]) continue;
             if (g.map[k] === 2 || g.map[k] === TILE_UP) stairsL.push([x, y]);
-            mc.fillStyle = g.map[k] === 0 ? "#2c2440" : "#8a80a8";
+            const hv = g.hz ? g.hz[k] : 0;
+            mc.fillStyle = g.map[k] === 0 ? "#2c2440" : hv === HZ_WATER ? "#3a7ac8" : hv === HZ_LAVA ? "#ff6a20" : hv === HZ_ICE ? "#c8f0ff" : hv === HZ_OBS ? "#2a1e3a" : hv === HZ_PIT ? "#5a4a38" : "#8a80a8";
             mc.fillRect(x, y, 1, 1);
           }
         }
       }
       {
-        const big = g.mmBig, ms2 = big ? 4 : 1;
-        const mw = MW * ms2, mh = MH * ms2;
+        const big = g.mmBig, ms2 = mmScale(!!big);
+        const mw = Math.round(MW * ms2), mh = Math.round(MH * ms2);
         const mx0 = big ? Math.round((VW - mw) / 2) : VW - mw - 3;
         const my0 = big ? HUD + Math.round((VIEWH - mh) / 2) : HUD + hudBossOff(bosses.length, !!(boss && boss.act)).mm;
         mmRect = [mx0 - 4, my0 - 4, mw + 8, mh + 8];
@@ -17088,10 +20158,12 @@ export default function App() {
   const tipLine = (s: string, i: number) => <div key={i} className={s.indexOf("\u2726 RARE") === 0 ? "dc-tipline-rare" : undefined}>{s}</div>;
   const statLines = (it: Item): string[] => {
     const out: string[] = [];
-    if (it.atk) out.push("Attack +" + it.atk);
-    if (it.def) out.push("Defense +" + it.def);
-    if (it.block) out.push("Block " + it.block + "%");
-    for (const b of Object.keys(it.bonus) as Bonus[]) { const v = it.bonus[b]; if (v !== undefined) out.push(b === "mv" ? "+" + fmt(v) + "% Movement Speed" : "+" + fmt(v) + " " + BNAME[b]); }
+    const psm = it.kind !== "pet" && it.kind !== "gem" ? prisStarMul(it) : 1;
+    if (psm > 1) out.push("\u2605 Prismatic star power x" + fmtUltMul(psm) + " (all stats, star abilities and ultimate)");
+    if (it.atk) out.push("Attack +" + fmtBig(itemAtk(it)));
+    if (it.def) out.push("Defense +" + fmtBig(itemDef(it)));
+    if (it.block) out.push("Block " + itemBlock(it) + "%");
+    for (const b of Object.keys(it.bonus) as Bonus[]) { const v0 = it.bonus[b]; if (v0 !== undefined) { const v = itemBonus(it, b); out.push(b === "mv" ? "+" + fmt(v) + "% Movement Speed" : "+" + fmt(v) + " " + BNAME[b]); } }
     if (it.kind === "pet" && g) out.push(...petLines(it, g.lvl));
     if (wepNeedsEl(it.kind)) out.push(ELN[ensureWepEl(it)] + (it.kind === "beamsword" ? " blade" : " bolt"));
     return out;
@@ -17116,11 +20188,11 @@ export default function App() {
     const dlt = (it && g) ? powerDelta(g.lvl, g.eq, it) : 0;
     const equipped = !!(it && g && EQK.some((k: EqKey) => g.eq[k] === it));
     return (
-    <button key={key} className={"dc-cell" + (it ? " r" + it.rar : "") + (it && it.ult !== undefined ? " ult" : "") + (it && it.set !== undefined ? " setp" : "") + (isSel ? " sel" : "")} style={{ borderColor: it && it.golden ? GOLD : it && it.set !== undefined ? SET_COL : it && isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : it ? RC[it.rar] : "#2e2840" }} onClick={onClick} aria-label={it ? it.name : label}>
-      {it ? <img src={iconURL(it)} alt="" draggable={false} /> : <span className="lb">{label}</span>}
+    <button key={key} className={"dc-cell" + (it ? " r" + it.rar : "") + (it && it.ult !== undefined ? " ult" : "") + (it && it.set !== undefined ? " setp" : "") + (it && isGem(it) && it.rar >= 4 && it.rar < 7 ? " gemhi" : "") + (isSel ? " sel" : "")} style={{ borderColor: it && it.golden ? GOLD : it && it.set !== undefined ? SET_COL : it ? RC[it.rar] : "#2e2840" }} onClick={onClick} aria-label={it ? it.name : label}>
+      {it ? <img src={iconURL(it, !(it.sk && it.sk.length))} alt="" draggable={false} /> : <span className="lb">{label}</span>}
       {it && isPrisWep(it) ? prisArcOverlay() : null}
       {it && it.kind === "pet" && (it.prt ?? 0) >= 1 && <span className="dc-rarepet">RARE</span>}
-      {it && it.st && it.st.length > 0 && <span className="dc-stars">{"\u2605" + it.st.length}</span>}
+      {it && starCount(it) > 0 && <span className="dc-stars">{"\u2605" + starCount(it)}</span>}
       {it && it.sk && it.sk.length > 0 && <span className="dc-pips">{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <i key={"p" + i} style={{ background: z.g ? GEMT[z.g.typ].c : "transparent", borderColor: GEMT[z.c].c }} />)}</span>}
       {it && g && <span className="dc-pl">{itemPower(it, g.lvl)}{!equipped && dlt !== 0 ? <span className={dlt > 0 ? "up" : "dn"}>{" " + (dlt > 0 ? "+" : "") + dlt}</span> : null}</span>}
     </button>
@@ -17131,9 +20203,9 @@ export default function App() {
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <div style={{ width: 46, flex: "none" }}>{cell(it, "ih", "", false, () => undefined)}</div>
       <div>
-        <div className={it.golden ? "gn" : it.rar >= 7 ? "pn" : ""} style={{ color: it.golden ? GOLD : it.set !== undefined ? SET_COL : isGem(it) && it.gt !== undefined ? GEMT[it.gt].c : RC[it.rar], fontWeight: 700, fontSize: 13 }}>{it.name + (it.st && it.st.length ? " " + (it.st.length > 5 ? "\u2605" + it.st.length : "\u2605".repeat(it.st.length)) : "")}</div>
-        {it.sk && it.sk.length > 0 && <div style={{ display: "flex", gap: 3, marginTop: 3 }}>{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <span key={"sk" + i} title={GEMT[z.c].n + (z.g ? " · " + GEM_QN[z.g.rar] + " " + GEMT[z.g.typ].n : " (empty)")} style={{ width: 9, height: 9, borderRadius: "50%", background: z.g ? GEMT[z.g.typ].c : "transparent", border: "2px solid " + GEMT[z.c].c, boxShadow: z.g ? "0 0 4px " + GEMT[z.g.typ].c : undefined, display: "inline-block" }} />)}</div>}
-        {isGem(it) && it.gt !== undefined && <div style={{ color: GEMT[it.gt].c, fontSize: 11, marginTop: 2 }}>{GEMT[it.gt].d}{it.rar >= 7 ? " Fits any socket." : ""}</div>}
+        <div className={it.golden ? "gn" : it.rar >= 7 ? "pn" : ""} style={{ color: it.golden ? GOLD : it.set !== undefined ? SET_COL : RC[it.rar], fontWeight: 700, fontSize: 13 }}>{it.name + (starCount(it) ? " " + (starCount(it) > 5 ? "\u2605" + starCount(it) : "\u2605".repeat(starCount(it))) : "")}</div>
+        {it.sk && it.sk.length > 0 && <div style={{ display: "flex", gap: 3, marginTop: 3 }}>{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <span key={"sk" + i} title={GEMT[z.c].n + (z.g ? " · " + gemFullName(gemFromSock(z.g, 1)) : " (empty)")} style={{ width: 9, height: 9, borderRadius: "50%", background: z.g ? GEMT[z.g.typ].c : "transparent", border: "2px solid " + GEMT[z.c].c, boxShadow: z.g ? "0 0 4px " + RC[z.g.rar] : undefined, display: "inline-block" }} />)}</div>}
+        {isGem(it) && it.gt !== undefined && <div style={{ color: GEMT[it.gt].c, fontSize: 11, marginTop: 2 }}>{GEMT[it.gt].d}{it.rar >= 7 ? " Fits any socket." : ""}{" Socket power " + fmtUltMul(gemQ(it.rar) * gemStarMul(it.rar, gemStarsOf(it))) + (gemStarsOf(it) ? " (stars x" + fmtUltMul(gemStarMul(it.rar, gemStarsOf(it))) + ")" : "") + " \u00b7 stars " + gemStarsOf(it) + "/" + gemStarMax(it.rar) + (gemStarMax(it.rar) ? " (combine 3 with the same stars)" : "")}</div>}
         <div className="dc-sm">{RT[it.rar] + " \u00b7 " + kindLabel(it.kind) + " \u00b7 item level " + it.ilvl}</div>
         {it.set !== undefined && SETS[it.set] && <div style={{ color: SET_COL, fontWeight: 700 }}>{SETS[it.set].n + " set"}</div>}
         {g && <div style={{ color: GOLD, fontWeight: 700, marginTop: 2 }}>{"Power Level " + itemPower(it, g.lvl) + (powerDelta(g.lvl, g.eq, it) ? "  (" + (powerDelta(g.lvl, g.eq, it) > 0 ? "+" : "") + powerDelta(g.lvl, g.eq, it) + " vs equipped)" : "")}</div>}
@@ -17160,6 +20232,7 @@ export default function App() {
       {(it.spells ?? []).map((sp: Spell, i: number) => <div key={"sp" + i} style={{ color: ELC[sp.el], marginTop: 2 }}>{"\u2726 " + spellDesc(sp)}</div>)}
       {(it.pas ?? []).map((p: Passive, i: number) => <div key={"pa" + i} style={{ color: ELC[p.el], marginTop: 2 }}>{"\u25c8 " + pasDesc(p)}</div>)}
       {(it.ef ?? []).map((e: number[], i: number) => <div key={"ef" + i} style={{ color: EFX[e[0]] ? EFX[e[0]].c : "#ffffff", marginTop: 2 }}>{"\u2727 " + efDesc(e)}</div>)}
+      {it.ww ? <div style={{ color: "#ff9a40", marginTop: 2, fontWeight: "bold" }}>{"\u2727 " + WW_NAME + ": " + WW_DESC}</div> : null}
       {it.ult !== undefined && <div className="dc-ultl">{ultDesc(it.ult)}</div>}
       <div style={{ marginTop: 5 }}>
         <div className="dc-sm">If equipped:</div>
@@ -17366,6 +20439,39 @@ export default function App() {
               </div>
             );
           })()}
+          {g && g.trophyOpen && (() => {
+            const own = new Set(artsOf(g));
+            const close = (): void => { g.trophyOpen = false; bump(); };
+            return (
+              <div className="dc-shopw" onPointerDown={(ev: { target: unknown; currentTarget: unknown }) => { if (ev.target === ev.currentTarget) close(); }} role="dialog" aria-modal="true" aria-label="Trophy case">
+                <div className="dc-inv dc-shop" onPointerDown={(ev: { stopPropagation: () => void }) => ev.stopPropagation()}>
+                  <div className="dc-shop-hd">
+                    <div>
+                      <b style={{ fontSize: 14 }}>{"\ud83c\udfc6 Trophy Case"}</b>
+                      <div className="dc-shop-gold">{"Ancient artifacts: " + own.size + " / " + ART_N}</div>
+                    </div>
+                    <button className="dc-leave" onClick={close} aria-label="Close trophy case">{"\u2715 Close"}</button>
+                  </div>
+                  <div className="dc-shop-bd">
+                    <div className="dc-sm">{"Artifacts hide in lava-sealed caves past depth 25. Cross the moat with a " + WW_NAME + " item or turn it to obsidian with a Paramount. Each artifact can only be found once."}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 4, marginTop: 8 }}>
+                      {ARTIFACTS.map((A: { t: string; n: string; l: string }, i: number) => {
+                        const has = own.has(i);
+                        return (
+                          <div key={"art" + i} title={has ? A.n + " - " + A.l : "Undiscovered"} style={{ border: "1px solid " + (has ? "#c8a040" : "#2a2634"), background: has ? "rgba(60,44,16,0.6)" : "rgba(14,12,20,0.8)", borderRadius: 4, padding: 3, textAlign: "center", minHeight: 78 }}>
+                            <img src={artIconUrl(i, !has)} width={40} height={40} alt={has ? A.n : "???"} style={{ imageRendering: "pixelated", opacity: has ? 1 : 0.85 }} />
+                            <div style={{ fontSize: 8, color: has ? "#ffd870" : "#5a5468", lineHeight: 1.1 }}>{has ? A.n : "???"}</div>
+                            <div style={{ fontSize: 7, color: has ? "#b8a888" : "#3a3448", lineHeight: 1.1 }}>{has ? A.t : (i + 1) + "/" + ART_N}</div>
+                            {has && <div style={{ fontSize: 6.5, color: "#d8d0c0", lineHeight: 1.15, marginTop: 2 }}>{A.l}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {g && g.stashOpen && cur && (() => {
             const carried = Math.max(0, Math.floor(g.gold));
             const banked = bankGoldOf(g);
@@ -17514,13 +20620,14 @@ export default function App() {
                     <div className="dc-sm">Sockets (color must match; Prismatic gems fit any):</div>
                     {selItem.sk.map((z: { c: number; g?: { typ: number; rar: number } }, si: number) => (
                       <div key={"skui" + si} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: "50%", background: z.g ? GEMT[z.g.typ].c : "transparent", border: "2px solid " + GEMT[z.c].c, flex: "none" }} />
-                        <span style={{ color: GEMT[z.c].c, fontSize: 11, flex: 1 }}>{z.g ? (GEM_QN[z.g.rar] + " " + GEMT[z.g.typ].n) : (GEMT[z.c].n + " socket (empty)")}</span>
+                        {z.g ? <img src={sockGemIconURL(z.g)} alt="" width={26} height={26} draggable={false} style={{ imageRendering: "pixelated", border: "2px solid " + ((z.g.rar >= 7 && ((z.g as { s?: number }).s ?? 0) >= 10) ? GOLD : RC[z.g.rar]), borderRadius: 5, background: "#1a1028", flex: "none", outline: "1px solid " + GEMT[z.c].c, outlineOffset: 1 }} />
+                          : <span style={{ width: 12, height: 12, borderRadius: "50%", background: "transparent", border: "2px solid " + GEMT[z.c].c, flex: "none" }} />}
+                        <span style={{ color: z.g ? RC[z.g.rar] : GEMT[z.c].c, fontSize: 11, flex: 1 }}>{z.g ? (gemFullName(gemFromSock(z.g, 1))) : (GEMT[z.c].n + " socket (empty)")}</span>
                         {z.g && <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11, padding: "0 8px" }} onClick={() => doAct(() => unsocketGem(g, selItem, si))}>Unsocket</button>}
                         {!z.g && ensureGemBag(g).some((it: Item) => isGem(it) && gemFitsSocket(it, z.c)) && (
                           <select defaultValue="" style={{ minHeight: 32, fontSize: 11, background: "#1a1626", color: "#fff", border: "1px solid #555", borderRadius: 6 }} onChange={(ev: { target: { value: string } }) => { const id = Number(ev.target.value); ev.target.value = ""; if (!isFinite(id)) return; doAct(() => { const gb = ensureGemBag(g); const bi = bagIndexById(gb, id); const gem = bi >= 0 ? gb[bi] : undefined; if (!gem) return ""; const r = socketGem(selItem, si, gem); if (r.indexOf("Socketed") === 0) gb.splice(bi, 1); return r; }); }}>
                             <option value="">Socket a gem...</option>
-                            {ensureGemBag(g).map((it: Item) => isGem(it) && gemFitsSocket(it, z.c) ? <option key={it.id} value={it.id}>{it.name}</option> : null)}
+                            {ensureGemBag(g).map((it: Item) => isGem(it) && gemFitsSocket(it, z.c) ? <option key={it.id} value={it.id}>{gemFullName(it)}</option> : null)}
                           </select>
                         )}
                       </div>
@@ -17531,6 +20638,7 @@ export default function App() {
                   {(selItem.spells ?? []).map((sp: Spell, i: number) => <div key={"sp" + i} style={{ color: ELC[sp.el], marginTop: 2 }}>{"\u2726 " + spellDesc(sp)}</div>)}
                   {(selItem.pas ?? []).map((p: Passive, i: number) => <div key={"pa" + i} style={{ color: ELC[p.el], marginTop: 2 }}>{"\u25c8 " + pasDesc(p)}</div>)}
                   {(selItem.ef ?? []).map((e: number[], i: number) => <div key={"ef" + i} style={{ color: EFX[e[0]] ? EFX[e[0]].c : "#ffffff", marginTop: 2 }}>{"\u2727 " + efDesc(e)}</div>)}
+                  {selItem.ww ? <div style={{ color: "#ff9a40", marginTop: 2, fontWeight: "bold" }}>{"\u2727 " + WW_NAME + ": " + WW_DESC}</div> : null}
                   {selItem.ult !== undefined && <div className="dc-ultl">{ultDesc(selItem.ult)}</div>}
                   {!isArmor(selItem.kind) && selItem.kind !== "pet" && selItem.kind !== "gem" && <div className="dc-sm" style={{ marginTop: 3 }}>{WI[selItem.kind as WT].note}</div>}
                   {selBag >= 0 && (() => {
@@ -17620,6 +20728,7 @@ export default function App() {
           <button className="dc-b" style={btn} disabled={!playing} onClick={() => (inv ? closeInv() : openInv())}>{"\ud83c\udfab"} Bag{g ? " " + g.bag.length : ""}</button>
           <button className={"dc-b" + (onStairs ? " hot" : "")} style={btn} disabled={!onStairs || (onUp && !canBack)} onClick={stairs}>{stairsLbl}</button>
           <button className="dc-b" style={btn} disabled={!canBack} onClick={() => { const gg = gRef.current; if (gg) goBack(gg, false); bump(); }} aria-label={locked ? "Go back a floor (locked)" : "Go back a floor"}>{(locked ? "\ud83d\udd12" : "\u25B2") + " Back"}</button>
+          <button className="dc-b" style={btn} disabled={!g || g.mode === "title"} onClick={() => { const gg = gRef.current; if (gg) { gg.trophyOpen = true; bump(); } }} aria-label="Trophy case">{"\ud83c\udfc6"}</button>
           <button className="dc-b" style={btn} onClick={toggleMute}>{muted ? "\ud83d\udd07" : "\ud83d\udd0a"}</button>
           <button className="dc-b" style={btn} onClick={toggleMusic}>{musicOn ? "\u266b On" : "\u266b Off"}</button>
         </div>

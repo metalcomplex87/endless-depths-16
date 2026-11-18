@@ -1,0 +1,13 @@
+import puppeteer from "puppeteer-core";
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+const b=await puppeteer.launch({executablePath:"/usr/bin/google-chrome-stable",headless:"new",userDataDir:"/tmp/ed16-profiles/ud-"+Date.now(),args:["--no-sandbox","--disable-gpu","--mute-audio"]});
+const p=await b.newPage(); await p.setViewport({width:412,height:780,deviceScaleFactor:2});
+p.on("pageerror",e=>console.log("ERR",e.message)); p.on("console",m=>console.log("CON",m.text().slice(0,200)));
+await p.goto("http://127.0.0.1:50199/?t="+Date.now()); await p.waitForFunction(()=>!!(window.__ED16_PRIS&&window.__ED16_HZ));
+await p.evaluate(()=>window.__ED16_PRIS.begin({depth:40,lvl:90})); await sleep(300);
+const H=(n,...a)=>p.evaluate((n,a)=>window.__ED16_HZ[n](...a),n,a);
+await H("gen",41);
+console.log(JSON.stringify(await H("ultCast",1,8)));
+await sleep(900);
+await (await p.$("canvas")).screenshot({path:"/tmp/ud.png"});
+await b.close();

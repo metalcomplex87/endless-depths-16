@@ -1,0 +1,673 @@
+[
+ {
+  "step": "hazard sim depth 26 (400 floors): no required tile cut off",
+  "pass": true,
+  "detail": {
+   "floors": 400,
+   "eligible": 400,
+   "water": 135,
+   "lava": 92,
+   "ice": 9,
+   "any": 201,
+   "tiles": {
+    "water": 2922,
+    "lava": 1081,
+    "ice": 280
+   },
+   "rejected": 205,
+   "reqFail": 0,
+   "reqBad": [],
+   "art": 0,
+   "artChest": 0,
+   "shrine": 18,
+   "bySize": {
+    "44": 253,
+    "50": 120,
+    "56": 27
+   }
+  }
+ },
+ {
+  "step": "hazard sim depth 60 (400 floors): no required tile cut off",
+  "pass": true,
+  "detail": {
+   "floors": 400,
+   "eligible": 400,
+   "water": 108,
+   "lava": 78,
+   "ice": 16,
+   "any": 163,
+   "tiles": {
+    "water": 2578,
+    "lava": 1064,
+    "ice": 351
+   },
+   "rejected": 197,
+   "reqFail": 0,
+   "reqBad": [],
+   "art": 0,
+   "artChest": 0,
+   "shrine": 22,
+   "bySize": {
+    "44": 185,
+    "50": 84,
+    "56": 85,
+    "61": 46
+   }
+  }
+ },
+ {
+  "step": "hazard sim depth 110 (400 floors): no required tile cut off",
+  "pass": true,
+  "detail": {
+   "floors": 400,
+   "eligible": 400,
+   "water": 126,
+   "lava": 69,
+   "ice": 27,
+   "any": 179,
+   "tiles": {
+    "water": 3588,
+    "lava": 991,
+    "ice": 840
+   },
+   "rejected": 211,
+   "reqFail": 0,
+   "reqBad": [],
+   "art": 0,
+   "artChest": 0,
+   "shrine": 19,
+   "bySize": {
+    "44": 124,
+    "50": 60,
+    "56": 54,
+    "61": 81,
+    "65": 54,
+    "68": 27
+   }
+  }
+ },
+ {
+  "step": "hazard sim on all size tiers: no required tile cut off",
+  "pass": true,
+  "detail": {
+   "floors": 160,
+   "eligible": 160,
+   "water": 47,
+   "lava": 28,
+   "ice": 7,
+   "any": 70,
+   "tiles": {
+    "water": 1889,
+    "lava": 614,
+    "ice": 214
+   },
+   "rejected": 154,
+   "reqFail": 0,
+   "reqBad": [],
+   "art": 0,
+   "artChest": 0,
+   "shrine": 4,
+   "bySize": {
+    "44": 20,
+    "50": 20,
+    "56": 20,
+    "61": 20,
+    "65": 20,
+    "68": 20,
+    "70": 20,
+    "72": 20
+   }
+  }
+ },
+ {
+  "step": "lava only on clear/wind floors; cold floors freeze big pools into ice",
+  "pass": true,
+  "detail": {
+   "coldIce": 2165,
+   "coldWater": 503
+  }
+ },
+ {
+  "step": "water floor generated",
+  "pass": true,
+  "detail": {
+   "water": 22,
+   "lava": 0,
+   "ice": 0,
+   "obs": 0,
+   "pit": 0
+  }
+ },
+ {
+  "step": "lava-sealed artifact cave generated",
+  "pass": true,
+  "detail": {
+   "dx": 33,
+   "dy": 19,
+   "cx": 33,
+   "cy": 17,
+   "ox": 33,
+   "oy": 23,
+   "sx": 0,
+   "sy": -1
+  }
+ },
+ {
+  "step": "artifact pocket: unreachable without affix/Paramount; reachable with affix; reachable after Paramount; no wall route",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "front": [
+    33,
+    24
+   ],
+   "landing": [
+    33,
+    20
+   ],
+   "door": [
+    33,
+    19
+   ],
+   "pedestal": [
+    33,
+    17
+   ],
+   "prize": "artifact",
+   "noAffix": false,
+   "withAffix": true,
+   "moveBlockedNoAffix": true,
+   "lockedWalls": 24,
+   "wallsBroken": 0,
+   "noAffixAfterWallAttacks": false,
+   "noAffixAfterUlt": false,
+   "paramountObsidian": 9,
+   "reachAfterParamount": true
+  }
+ },
+ {
+  "step": "with the affix the hero walks over the lava moat to the landing",
+  "pass": true,
+  "detail": {
+   "steps": [
+    {
+     "ok": true,
+     "from": [
+      33,
+      24
+     ],
+     "to": [
+      33,
+      23
+     ],
+     "onHz": 2,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      23
+     ],
+     "to": [
+      33,
+      22
+     ],
+     "onHz": 2,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      22
+     ],
+     "to": [
+      33,
+      21
+     ],
+     "onHz": 2,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      21
+     ],
+     "to": [
+      33,
+      20
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      20
+     ],
+     "to": [
+      33,
+      19
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      19
+     ],
+     "to": [
+      33,
+      18
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      18
+     ],
+     "to": [
+      33,
+      18
+     ],
+     "onHz": 0,
+     "slide": false
+    },
+    {
+     "ok": true,
+     "from": [
+      33,
+      18
+     ],
+     "to": [
+      33,
+      17
+     ],
+     "onHz": 0,
+     "slide": false
+    }
+   ],
+   "hero": [
+    33,
+    20
+   ]
+  }
+ },
+ {
+  "step": "door opens; pedestal grants an artifact (1/50)",
+  "pass": true,
+  "detail": {
+   "st2": {
+    "dx": 33,
+    "dy": 19,
+    "cx": 33,
+    "cy": 17,
+    "ox": 33,
+    "oy": 23,
+    "sx": 0,
+    "sy": -1,
+    "open": 1
+   },
+   "st3": {
+    "arts": 1,
+    "art": {
+     "dx": 33,
+     "dy": 19,
+     "cx": 33,
+     "cy": 17,
+     "ox": 33,
+     "oy": 23,
+     "sx": 0,
+     "sy": -1,
+     "open": 1,
+     "taken": 1
+    },
+    "hero": [
+     33,
+     17
+    ]
+   }
+  }
+ },
+ {
+  "step": "removing the affix inside the pocket never traps the hero (can walk back out)",
+  "pass": true,
+  "detail": [
+   33,
+   24
+  ]
+ },
+ {
+  "step": "lava-sealed Resplendent Chest cave generated",
+  "pass": true,
+  "detail": {
+   "dx": 18,
+   "dy": 38,
+   "cx": 18,
+   "cy": 40,
+   "ox": 18,
+   "oy": 34,
+   "sx": 0,
+   "sy": 1,
+   "rc": 1
+  }
+ },
+ {
+  "step": "chest pocket sealed the same way",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "front": [
+    18,
+    33
+   ],
+   "landing": [
+    18,
+    37
+   ],
+   "door": [
+    18,
+    38
+   ],
+   "pedestal": [
+    18,
+    40
+   ],
+   "prize": "chest",
+   "noAffix": false,
+   "withAffix": true,
+   "moveBlockedNoAffix": true,
+   "lockedWalls": 24,
+   "wallsBroken": 0,
+   "noAffixAfterWallAttacks": false,
+   "noAffixAfterUlt": false,
+   "paramountObsidian": 9,
+   "reachAfterParamount": true
+  }
+ },
+ {
+  "step": "Resplendent Chest = triple act-boss (3 overshields) hoard, no artifact",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "idx": -1,
+   "artsGained": 0,
+   "chestItems": 32,
+   "gold": 37903,
+   "taken": true,
+   "rc": true,
+   "banner": "RESPLENDENT CHEST OPENED!"
+  }
+ },
+ {
+  "step": "every cave holds exactly one prize (artifact XOR chest)",
+  "pass": true,
+  "detail": {
+   "arts": 39,
+   "chests": 20,
+   "both": 0,
+   "none": 0
+  }
+ },
+ {
+  "step": "after 50/50 artifacts: caves keep spawning but always hold the chest",
+  "pass": true,
+  "detail": {
+   "n50": 13
+  }
+ },
+ {
+  "step": "terrain reaction ult-ice",
+  "pass": true,
+  "detail": {
+   "near": {
+    "ok": true,
+    "hero": [
+     6,
+     29
+    ],
+    "hz": [
+     8,
+     29
+    ],
+    "dens": 10
+   },
+   "before": {
+    "water": 2,
+    "lava": 0,
+    "ice": 28,
+    "obs": 0,
+    "pit": 0
+   },
+   "after": {
+    "water": 12,
+    "lava": 0,
+    "ice": 18,
+    "obs": 0,
+    "pit": 0
+   },
+   "cast": true
+  }
+ },
+ {
+  "step": "terrain reaction para-water",
+  "pass": true,
+  "detail": {
+   "near": {
+    "ok": true,
+    "hero": [
+     37,
+     35
+    ],
+    "hz": [
+     35,
+     35
+    ],
+    "dens": 5
+   },
+   "before": {
+    "water": 5,
+    "lava": 0,
+    "ice": 0,
+    "obs": 0,
+    "pit": 0
+   },
+   "after": {
+    "water": 0,
+    "lava": 0,
+    "ice": 0,
+    "obs": 0,
+    "pit": 5
+   },
+   "cast": true
+  }
+ },
+ {
+  "step": "terrain reaction para-lava",
+  "pass": true,
+  "detail": {
+   "near": {
+    "ok": true,
+    "hero": [
+     23,
+     50
+    ],
+    "hz": [
+     23,
+     48
+    ],
+    "dens": 4
+   },
+   "before": {
+    "water": 0,
+    "lava": 7,
+    "ice": 0,
+    "obs": 0,
+    "pit": 0
+   },
+   "after": {
+    "water": 0,
+    "lava": 3,
+    "ice": 0,
+    "obs": 4,
+    "pit": 0
+   },
+   "cast": true
+  }
+ },
+ {
+  "step": "gib pieces react on water",
+  "pass": true,
+  "detail": {
+   "n": 12,
+   "states": [
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  }
+ },
+ {
+  "step": "gib pieces react on lava",
+  "pass": true,
+  "detail": {
+   "n": 1,
+   "states": [
+    0
+   ]
+  }
+ },
+ {
+  "step": "gib pieces react on ice",
+  "pass": true,
+  "detail": {
+   "n": 12,
+   "states": [
+    4,
+    0,
+    0,
+    0,
+    0,
+    4,
+    4,
+    0,
+    0,
+    3,
+    4,
+    3
+   ]
+  }
+ },
+ {
+  "step": "shrine spawns near the centre on a reachable tile",
+  "pass": true,
+  "detail": {
+   "x": 20,
+   "y": 22
+  }
+ },
+ {
+  "step": "bumping the shrine starts the 60s swarm (shrine used at once)",
+  "pass": true,
+  "detail": {
+   "t": 58.50009999999991,
+   "kills": 0,
+   "live": 26
+  }
+ },
+ {
+  "step": "swarm end awards the tier reached",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "kills": 120,
+   "tier": 2,
+   "items": 4,
+   "rars": [
+    4,
+    4,
+    4,
+    3
+   ],
+   "gold": 19703,
+   "banner": "SWARM TIER: GOLD!"
+  }
+ },
+ {
+  "step": "death ends the swarm and the shrine stays used",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "swarm": false,
+   "used": true
+  }
+ },
+ {
+  "step": "buried chests capped at 2 per floor",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "broken": 20,
+   "made": 2,
+   "buried": 2
+  }
+ },
+ {
+  "step": "pet never targets a chest",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "kind": null
+  }
+ },
+ {
+  "step": "socket icon test 0-8 sockets x 4 fill patterns: drawn circles == real sockets, states match, no doubled overlay",
+  "pass": true,
+  "detail": {
+   "ok": true,
+   "rows": 36,
+   "bad": []
+  }
+ },
+ {
+  "step": "inventory cells show exactly 2, 4 and 8 circles",
+  "pass": true,
+  "detail": [
+   {
+    "pips": 2,
+    "filled": 1
+   },
+   {
+    "pips": 4,
+    "filled": 2
+   },
+   {
+    "pips": 8,
+    "filled": 4
+   }
+  ]
+ },
+ {
+  "step": "no page errors",
+  "pass": true,
+  "detail": []
+ }
+]
