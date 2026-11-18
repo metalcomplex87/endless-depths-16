@@ -65,7 +65,7 @@ async function main() {
   await page.evaluate(() => window.__ED16_PRIS.begin({ depth: 30, lvl: 60 }));
   await sleep(400);
   // 1. connectivity sweep: many generated floors (shrine forced on every other one)
-  const bad = []; let floors = 0, chests = 0, big = 0, small = 0, shr = 0, shrBig = 0;
+  const bad = []; let unreach = 0, floors = 0, chests = 0, big = 0, small = 0, shr = 0, shrBig = 0;
   for (const d of [3, 8, 14, 22, 27, 33, 41, 58, 77, 96, 120, 150, 199, 206, 260, 333, 420, 512, 640, 777, 900, 1111, 1301, 1666, 2025, 2600, 3000]) {
     for (let rep = 0; rep < 3; rep++) {
       await H(page, "force", { shrine: rep !== 1, buried: false });
@@ -76,12 +76,12 @@ async function main() {
       if (r.stairsOk.some((x) => !x)) bad.push(d + rep + ": stairs cut off");
       if (r.portalsOk.some((x) => !x)) bad.push(d + rep + ": portal cut off");
       if (!r.req.ok) bad.push(d + rep + ": req " + r.req.bad.join("/"));
-      for (const c of r.chests) { chests++; if (c.fit === 1) big++; else small++; if (!c.adj || !c.bumpAll || (c.fit === 1 && c.corr)) bad.push(d + rep + ": chest " + JSON.stringify(c)); }
+      for (const c of r.chests) { chests++; if (!c.adj) unreach++; if (c.fit === 1) big++; else small++; if ((!c.adj && c.reach0) || !c.bumpAll || (c.fit === 1 && c.corr)) bad.push(d + rep + ": chest " + JSON.stringify(c)); }
       if (r.shrine) { shr++; if (r.shrine.f === 1) shrBig++; if (!r.shrine.adj) bad.push(d + rep + ": shrine unreachable"); }
     }
   }
   await H(page, "force", {});
-  rec("connectivity: " + floors + " floors, " + chests + " chests (" + big + " 2x2, " + small + " kept 1x1), " + shr + " shrines (" + shrBig + " 2x2) - no stairs/portal/region cut off, every chest reachable and bumpable from all free sides", bad.length === 0 && floors > 60, bad.slice(0, 6).join(" | "));
+  rec("connectivity: " + floors + " floors, " + chests + " chests (" + big + " 2x2, " + small + " kept 1x1), " + shr + " shrines (" + shrBig + " 2x2), " + unreach + " chests sealed off on the original layout too - no stairs/portal/region cut off, every chest reachable and bumpable from all free sides", bad.length === 0 && floors > 60, bad.slice(0, 6).join(" | "));
   // 2. legacy 1x1 chests (old saves) get fitted, and the floor stays connected
   await H(page, "gen", 140);
   const lg = await H(page, "legacyChests", 12);

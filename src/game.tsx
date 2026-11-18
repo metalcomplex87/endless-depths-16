@@ -13690,8 +13690,23 @@ function fit2x2(g: Game, ax: number, ay: number, block: Uint8Array): { x: number
     if (ring === r) cands.push([ax + ox, ay + oy]);
   }
   const base = floorComponents(g, block); FIT_STATS.bfs++;
+  // the footprint must stay on the same side of any wall as the original tile (local flood fill, 7 tiles)
+  const local = new Uint8Array(MW * MH);
+  if (inb(ax, ay) && g.map[ay * MW + ax] !== 0) {
+    const q = [ay * MW + ax]; local[q[0]] = 1;
+    for (let i = 0; i < q.length; i++) {
+      const k = q[i], x = k % MW, y = (k / MW) | 0;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + ox, ny = y + oy; if (!inb(nx, ny) || Math.abs(nx - ax) > 7 || Math.abs(ny - ay) > 7) continue;
+        const nk = ny * MW + nx; if (local[nk] || g.map[nk] === 0 || hzSolid(g, nx, ny) || (block[nk] && nk !== ay * MW + ax)) continue;
+        local[nk] = 1; q.push(nk);
+      }
+    }
+  }
   let tries = 0;
   for (const [x, y] of cands) {
+    const k0 = y * MW + x;
+    if (!inb(x, y) || !inb(x + 1, y + 1) || !local[k0] || !local[k0 + 1] || !local[k0 + MW] || !local[k0 + MW + 1]) continue;
     if (!bigCellOk(g, x, y, block) || !bigCellOk(g, x + 1, y, block) || !bigCellOk(g, x, y + 1, block) || !bigCellOk(g, x + 1, y + 1, block)) continue;
     if (++tries > 14) break;
     const k = y * MW + x, test = block.slice(); test[k] = test[k + 1] = test[k + MW] = test[k + MW + 1] = 1;
@@ -16866,10 +16881,11 @@ try {
         for (let i = 0; i < q.length; i++) { const k = q[i], x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue; const nk = ny * MW + nx; if (seen[nk] || all[nk] || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue; seen[nk] = 1; q.push(nk); } }
         return seen;
       })();
+      const r0 = (() => { const seen = new Uint8Array(MW * MH), q = [g.hero.y * MW + g.hero.x]; seen[q[0]] = 1; for (let i = 0; i < q.length; i++) { const k = q[i], x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny) || isOuterBarrier(nx, ny)) continue; const nk = ny * MW + nx; if (seen[nk] || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue; seen[nk] = 1; q.push(nk); } } return seen; })(); // reach with no footprints at all
       const adj = (cells: number[]): number[][] => { const out: number[][] = []; for (const k of cells) { const x = k % MW, y = (k / MW) | 0; for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ox, ny = y + oy; if (!inb(nx, ny)) continue; const nk = ny * MW + nx; if (cells.includes(nk)) continue; if (reach[nk]) out.push([nx, ny, ox, oy]); } } return out; };
       const stairsOk: boolean[] = []; for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2 || g.map[k] === TILE_UP) stairsOk.push(!!reach[k]);
       const portalsOk = allPortals(g).map((p: PortalSpot) => portalCells(p).some((c) => !!reach[c.y * MW + c.x] || adj([c.y * MW + c.x]).length > 0));
-      const ch = g.chests.filter((c: Chest) => !c.open).map((c: Chest) => { const cells = chestCells(c), a = adj(cells); return { x: c.x, y: c.y, fit: c.fit, rar: c.rar, bur: !!c.bur, adj: a.length, bumpAll: a.every(([x, y, ox, oy]) => chestAt(g, x - ox, y - oy) === c), corr: cells.some((k: number) => isCorridorCell(g.map, k % MW, (k / MW) | 0)) }; });
+      const ch = g.chests.filter((c: Chest) => !c.open).map((c: Chest) => { const cells = chestCells(c), a = adj(cells); return { x: c.x, y: c.y, fit: c.fit, rar: c.rar, bur: !!c.bur, adj: a.length, reach0: cells.some((k: number) => { const x = k % MW, y = (k / MW) | 0; return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => inb(x + ox, y + oy) && !!r0[(y + oy) * MW + x + ox]); }), bumpAll: a.every(([x, y, ox, oy]) => chestAt(g, x - ox, y - oy) === c), corr: cells.some((k: number) => isCorridorCell(g.map, k % MW, (k / MW) | 0)) }; });
       const sh = g.shrine ? { x: g.shrine.x, y: g.shrine.y, f: g.shrine.f, adj: adj(shrineCells(g.shrine)).length } : null;
       return { ok: true, depth: g.depth, MW, comps: [c0, c1], stairsOk, portalsOk, chests: ch, shrine: sh, req: hzRequiredOk(g), fit: { ...FIT_STATS } };
     },
