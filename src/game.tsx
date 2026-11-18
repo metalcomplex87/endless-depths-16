@@ -140,7 +140,7 @@ interface Game {
   msgs: { t: string; c: string }[]; banner: Banner | null; turn: number; best: number; bestLvl: number;
   flash: number; flashC: string; shake: number; regenAcc: number; kills: number; lvlFx: number; deadT: number; time: number;
   fx: Fx[]; ground: Ground[]; allies: Ally[]; echo: Spell[]; ward: number; autoEq: boolean; music: boolean;
-  trader: Trader | null; merchant?: Merchant | null; shopOpen: boolean; gambOpen?: boolean; chestShop?: Partial<Record<MerchId, ChestDeal>>; chestTypes?: Record<string, ChestDeal>; chestTypeMig?: boolean; chestReveal?: { it: Item; t: number; phase: "open" | "show"; sku?: string } | null; merchSub?: { oneHand?: WT; twoHand?: WT }; ultAt: number; ultAtA?: number; ultAts?: Partial<Record<EqKey, number>>; mmBig: boolean; toast: number; saveT: number; floorTurn: number; deaths: number; spT?: number;
+  trader: Trader | null; merchant?: Merchant | null; shopOpen: boolean; gambOpen?: boolean; chestShop?: Partial<Record<MerchId, ChestDeal>>; chestTypes?: Record<string, ChestDeal>; chestTypeMig?: boolean; chestReveal?: { it: Item; t: number; phase: "open" | "show"; sku?: string } | null; merchSub?: { oneHand?: WT; twoHand?: WT }; ultAt: number; ultAtA?: number; ultAts?: Partial<Record<EqKey, number>>; paraAt?: number; para?: ParaFx | null; mmBig: boolean; toast: number; saveT: number; floorTurn: number; deaths: number; spT?: number;
   portal: PortalSpot | null; vault: string | null; secret?: PortalSpot | null; gobPort?: PortalSpot | null; arena?: string | null; gobCave?: string | null; gobT: number; locked: boolean;
   torches: Torch[];
   area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
@@ -358,7 +358,9 @@ function weaponSpells(eq: Eq): Spell[] {
   return out;
 }
 // ---------- ultimates (Prismatic weapons) ----------
-const ULT_CD = 180000;
+const ULT_CD = 60000; // each individual Prismatic ultimate: 1 minute (was 3 minutes)
+const PARA_CD = 180000; // Paramount Ultimate: shared 3-minute lockout on all six ultimates + the Paramount button
+const ULT_CD_MAX = PARA_CD; // longest cooldown a save can carry (a Paramount lockout)
 const UPAT = ["Storm", "Nova", "Collapse", "Tempest", "Cataclysm", "Rain", "Reaping", "Judgement", "Crossfire", "Maelstrom"];
 const UDESC = ["meteors crash onto every foe", "colossal novas sweep the screen", "the world implodes, then detonates", "lightning chains between every foe", "the ground splits in eight directions", "a deluge of falling bolts", "a spectral scythe reaps all", "pillars of judgement strike each foe", "searing beams cross the screen", "a spiral maelstrom of bolts"];
 const UWORD: Record<El, string[]> = {
@@ -377,7 +379,7 @@ const ULTS: Ult[] = Array.from({ length: 50 }, (_: unknown, i: number): Ult => {
 });
 function ultDesc(u: number): string {
   const x = ULTS[u] ?? ULTS[0];
-  return "\u2605 ULTIMATE: " + x.n + " - " + UDESC[x.pat] + ". Hits every enemy in view. Damage scales with your Attack, the item's level, your level versus the depth, and (if Prismatic) star power and how many Prismatic ultimates are fused. Can kill any foe, including bosses. 3 min cooldown.";
+  return "\u2605 ULTIMATE: " + x.n + " - " + UDESC[x.pat] + ". Hits every enemy in view. Damage scales with your Attack, the item's level, your level versus the depth, and (if Prismatic) star power and how many Prismatic ultimates are fused. Can kill any foe, including bosses. 1 min cooldown.";
 }
 function ultWeapon(eq: Eq): Item | null {
   if (eq.rh && eq.rh.ult !== undefined) return eq.rh;
@@ -8055,7 +8057,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
   const vault = (g.vault && g.vault.length <= SAVE_VAULT_MAX) ? g.vault : null;
   return {
     v: 2, d: g.depth, l: g.lvl, x: Math.round(g.xp), g: g.gold, p: g.potions, b: g.best, bl: g.bestLvl, k: g.kills, dt: g.deaths || 0,
-    u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
+    u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), pa: Math.max(0, Math.round((g.paraAt ?? 0) - Date.now())), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
     e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g),
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
     ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
@@ -8081,7 +8083,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     eq: g.eq, bag: g.bag, map: u8s(g.map), seen: u8s(g.seen), en: g.en.filter((e: En) => e.hp > 0).concat(g.pend), chests: g.chests, drops: g.drops,
     turn: g.turn, kills: g.kills, regenAcc: g.regenAcc, muted: g.muted,
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
-    trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
+    trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, paraAt: g.paraAt ?? 0, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
     area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
     wallBreak: !!g.wallBreak, cracks: packCracks(g),
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
@@ -8348,8 +8350,8 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.xp = optNum("x", 0, 1e15, 0); g.gold = Math.floor(optNum("g", 0, 1e15, 0));
     g.potions = Math.floor(optNum("p", 0, 1e6, 0)); g.kills = Math.floor(optNum("k", 0, 1e12, 0)); g.deaths = Math.floor(optNum("dt", 0, 1e9, 0));
     g.best = Math.max(g.best, Math.floor(optNum("b", 0, 100000, g.depth)), g.depth); g.bestLvl = Math.max(g.bestLvl, Math.floor(optNum("bl", 0, 100000, g.lvl)), g.lvl);
-    g.ultAt = Date.now() + Math.min(ULT_CD, optNum("u", 0, ULT_CD, 0));
-    g.ultAtA = Date.now() + Math.min(ULT_CD, typeof s.ua === "number" && isFinite(s.ua) ? Math.max(0, s.ua) : 0);
+    g.ultAt = Date.now() + Math.min(ULT_CD_MAX, optNum("u", 0, ULT_CD_MAX, 0));
+    g.ultAtA = Date.now() + Math.min(ULT_CD_MAX, typeof s.ua === "number" && isFinite(s.ua) ? Math.max(0, s.ua) : 0);
     g.autoEq = s.ae !== 0; g.muted = s.mu === 1; g.music = s.mo !== 0; g.autoCombine = s.ac !== 0;
     g.wallBreak = s.wb === 1;
     g.gems = typeof s.gm === "number" && isFinite(s.gm) ? Math.max(0, Math.floor(s.gm)) : 0;
@@ -8368,6 +8370,8 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     fixEq(g.eq);
     enforceHandRules(g);
     g.ultAts = readUltCds(s.ucs, g.ultAt, g.ultAtA, g.eq, true);
+    g.paraAt = typeof s.pa === "number" && isFinite(s.pa) && s.pa > 0 ? Date.now() + Math.min(PARA_CD, s.pa) : 0;
+    normUltCds(g);
     syncLegacyUlt(g);
     g.thSeen = thSeenParse(s.ts);
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
@@ -8601,9 +8605,11 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.chestTypeMig = s.chestTypeMig === true;
     migrateChestTypes(g);
     g.merchSub = unpackMerchSub(s.merchSub);
-    g.ultAt = typeof s.ultAt === "number" && isFinite(s.ultAt) ? Math.min(s.ultAt, Date.now() + ULT_CD) : 0;
-    g.ultAtA = typeof s.ultAtA === "number" && isFinite(s.ultAtA) ? Math.min(s.ultAtA, Date.now() + ULT_CD) : 0;
+    g.ultAt = typeof s.ultAt === "number" && isFinite(s.ultAt) ? Math.min(s.ultAt, Date.now() + ULT_CD_MAX) : 0;
+    g.ultAtA = typeof s.ultAtA === "number" && isFinite(s.ultAtA) ? Math.min(s.ultAtA, Date.now() + ULT_CD_MAX) : 0;
     g.ultAts = readUltCds(s.ultAts, g.ultAt, g.ultAtA, g.eq, false);
+    g.paraAt = typeof s.paraAt === "number" && isFinite(s.paraAt) ? Math.max(0, Math.min(s.paraAt, Date.now() + PARA_CD)) : 0;
+    normUltCds(g);
     syncLegacyUlt(g);
     g.floorTurn = typeof s.floorTurn === "number" && isFinite(s.floorTurn) ? Math.floor(s.floorTurn) : 0;
     g.deaths = typeof s.deaths === "number" && isFinite(s.deaths) ? Math.max(0, Math.floor(s.deaths)) : 0;
@@ -11066,12 +11072,12 @@ function packUltCds(g: Game): Partial<Record<EqKey, number>> {
 function readUltCds(raw: unknown, fallbackW: number, fallbackA: number, eq: Eq, remain: boolean): Partial<Record<EqKey, number>> {
   const out: Partial<Record<EqKey, number>> = {};
   const now = Date.now();
-  const clamp = (t: number): number => Math.max(0, Math.min(t, now + ULT_CD));
+  const clamp = (t: number): number => Math.max(0, Math.min(t, now + ULT_CD_MAX));
   if (raw && typeof raw === "object") {
     const rec = raw as Record<string, unknown>;
     for (const k of EQK) {
       const v = rec[k];
-      if (typeof v === "number" && isFinite(v) && v > 0) out[k] = clamp(remain ? now + Math.min(ULT_CD, v) : v);
+      if (typeof v === "number" && isFinite(v) && v > 0) out[k] = clamp(remain ? now + Math.min(ULT_CD_MAX, v) : v);
     }
   }
   if (!Object.keys(out).length) {
@@ -11090,6 +11096,20 @@ function syncLegacyUlt(g: Game): void {
   g.ultAtA = (a && g.ultAts && g.ultAts[a.slot]) || 0;
 }
 function ultCd(g: Game, slot: EqKey): number { return (g.ultAts && g.ultAts[slot]) || 0; }
+// Old saves carried 3-minute individual cooldowns; under the 1-minute rule they are trimmed to 1 minute,
+// unless a Paramount lockout (3 minutes, shared) is what put them there.
+function normUltCds(g: Game): void {
+  const now = Date.now();
+  const lock = (g.paraAt ?? 0) > now ? (g.paraAt as number) : 0;
+  if (!g.ultAts) g.ultAts = {};
+  for (const k of EQK) {
+    const t = g.ultAts[k];
+    if (!t) continue;
+    const lim = Math.max(now + ULT_CD, lock);
+    if (t > lim) g.ultAts[k] = lim;
+  }
+  if (!lock) g.paraAt = 0;
+}
 function setUltCd(g: Game, slot: EqKey, t: number): void {
   if (!g.ultAts) g.ultAts = {};
   g.ultAts[slot] = t;
@@ -12016,7 +12036,256 @@ function ultFxFused(g: Game, pieces: { slot: EqKey; it: Item }[], hx: number, hy
     ultFx(g, u, hx, hy, ts, !!it.golden || anyG, n, cap, scale, i * 0.09);
   }
 }
+// ---------- Paramount Ultimate ----------
+// Unlocks when all six gear slots (head, chest, arms, legs, right hand, left hand; not the pet) hold a Prismatic
+// item with an ultimate. Fires all six at once for 2x their combined damage, then locks all six individual
+// ultimates and the Paramount button for a shared 3 minutes.
+interface ParaFx {
+  t: number; cols: string[]; names: string[]; golden: boolean;
+  fired: boolean; total: number; hit: number; slain: number;
+  sh: number[]; // shards, 8 numbers each: x, y, vx, vy, rot, vr, size, hue (screen space, relative to the sigil)
+}
+const PARA_GEAR: EqKey[] = ["head", "chest", "arms", "legs", "rh", "lh"];
+const PARA_DET = 2.25; // detonation time (s): damage lands here
+const PARA_END = 4.9;
+const PARA_SLOW = 0.3; // game time runs at 30% until the detonation
+let PARA_TEST_JIT: number | undefined; // test hook: fixed damage jitter
+let PARA_CAM = { x: 0, y: 0 };
+function paraPieces(g: Game): { slot: EqKey; it: Item }[] | null {
+  const all = ultsOf(g.eq);
+  const out: { slot: EqKey; it: Item }[] = [];
+  for (const k of PARA_GEAR) { const u = all.find((x: { slot: EqKey }) => x.slot === k); if (!u) return null; out.push(u); }
+  return out;
+}
+function paraReadyAt(g: Game): number {
+  const ps = paraPieces(g);
+  if (!ps) return Infinity;
+  let t = g.paraAt ?? 0;
+  for (const u of ps) t = Math.max(t, ultCd(g, u.slot));
+  return t;
+}
+// Exact damage of the six equipped ultimates against one foe, added up, then doubled.
+function paraDamage(g: Game, st: Stats, ps: { it: Item }[], e: En, jitter?: number): { each: number[]; sum: number; total: number } {
+  const each = ps.map((u: { it: Item }) => ultDamage(g, st, u.it, e, jitter));
+  let sum = 0;
+  for (const d of each) sum = safeNum(sum + d);
+  return { each, sum, total: safeRound(safeMul(sum, 2)) };
+}
+function castParamount(g: Game): boolean {
+  if (g.mode !== "play" || uiBlocked(g) || g.paused || g.para) return false;
+  const ps = paraPieces(g);
+  if (!ps) return false;
+  const now = Date.now();
+  if (now < paraReadyAt(g)) return false;
+  const lock = now + PARA_CD;
+  for (const u of ps) { if (!g.ultAts) g.ultAts = {}; g.ultAts[u.slot] = lock; }
+  g.paraAt = lock;
+  syncLegacyUlt(g);
+  const cols = ps.map((u: { it: Item }) => { const ul = ULTS[u.it.ult ?? 0] ?? ULTS[0]; return u.it.golden ? GOLD : ELC[ul.el]; });
+  const names = ps.map((u: { it: Item }) => (ULTS[u.it.ult ?? 0] ?? ULTS[0]).n);
+  g.para = { t: 0, cols, names, golden: ps.some((u: { it: Item }) => !!u.it.golden), fired: false, total: 0, hit: 0, slain: 0, sh: [] };
+  g.banner = null;
+  msg(g, "PARAMOUNT ULTIMATE - " + names.join(" + ") + "!", "#fff0a0");
+  g.sfx("para", 0);
+  saveGame(g);
+  return true;
+}
+function paraDetonate(g: Game): void {
+  const P = g.para;
+  if (!P || P.fired) return;
+  P.fired = true;
+  g.flash = 0.95; g.flashC = "#fff4c8"; g.shake = 26;
+  const ps = paraPieces(g);
+  if (g.mode === "play" && ps) {
+    const st = calc(g.lvl, g.eq);
+    const h = g.hero;
+    const targets = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x] === 1);
+    for (const e of targets) {
+      const d = paraDamage(g, st, ps, e, PARA_TEST_JIT).total;
+      if (d <= 0) continue;
+      P.total = safeNum(P.total + d); P.hit++;
+      withHit({ ox: h.x, oy: h.y }, () => {
+        const uel = ultBestEl(e);
+        hurtEn(g, e, d, { n: "Paramount Ultimate", t: ELN[uel], c: "#fff0a0", k: 0, u: ps[0].it.ult ?? 0 }); e.hit = 0.6; e.awake = true;
+        floatTxt(g, e.x, e.y - 0.4, fmtFull(d), "#fff0a0");
+        if (e.hp <= 0) { P.slain++; kill(g, e); }
+      });
+      burst(g, e.ax * TS + 12, e.ay * TS + 12, 18, ["#ffffff", "#fff0a0", ...P.cols], 200, 30);
+    }
+    endTurn(g, false);
+  }
+  // glass shards burst out of the sigil
+  for (let i = 0; i < 46; i++) {
+    const a = R() * 6.2832, sp = 90 + R() * 260;
+    P.sh.push(0, 0, Math.cos(a) * sp, Math.sin(a) * sp, R() * 6.28, (R() - 0.5) * 14, 3 + R() * 6, Math.floor(R() * 360));
+  }
+  g.banner = null;
+  msg(g, "PARAMOUNT: " + fmtFull(P.total) + " total damage, " + P.hit + " struck, " + P.slain + " slain.", "#fff0a0");
+  saveGame(g);
+}
+// Real-time (not slowed) timeline tick. Returns the game-time scale for this frame.
+function paraTick(g: Game, dt: number): number {
+  const P = g.para;
+  if (!P) return 1;
+  P.t += dt;
+  if (!P.fired && P.t >= PARA_DET) paraDetonate(g);
+  if (P.sh.length) for (let i = 0; i < P.sh.length; i += 8) {
+    P.sh[i] += P.sh[i + 2] * dt; P.sh[i + 1] += P.sh[i + 3] * dt;
+    const k = Math.pow(0.25, dt); P.sh[i + 2] *= k; P.sh[i + 3] = P.sh[i + 3] * k + 60 * dt; P.sh[i + 4] += P.sh[i + 5] * dt;
+  }
+  if (P.t >= PARA_END) { g.para = null; return 1; }
+  return P.fired ? 1 : PARA_SLOW;
+}
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+const easeOut = (v: number): number => 1 - Math.pow(1 - clamp01(v), 3);
+function drawParamount(ctx: CanvasRenderingContext2D, g: Game): void {
+  const P = g.para;
+  if (!P) return;
+  const p = P.t;
+  const h = g.hero;
+  const hx = h.ax * TS + 12 - PARA_CAM.x, hy = h.ay * TS + 12 - PARA_CAM.y;
+  const sx = hx, sy = Math.max(HUD + 46, hy - 62);
+  ctx.save();
+  // 1) the world darkens
+  const dark = p < PARA_DET ? 0.66 * easeOut(p / 0.45) : 0.66 * (1 - clamp01((p - PARA_DET) / 0.9));
+  if (dark > 0.01) { ctx.globalAlpha = dark; ctx.fillStyle = "#05030c"; ctx.fillRect(0, HUD, VW, VIEWH); ctx.globalAlpha = 1; }
+  ctx.globalCompositeOperation = "lighter";
+  const rot = p * 2.6;
+  const R0 = 36;
+  // 2) six beams rise from the hero to the sigil's vertices
+  const beamA = p < 1.9 ? 1 : 1 - clamp01((p - 1.9) / 0.35);
+  if (p > 0.3 && beamA > 0) {
+    for (let i = 0; i < 6; i++) {
+      const k = easeOut((p - 0.35 - i * 0.07) / 0.45);
+      if (k <= 0) continue;
+      const a = rot + i * 1.0472 - 1.5708;
+      const sc = p > 1.75 ? 1 - clamp01((p - 1.75) / 0.5) : 1;
+      const tx = sx + Math.cos(a) * R0 * sc, ty = sy + Math.sin(a) * R0 * sc;
+      const ox = hx + (i - 2.5) * 2.2, oy = hy;
+      const ex = ox + (tx - ox) * k, ey = oy + (ty - oy) * k;
+      ctx.globalAlpha = 0.35 * beamA; ctx.strokeStyle = P.cols[i]; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.globalAlpha = 0.95 * beamA; ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.globalAlpha = beamA; ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(ex, ey, 2.4, 0, 6.2832); ctx.fill();
+    }
+  }
+  // 3) the rotating rainbow sigil
+  if (p > 0.85 && p < PARA_DET + 0.05) {
+    const appear = easeOut((p - 0.85) / 0.35);
+    const sc = (p > 1.75 ? 1 - easeOut((p - 1.75) / 0.5) : 1) * appear;
+    const Rr = R0 * (0.6 + 0.4 * appear) * Math.max(0.02, sc);
+    ctx.lineWidth = 2.6;
+    for (let i = 0; i < 18; i++) {
+      ctx.strokeStyle = "hsl(" + Math.floor((i * 20 + p * 220) % 360) + ",100%,62%)";
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.arc(sx, sy, Rr, rot + i * 0.349, rot + (i + 1) * 0.349); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#fff0a0";
+    ctx.beginPath(); ctx.arc(sx, sy, Rr * 1.22, 0, 6.2832); ctx.stroke();
+    for (let i = 0; i < 24; i++) {
+      const a = -rot * 0.6 + i * 0.2618, r1 = Rr * 1.12, r2 = Rr * (i % 2 ? 1.3 : 1.38);
+      ctx.beginPath(); ctx.moveTo(sx + Math.cos(a) * r1, sy + Math.sin(a) * r1); ctx.lineTo(sx + Math.cos(a) * r2, sy + Math.sin(a) * r2); ctx.stroke();
+    }
+    // counter-rotating hexagram
+    ctx.lineWidth = 1.6; ctx.globalAlpha = 0.95;
+    for (let t = 0; t < 2; t++) {
+      ctx.strokeStyle = t ? "hsl(" + Math.floor((p * 300 + 180) % 360) + ",100%,70%)" : "hsl(" + Math.floor((p * 300) % 360) + ",100%,70%)";
+      ctx.beginPath();
+      for (let j = 0; j <= 3; j++) { const a = -rot * 1.4 + t * 1.0472 + j * 2.0944 - 1.5708; const x = sx + Math.cos(a) * Rr * 0.86, y = sy + Math.sin(a) * Rr * 0.86; if (j) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+      ctx.stroke();
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = rot + i * 1.0472 - 1.5708;
+      ctx.fillStyle = P.cols[i]; ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(sx + Math.cos(a) * Rr, sy + Math.sin(a) * Rr, 3.2 * Math.max(0.3, sc), 0, 6.2832); ctx.fill();
+    }
+  }
+  // 4) collapse into a white-gold singularity (energy streaks pulled inward)
+  if (p > 1.6 && p < PARA_DET + 0.12) {
+    const q = clamp01((p - 1.6) / (PARA_DET - 1.6));
+    const rr = 2 + 11 * q * q + Math.sin(p * 60) * 1.2;
+    const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, rr * 2.6);
+    gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.35, "#fff2b0"); gr.addColorStop(0.7, "rgba(255,190,60,0.5)"); gr.addColorStop(1, "rgba(255,160,40,0)");
+    ctx.globalAlpha = 1; ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(sx, sy, rr * 2.6, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = "#fff6d0"; ctx.lineWidth = 1;
+    for (let i = 0; i < 10; i++) {
+      const a = i * 0.628 + p * 3, d = 70 * (1 - ((p * 2.4 + i * 0.1) % 1));
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath(); ctx.moveTo(sx + Math.cos(a) * d, sy + Math.sin(a) * d); ctx.lineTo(sx + Math.cos(a) * (d + 12), sy + Math.sin(a) * (d + 12)); ctx.stroke();
+    }
+  }
+  // 5) full-screen prismatic shockwave + glass shards
+  if (P.fired && p < PARA_DET + 1.3) {
+    const q = clamp01((p - PARA_DET) / 1.1);
+    const maxR = Math.hypot(VW, VH) * 1.05;
+    const r = easeOut(q) * maxR;
+    const w = 10 * (1 - q) + 2;
+    ctx.globalAlpha = 0.9 * (1 - q);
+    for (let i = 0; i < 24; i++) {
+      ctx.strokeStyle = "hsl(" + Math.floor((i * 15 + p * 200) % 360) + ",100%,62%)";
+      ctx.lineWidth = w;
+      ctx.beginPath(); ctx.arc(sx, sy, r, i * 0.2618, (i + 1) * 0.2618 + 0.02); ctx.stroke();
+    }
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, w * 0.35);
+    ctx.beginPath(); ctx.arc(sx, sy, Math.max(0, r - w), 0, 6.2832); ctx.stroke();
+    ctx.globalAlpha = 0.5 * (1 - q); ctx.lineWidth = 2; ctx.strokeStyle = "#fff0a0";
+    ctx.beginPath(); ctx.arc(sx, sy, r * 0.7, 0, 6.2832); ctx.stroke();
+  }
+  if (P.sh.length && p < PARA_DET + 1.6) {
+    const q = clamp01((p - PARA_DET) / 1.6);
+    for (let i = 0; i < P.sh.length; i += 8) {
+      const x = sx + P.sh[i], y = sy + P.sh[i + 1], rt = P.sh[i + 4], z = P.sh[i + 6];
+      ctx.globalAlpha = 0.95 * (1 - q);
+      ctx.fillStyle = "hsl(" + P.sh[i + 7] + ",100%,72%)";
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(rt) * z, y + Math.sin(rt) * z);
+      ctx.lineTo(x + Math.cos(rt + 2.3) * z * 0.6, y + Math.sin(rt + 2.3) * z * 0.6);
+      ctx.lineTo(x + Math.cos(rt + 3.9) * z * 0.45, y + Math.sin(rt + 3.9) * z * 0.45);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.6; ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+  // 6) title card + the huge combined number
+  if (P.fired && p < PARA_END) {
+    const q = (p - PARA_DET);
+    const fade = 1 - clamp01((p - (PARA_END - 0.6)) / 0.6);
+    const pop = 1 + 0.6 * (1 - easeOut(q / 0.25));
+    const cy = HUD + VIEWH * 0.3;
+    ctx.globalAlpha = 0.55 * fade; ctx.fillStyle = "#07040f";
+    ctx.fillRect(0, cy - 26, VW, 62);
+    ctx.globalAlpha = fade;
+    const grd = ctx.createLinearGradient(0, 0, VW, 0);
+    for (let i = 0; i <= 6; i++) grd.addColorStop(i / 6, "hsl(" + Math.floor((i * 60 + p * 160) % 360) + ",100%,66%)");
+    ctx.save();
+    ctx.translate(VW / 2, cy - 6); ctx.scale(pop, pop);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    let fs = 30; ctx.font = "900 " + fs + "px " + PEAK_FONT;
+    while (fs > 14 && ctx.measureText("PARAMOUNT").width > VW - 14) { fs--; ctx.font = "900 " + fs + "px " + PEAK_FONT; }
+    ctx.lineWidth = 3; ctx.strokeStyle = "#3a2400"; ctx.strokeText("PARAMOUNT", 0, 0);
+    ctx.fillStyle = grd; ctx.fillText("PARAMOUNT", 0, 0);
+    ctx.lineWidth = 0.8; ctx.strokeStyle = "#fff6d0"; ctx.strokeText("PARAMOUNT", 0, 0);
+    ctx.restore();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const num = fmtFull(P.total);
+    let ns = 22; ctx.font = "900 " + ns + "px " + PEAK_FONT;
+    while (ns > 10 && ctx.measureText(num).width > VW - 12) { ns--; ctx.font = "900 " + ns + "px " + PEAK_FONT; }
+    ctx.lineWidth = 3; ctx.strokeStyle = "#000000"; ctx.strokeText(num, VW / 2, cy + 18);
+    ctx.fillStyle = "#fff0a0"; ctx.fillText(num, VW / 2, cy + 18);
+    ctx.font = "bold 6px monospace"; ctx.fillStyle = "#ffffff";
+    ctx.fillText("6 ULTIMATES x2 \u00b7 " + P.hit + " STRUCK \u00b7 " + P.slain + " SLAIN", VW / 2, cy + 31);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
 function castUlt(g: Game, slot?: EqKey): boolean {
+
   if (g.mode !== "play" || uiBlocked(g) || g.paused) return false;
   const all = ultsOf(g.eq);
   if (!all.length) return false;
@@ -12485,6 +12754,10 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-ults .dc-ultm { display: block; font-size: 10px; font-weight: 700; color: #ffe080; line-height: 1.15; }
 .dc-ults .dc-ultk { position: absolute; left: 4px; top: 2px; font-size: 8px; font-weight: 800; opacity: 0.75; pointer-events: none; }
 .dc-ults .dc-ult.rdy { box-shadow: 0 0 10px #ffd840, 0 1px 6px rgba(0, 0, 0, 0.5); }
+.dc-ults .dc-para { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; border: 2px solid #fff0a0; color: #fff6d0; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); line-height: 1.05; }
+.dc-ults .dc-para.rdy { background: linear-gradient(90deg, #ff4060, #ffd840, #40ff90, #40d0ff, #a060ff, #ff40c0, #ff4060); background-size: 300% 100%; animation: shim 1.6s linear infinite; box-shadow: 0 0 14px #fff0a0, 0 0 4px #ffffff, 0 1px 6px rgba(0, 0, 0, 0.5); color: #1a0f00; }
+.dc-ults .dc-paran { display: block; font-size: 12px; font-weight: 900; letter-spacing: 0.08em; }
+.dc-ults .dc-param { display: block; font-size: 9px; font-weight: 800; opacity: 0.9; }
 .dc-ults.n1, .dc-ults.n2 { width: 96px; grid-template-columns: 1fr; }
 .dc-ults.n3, .dc-ults.n4 { width: 88px; grid-template-columns: 1fr; }
 .dc-ults.n5, .dc-ults.n6 { width: 148px; grid-template-columns: 1fr 1fr; }
@@ -13866,7 +14139,88 @@ function sortTest(): Record<string, unknown> {
   return { seq, contiguous: switches === groups - 1, setFirst: grp.indexOf("6S") < grp.indexOf("6N"), starsOk };
 }
 try { (window as unknown as { __ED16_SORT?: object }).__ED16_SORT = { test: sortTest }; } catch { /* ignore */ }
+// ---------- test hooks: Paramount Ultimate ----------
+function paraGame(six: boolean): Game {
+  const g = newGame(null);
+  g.mode = "play"; g.lvl = 120; g.depth = 100; g.front = 100; g.area = "dungeon"; g.vault = null;
+  g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+  const kinds: [EqKey, Kind][] = [["head", "head"], ["chest", "chest"], ["arms", "arms"], ["legs", "legs"], ["rh", "sword"], ["lh", six ? "sword" : "shield"]];
+  kinds.forEach(([k, kind]: [EqKey, Kind], i: number) => { const it = makeItem(88 + i * 5, 7, kind, 100); if (i % 2) forceStars(it, i); g.eq[k] = it; });
+  g.en = []; moveCarveRoom(g, 22, 22, 9);
+  g.hero.x = g.hero.ax = 22; g.hero.y = g.hero.ay = 22;
+  g.ultAts = {}; g.paraAt = 0;
+  return g;
+}
+function paraFoes(g: Game, n: number): En[] {
+  const out: En[] = [];
+  const spots = [[25, 21], [19, 23], [23, 25], [20, 19], [26, 24]];
+  for (let i = 0; i < n; i++) { const [x, y] = spots[i]; const e = mkEnemy(g, x, y, i === 0 ? 2 : 1); e.hp = e.mhp = 1e13; e.shd = 0; e.mshd = 0; e.ovhp = 0; e.ovmhp = 0; e.ovn = 0; e.awake = true; g.en.push(e); out.push(e); }
+  computeVis(g);
+  return out;
+}
+function paraTest(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const res: Record<string, unknown> = {};
+    res.ultCdMs = ULT_CD; res.paraCdMs = PARA_CD;
+    // 1-minute individual cooldown
+    const g1 = paraGame(true); paraFoes(g1, 1);
+    const t0 = Date.now(); castUlt(g1, "head");
+    res.singleCdLeft = ultCd(g1, "head") - t0;
+    res.singleCdLen = ultCdLen(g1);
+    // unlock rule
+    const g5 = paraGame(false);
+    res.unlock = { fiveWithShield: !!paraPieces(g5), ults5: ultsOf(g5.eq).length, six: !!paraPieces(paraGame(true)), sixWithPrisPetToo: (() => { const gp = paraGame(true); gp.eq.pet = makePet(100, 7, 100); return !!paraPieces(gp); })() };
+    res.castWhenLocked5 = castParamount(g5);
+    // Paramount blocked while any of the six is cooling down
+    res.blockedByOneCd = (() => { const gx = paraGame(true); paraFoes(gx, 1); castUlt(gx, "legs"); return castParamount(gx); })();
+    // damage: exact 2x of the six ultimates' combined damage (fixed jitter for an exact comparison)
+    const g = paraGame(true); const foes = paraFoes(g, 3);
+    const st = calc(g.lvl, g.eq); const ps = paraPieces(g)!;
+    PARA_TEST_JIT = 1;
+    try {
+      const exp = foes.map((e: En) => paraDamage(g, st, ps, e, 1));
+      const hp0 = foes.map((e: En) => e.hp);
+      const tc = Date.now();
+      const ok = castParamount(g);
+      const cds = { slots: PARA_GEAR.map((k: EqKey) => Math.round((ultCd(g, k) - tc) / 1000)), para: Math.round(((g.paraAt ?? 0) - tc) / 1000) };
+      const hpMid = foes.map((e: En) => e.hp);
+      let sc = 1; let steps = 0;
+      while (g.para && !g.para.fired && steps < 100) { sc = paraTick(g, 0.05); steps++; }
+      res.timeScaleBeforeDetonation = PARA_SLOW;
+      res.damage = foes.map((e: En, i: number) => ({ eachUlt: exp[i].each, sixSum: exp[i].sum, expected2x: exp[i].total, dealt: hp0[i] - e.hp, untilDetonation: hp0[i] - hpMid[i], match: hp0[i] - e.hp === exp[i].total }));
+      res.cast = { ok, cds, total: g.para ? g.para.total : null, hit: g.para ? g.para.hit : null, detonatedAfterS: +(steps * 0.05).toFixed(2), scaleAfter: sc };
+      res.peak = g.pk ? g.pk.u : null;
+      res.recast = castParamount(g);
+      res.singleWhileLocked = PARA_GEAR.map((k: EqKey) => castUlt(g, k));
+      // Save Code round trip keeps the shared lockout
+      const g2 = decodeCode(makeCode(g), null);
+      const n2 = Date.now();
+      res.saveRoundTrip = g2 ? { para: Math.round(((g2.paraAt ?? 0) - n2) / 1000), slots: PARA_GEAR.map((k: EqKey) => Math.round((ultCd(g2, k) - n2) / 1000)) } : null;
+      // An old save whose ults sit on the old 3-minute cooldown (no Paramount lockout) is trimmed to 1 minute
+      const g3 = paraGame(true); const n3 = Date.now();
+      g3.ultAts = { head: n3 + 170000, rh: n3 + 30000 }; g3.paraAt = 0;
+      const g4 = decodeCode(makeCode(g3), null);
+      const n4 = Date.now();
+      res.oldCdTrim = g4 ? { head: Math.round((ultCd(g4, "head") - n4) / 1000), rh: Math.round((ultCd(g4, "rh") - n4) / 1000), para: g4.paraAt ?? 0 } : null;
+      // finish the effect
+      let k = 0; while (g.para && k < 200) { paraTick(g, 0.05); k++; }
+      res.effectEndsAfterS = +((steps + k) * 0.05).toFixed(2);
+    } finally { PARA_TEST_JIT = undefined; }
+    return res;
+  });
+}
+let PARA_SHOT_G: Game | null = null;
+function paraShot(cast: boolean): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = PARA_SHOT_G && !cast ? PARA_SHOT_G : (PARA_SHOT_G ?? paraGame(true));
+    if (!PARA_SHOT_G) { paraFoes(g, 5); LOAD_COMBINED.add(g); PARA_SHOT_G = g; if (installTestGame) installTestGame(g); IP.camOk = false; }
+    if (cast) return { ok: castParamount(g) };
+    return { ok: true, ready: paraReadyAt(g) <= Date.now() };
+  });
+}
+try { (window as unknown as { __ED16_PARA?: object }).__ED16_PARA = { test: paraTest, shot: paraShot, t: () => (PARA_SHOT_G && PARA_SHOT_G.para ? PARA_SHOT_G.para.t : -1), end: () => { PARA_SHOT_G = null; portalsEnd(); } }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
+
 function withPetsTest<T>(fn: () => T): T {
   const prev = GIB_SKIP_SAVE;
   GIB_SKIP_SAVE = true;
@@ -15171,6 +15525,17 @@ export default function App() {
         case "roar": tone(110, 45, 1.1, "sawtooth", 0.08); tone(116, 48, 1.1, "sawtooth", 0.06); nz(1.0, 0.12, "lowpass", 900, 80); break;
         case "pulse": tone(300, 620, 0.12, "sine", 0.03); break;
         case "mx": playMagic(v); break;
+        case "para": {
+          // Paramount sting: sub drop + six rising notes (one per ultimate) + a bright chord and glassy shimmer at the detonation.
+          tone(70, 32, 2.2, "sine", 0.12); nz(2.0, 0.08, "lowpass", 400, 2400);
+          [262, 330, 392, 523, 659, 784].forEach((f: number, i: number) => tone(f, f * 1.01, 0.5, i % 2 ? "triangle" : "sine", 0.05, 0.35 + i * 0.12));
+          tone(1400, 3200, 0.9, "sine", 0.025, 1.2);
+          tone(110, 36, 1.6, "sawtooth", 0.11, 2.25); nz(1.6, 0.22, "lowpass", 5000, 60, 2.25);
+          [523, 659, 784, 1047, 1319].forEach((f: number, i: number) => tone(f, f, 1.6, i % 2 ? "triangle" : "sine", 0.045, 2.3 + i * 0.02));
+          for (let i = 0; i < 10; i++) tone(2400 + i * 260, 1800 + i * 200, 0.12, "triangle", 0.02, 2.35 + i * 0.05);
+          nz(0.7, 0.07, "highpass", 6000, 3000, 2.4);
+          break;
+        }
         case "ult": {
           const u = ULTS[v] ?? ULTS[0];
           const b = 90 + (v % 10) * 18 + Math.floor(v / 10) * 7;
@@ -15545,6 +15910,7 @@ export default function App() {
       g.toast = Math.max(0, g.toast - dt);
       if (g.lootToast) g.lootToast = Math.max(0, g.lootToast - dt);
       const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
+      if (g.para) dt *= paraTick(g, paused ? 0 : dt); // Paramount: real-time timeline, slowed game time until detonation
       if (g.mode === "play" && !paused) { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
       if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); portalFxTick(g, dt); }
       if (g.portal && portalVis(g, g.vis) && Math.random() < 0.3) {
@@ -15717,6 +16083,7 @@ export default function App() {
         text("BANK", sx0 + 12, sy0 - 4, GOLD, "center", 5);
       }
       drawPeakCamp(ctx, g, camX, camY);
+      PARA_CAM = { x: camX, y: camY };
       const ens = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x]).sort((a: En, b: En) => a.y - b.y);
       let boss: En | null = null;
       const bosses: En[] = [];
@@ -16036,7 +16403,7 @@ export default function App() {
       ctx.setTransform(PX, 0, 0, PX, 0, 0);
       ctx.imageSmoothingEnabled = false;
       if (g.mode === "title") drawTitle(g);
-      else drawPlay(g);
+      else { drawPlay(g); if (g.para) drawParamount(ctx, g); }
       if (invRef.current && portRef.current) {
         const pctx = portRef.current.getContext("2d");
         if (pctx) drawBagPortrait(pctx, g.eq);
@@ -16134,7 +16501,7 @@ export default function App() {
       const dd = keyDir(ev);
       const tok = keyTok(ev);
       const isUltDigit = kl >= "1" && kl <= "6";
-      const handled = !!dd || kl === " " || kl === "." || kl === "enter" || kl === "i" || kl === "b" || kl === "tab" || kl === ">" || kl === "m" || kl === "r" || kl === "n" || kl === "k" || isUltDigit;
+      const handled = !!dd || kl === " " || kl === "." || kl === "enter" || kl === "i" || kl === "b" || kl === "tab" || kl === ">" || kl === "m" || kl === "r" || kl === "n" || kl === "k" || kl === "0" || isUltDigit;
       if (!handled) return;
       ev.preventDefault();
       ensureAudio();
@@ -16152,6 +16519,7 @@ export default function App() {
       else if (kl === "i" || kl === "b" || kl === "tab") api?.openInv();
       else if (kl === ">" || kl === "enter") { try { useStairsOrPortal(g); } catch (err) { console.error("Endless Depths: input error (recovered, run kept)", err); } }
       else if (kl === "r") { if (castUlt(g)) g.notify(); }
+      else if (kl === "0") { if (castParamount(g)) g.notify(); }
       else if (isUltDigit) { const u = ultsOf(g.eq)[Number(kl) - 1]; if (u && castUlt(g, u.slot)) g.notify(); }
       else if (kl === "n") g.mmBig = !g.mmBig;
       else if (kl === "k") { if (g.mode === "play") toggleWallBreak(g); }
@@ -16822,6 +17190,19 @@ export default function App() {
             const now = Date.now();
             return (
             <div className={"dc-ults n" + Math.min(6, list.length)} style={{ gap: sz.gap }}>
+              {(() => {
+                if (!paraPieces(g)) return null;
+                const pLeft = Math.max(0, paraReadyAt(g) - now);
+                const pReady = pLeft <= 0 && !g.para;
+                const pFrac = 1 - Math.min(1, pLeft / PARA_CD);
+                const plab = "Paramount Ultimate: all six ultimates at once, x2 combined damage" + (pLeft > 0 ? " - ready in " + ultCdText(pLeft) : "");
+                return (
+                  <button key="paramount" type="button" className={"dc-b dc-para" + (pReady ? " rdy" : "")} data-para-ready={pReady ? "1" : "0"} data-para-cd={pLeft} style={{ ...btn, gridColumn: "1 / -1", width: "100%", height: Math.max(30, Math.round(sz.h * 0.8)), padding: 2, background: pReady ? undefined : "conic-gradient(#fff0a0 " + Math.round(pFrac * 360) + "deg, #2a2438 0deg)" }} disabled={!playing || !pReady} onClick={() => { const gg = gRef.current; if (gg && castParamount(gg)) bump(); }} aria-label={plab} title={plab}>
+                    <span className="dc-paran">{"✦ PARAMOUNT ✦"}</span>
+                    <span className="dc-param">{pReady ? "6 ULTS x2" : ultCdText(pLeft)}</span>
+                  </button>
+                );
+              })()}
               {list.map((u: { slot: EqKey; it: Item }, i: number) => {
                 const left = Math.max(0, ultCd(g, u.slot) - now);
                 const ready = left <= 0;

@@ -190,8 +190,8 @@ async function main() {
     const dmgChest = await api(page, "dmg", "chest");
     record("weapon and armor ultimates have their own individual power", !!(dmgA && dmgA.ok && dmgChest && dmgChest.ok && dmgA.mul === 2.5), `rh mid=${dmgA && dmgA.mid} chest mid=${dmgChest && dmgChest.mid} muls ${dmgA && dmgA.mul}/${dmgChest && dmgChest.mul}`);
 
-    // Independent 180s cooldown, countdown on the fired button only
-    record("base ultimate cooldown is 3 minutes (180000 ms)", !!(three && three.ultCdMs === 180000), String(three && three.ultCdMs));
+    // Independent 60s cooldown, countdown on the fired button only
+    record("base ultimate cooldown is 1 minute (60000 ms)", !!(three && three.ultCdMs === 60000), String(three && three.ultCdMs));
     await api(page, "clearCds");
     const beforeCast = await api(page, "logical");
     const allReady = beforeCast && beforeCast.buttons && beforeCast.buttons.every((b) => b.ready);
@@ -202,11 +202,11 @@ async function main() {
     const uiCd = await api(page, "ui");
     const rhCd = afterCast && afterCast.buttons && afterCast.buttons.find((b) => b.slot === "rh");
     const othersReady = afterCast && afterCast.buttons && afterCast.buttons.filter((b) => b.slot !== "rh").every((b) => b.ready);
-    const leftOk = rhCd && rhCd.left >= 170000 && rhCd.left <= 180000;
+    const leftOk = rhCd && rhCd.left >= 50000 && rhCd.left <= 60000;
     const txtOk = rhCd && /^\d:\d\d$/.test(rhCd.cdText);
     const uiRh = uiCd && uiCd.buttons && uiCd.buttons.find((b) => b.slot === "rh");
     const uiShows = uiRh && /\d:\d\d/.test(uiRh.label + " " + uiRh.aria);
-    record("firing one ult starts its own 180s cooldown", !!(fired && fired.fired && leftOk), JSON.stringify(rhCd));
+    record("firing one ult starts its own 60s cooldown", !!(fired && fired.fired && leftOk), JSON.stringify(rhCd));
     record("other ultimates stay ready (independent cooldowns)", !!othersReady, JSON.stringify(afterCast && afterCast.buttons));
     record("cooldown countdown is shown on the button", !!(txtOk && uiShows), `logical=${rhCd && rhCd.cdText} ui=${uiRh && uiRh.label}`);
 
@@ -236,7 +236,7 @@ async function main() {
     await api(page, "cast", "rh");
     const ch = await api(page, "logical");
     const chRh = ch && ch.buttons && ch.buttons[0];
-    record("Apex Chronos shortens the 180s cooldown", !!(len0 === 180000 && len1 < 180000 && len1 >= 90000 && chRh && chRh.left <= len1 && chRh.left >= len1 - 2000 && chRh.cdText), `len ${len0} -> ${len1}, left=${chRh && chRh.left} text=${chRh && chRh.cdText}`);
+    record("Apex Chronos shortens the 60s cooldown", !!(len0 === 60000 && len1 < 60000 && len1 >= 30000 && chRh && chRh.left <= len1 && chRh.left >= len1 - 2000 && chRh.cdText), `len ${len0} -> ${len1}, left=${chRh && chRh.left} text=${chRh && chRh.cdText}`);
 
     // A single ult does not one-shot a typical-depth boss
     await api(page, "begin", { depth: 10, lvl: 10 });
