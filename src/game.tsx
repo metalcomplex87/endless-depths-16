@@ -13747,20 +13747,26 @@ function maybeSpawnShrine(g: Game): boolean {
   if (!SHRINE_FORCE && rng32(hash32(floorSeed(g), g.depth, 0x5821) | 1)() >= SHRINE_CH) return false;
   const reach = reachFromHero(g);
   const cx = MW >> 1, cy = MH >> 1;
-  let best = -1, bd = 1e9;
+  const cands: number[][] = [];
   for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) {
     const k = y * MW + x;
     if (!reach[k] || g.map[k] !== 1 || (x === g.hero.x && y === g.hero.y)) continue;
     if (cellFeatureBlocked(g, x, y, { allowCorr: false }) || enemyAt(g, x, y)) continue;
-    const d = Math.abs(x - cx) + Math.abs(y - cy);
-    if (d < bd) { bd = d; best = k; }
+    cands.push([Math.abs(x - cx) + Math.abs(y - cy), x, y]);
   }
-  if (best < 0) return false;
-  g.shrine = { x: best % MW, y: (best / MW) | 0 };
-  const p = fit2x2(g, g.shrine.x, g.shrine.y, bigBlockMask(g, null, true));
-  if (!p) { g.shrine = null; return false; } // a new shrine is always 2x2; no room for one, no shrine
-  g.shrine.x = p.x; g.shrine.y = p.y; g.shrine.f = 1;
-  return true;
+  if (!cands.length) return false;
+  cands.sort((a, b) => a[0] - b[0]);
+  // a new shrine is always 2x2: try the spots nearest the middle until one has room (spread out, max 12 tries)
+  const block = bigBlockMask(g, null, true);
+  const tried: number[][] = [];
+  for (const [, x, y] of cands) {
+    if (tried.length >= 12) break;
+    if (tried.some(([tx, ty]) => Math.abs(tx - x) + Math.abs(ty - y) < 6)) continue;
+    tried.push([x, y]);
+    const p = fit2x2(g, x, y, block);
+    if (p) { g.shrine = { x: p.x, y: p.y, f: 1 }; return true; }
+  }
+  return false;
 }
 function markShrineUsed(g: Game): void {
   if (!g.shrine) return;
