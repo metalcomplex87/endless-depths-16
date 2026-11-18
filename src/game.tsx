@@ -2534,6 +2534,9 @@ function invStars(it: Item): number { return it.st ? it.st.length : 0; }
 function cmpInvItems(a: Item, b: Item): number {
   const ra = lootRarBucket(a), rb = lootRarBucket(b);
   if (rb !== ra) return rb - ra;
+  // Within a bucket, set pieces form their own group ahead of regular items (never interleaved).
+  const ka = a.set !== undefined ? 1 : 0, kb = b.set !== undefined ? 1 : 0;
+  if (kb !== ka) return kb - ka;
   const sa = invStars(a), sb = invStars(b);
   if (sb !== sa) return sb - sa;
   return (a.id | 0) - (b.id | 0);
@@ -13790,6 +13793,28 @@ function bpShot(): Record<string, unknown> {
   });
 }
 try { (window as unknown as { __ED16_BPOW?: object }).__ED16_BPOW = { test: bpTest, shot: bpShot, end: portalsEnd }; } catch { /* ignore */ }
+function sortTest(): Record<string, unknown> {
+  const g = newGame(null);
+  const bag: Item[] = [];
+  const kinds: Kind[] = ["head", "chest", "sword", "legs", "arms"];
+  const ak: AK[] = ["head", "chest", "legs", "arms"];
+  for (let i = 0; i < 30; i++) {
+    const r = i % 5 === 0 ? 5 : 6;
+    const it = i % 2 === 1 ? makeSetPiece(40, ak[i % 4], undefined, 40, i % 6 === 1 ? 4 : 6) : makeItem(40, r, kinds[i % kinds.length], 40);
+    it.st = new Array(i % 4).fill(0).map(() => [0]);
+    bag.push(it);
+  }
+  g.bag = bag.sort(() => Math.random() - 0.5);
+  sortInventory(g);
+  const seq = g.bag.map((it: Item) => (it.set !== undefined ? "S" : "R" + it.rar) + "*" + invStars(it));
+  const grp = g.bag.map((it: Item) => lootRarBucket(it) + (it.set !== undefined ? "S" : "N"));
+  let switches = 0; for (let i = 1; i < grp.length; i++) if (grp[i] !== grp[i - 1]) switches++;
+  const groups = new Set(grp).size;
+  let starsOk = true;
+  for (let i = 1; i < g.bag.length; i++) if (grp[i] === grp[i - 1] && invStars(g.bag[i]) > invStars(g.bag[i - 1])) starsOk = false;
+  return { seq, contiguous: switches === groups - 1, setFirst: grp.indexOf("6S") < grp.indexOf("6N"), starsOk };
+}
+try { (window as unknown as { __ED16_SORT?: object }).__ED16_SORT = { test: sortTest }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
 function withPetsTest<T>(fn: () => T): T {
   const prev = GIB_SKIP_SAVE;
