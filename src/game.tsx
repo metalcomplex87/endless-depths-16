@@ -116,7 +116,7 @@ interface En { id: number; x: number; y: number; ax: number; ay: number; f: numb
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[] }
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; g: number; k?: number; ang?: number; spin?: number; gib?: boolean; trail?: boolean; pfx?: boolean; rest?: number; drag?: number; bounces?: number; streak?: number }
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
@@ -131,11 +131,12 @@ interface FloorSnap {
   theme: number; campSpot?: { x: number; y: number }; gobT: number; floorTurn: number;
   cracks?: string;
 }
-interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number }
+interface Splat { x: number; y: number; wall: boolean; c: string; life: number; max: number; dots: { x: number; y: number; s: number; a: number }[] }
+interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number; rest?: number; drag?: number; bounces?: number; streak?: number }
 interface Game {
   mode: Mode; depth: number; map: Uint8Array; seen: Uint8Array; vis: Uint8Array; theme: number; tiles: HTMLCanvasElement[];
   hero: Hero; lvl: number; xp: number; gold: number; gems?: number; potions: number; eq: Eq; bag: Item[];
-  en: En[]; pend: En[]; chests: Chest[]; drops: Drop[]; parts: Part[]; floats: Float[]; shots: Shot[]; shards?: Shard[];
+  en: En[]; pend: En[]; chests: Chest[]; drops: Drop[]; parts: Part[]; floats: Float[]; shots: Shot[]; shards?: Shard[]; splats?: Splat[];
   msgs: { t: string; c: string }[]; banner: Banner | null; turn: number; best: number; bestLvl: number;
   flash: number; flashC: string; shake: number; regenAcc: number; kills: number; lvlFx: number; deadT: number; time: number;
   fx: Fx[]; ground: Ground[]; allies: Ally[]; echo: Spell[]; ward: number; autoEq: boolean; music: boolean;
@@ -1100,6 +1101,7 @@ function spawnMonstersOnMap(g: Game): void {
   }
 }
 function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
+  g.splats = [];
   g.depth = snap.d;
   g.map = unpackMapBits(snap.map, 2, MW * MH);
   g.seen = unpackMapBits(snap.seen, 1, MW * MH);
@@ -1973,6 +1975,7 @@ function applySideStash(g: Game, raw: string): boolean {
   try {
     const s = JSON.parse(raw) as SideStash;
     if (!s || typeof s.map !== "string" || s.map.length !== MW * MH || typeof s.seen !== "string" || s.seen.length !== MW * MH || !inb(s.hx, s.hy)) return false;
+    g.splats = [];
     g.map = su8(s.map); g.seen = su8(s.seen); g.vis = new Uint8Array(MW * MH);
     g.en = (Array.isArray(s.en) ? s.en : []).filter((e: En) => !!e && e.hp > 0 && inb(e.x, e.y)).map((e: En) => ({ ...e, ax: e.x, ay: e.y, bump: 0, hit: 0 }));
     g.pend = [];
@@ -1993,6 +1996,7 @@ function clearToSideRoom(g: Game, x: number, y: number, w: number, h: number): v
   const map = new Uint8Array(MW * MH);
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) map[yy * MW + xx] = 1;
   g.map = map;
+  g.splats = [];
   g.seen = new Uint8Array(MW * MH);
   for (let yy = y - 1; yy <= y + h; yy++) for (let xx = x - 1; xx <= x + w; xx++) if (inb(xx, yy)) g.seen[yy * MW + xx] = 1;
   g.vis = new Uint8Array(MW * MH);
@@ -2142,6 +2146,7 @@ function applySideInterior(g: Game, raw: unknown): boolean {
     const s = JSON.parse(raw) as Record<string, unknown>;
     const map = su8(s.map);
     if (!map || map.length !== MW * MH) return false;
+    g.splats = [];
     g.map = map;
     g.seen = su8(s.seen) || new Uint8Array(MW * MH);
     g.vis = new Uint8Array(MW * MH);
@@ -2283,7 +2288,7 @@ function sliceSprite(src: HTMLCanvasElement, n: number): HTMLCanvasElement[] {
   return outs;
 }
 function shardsOf(g: Game): Shard[] { return (g as Game & { shards?: Shard[] }).shards || ((g as Game & { shards?: Shard[] }).shards = []); }
-function spawnShatter(g: Game, e: En, dx: number, dy: number): void {
+function spawnShatter(g: Game, e: En, dx: number, dy: number, r: number = 1): void {
   const src = captureEnemySprite(e);
   if (!src) return;
   const bossy = !!(e.act || e.cls === 2);
@@ -2304,13 +2309,16 @@ function spawnShatter(g: Game, e: En, dx: number, dy: number): void {
   let ang = Math.atan2(dy, dx);
   if (!isFinite(ang) || (dx === 0 && dy === 0)) ang = R() * 6.2832;
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
+  const ok = okillCurve(r);
   for (const cv of slices) {
     const a = ang + (R() - 0.5) * GIB_CONE * 2;
-    const sp = (bossy ? 90 : 55) * (0.65 + R() * 0.7);
+    const sp = (bossy ? 90 : 55) * (0.65 + R() * 0.7) * ok.spd;
+    const life = Math.min(OKILL_LIFE_CAP, (0.7 + R() * 0.45) * ok.life);
     list.push({
-      x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 20,
+      x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 20 * ok.grav,
       rot: R() * 6.2832, vr: (R() - 0.5) * 8,
-      life: 0.7 + R() * 0.45, max: 1, cv, g: 180,
+      life, max: life, cv, g: 180 * ok.grav,
+      rest: ok.rest, drag: ok.drag, streak: ok.trail, bounces: 0,
     });
   }
   g.sfx("shatter");
@@ -2319,7 +2327,9 @@ function tickShards(g: Game, dt: number): void {
   const list = (g as Game & { shards?: Shard[] }).shards;
   if (!list || !list.length) return;
   for (const s of list) {
-    s.x += s.vx * dt; s.y += s.vy * dt; s.vy += s.g * dt; s.vx *= 0.98; s.rot += s.vr * dt; s.life -= dt;
+    if ((s.rest ?? 0) > 0.05) bounceMove(g, s, dt);
+    else { s.x += s.vx * dt; s.y += s.vy * dt; }
+    s.vy += s.g * dt; s.vx *= (s.drag ?? 0.98); s.rot += s.vr * dt; s.life -= dt;
   }
   (g as Game & { shards?: Shard[] }).shards = list.filter((s: Shard) => s.life > 0);
 }
@@ -2328,6 +2338,19 @@ function drawShards(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: 
   if (!list || !list.length) return;
   for (const s of list) {
     const fade = Math.max(0, Math.min(1, s.life / Math.max(0.15, s.max) * 1.4));
+    if ((s.streak ?? 0) > 0.2) {
+      const len = Math.min(90, Math.hypot(s.vx, s.vy) * 0.035 * (s.streak ?? 0));
+      const spd = Math.hypot(s.vx, s.vy) || 1;
+      ctx.save();
+      ctx.globalAlpha = fade * 0.28 * (s.streak ?? 0);
+      ctx.strokeStyle = "#f0e8e0";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x - camX, s.y - camY);
+      ctx.lineTo(s.x - camX - s.vx / spd * len, s.y - camY - s.vy / spd * len);
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.save();
     ctx.globalAlpha = fade;
     ctx.translate(s.x - camX, s.y - camY);
@@ -4005,13 +4028,199 @@ function hitDirOf(g: Game, e: En): { dx: number; dy: number } {
   if (stamped && (stamped.dx !== 0 || stamped.dy !== 0)) return stamped;
   return heroToEn(g, e) || ((): { dx: number; dy: number } => { const an = R() * 6.2832; return { dx: Math.cos(an), dy: Math.sin(an) }; })();
 }
-function burstGib(g: Game, x: number, y: number, n: number, cols: string[], sp: number, grav: number, dx: number, dy: number): void {
+const OKILL_R10 = 10;
+const OKILL_R20 = 20;
+const OKILL_SPD_10 = 16;
+const OKILL_SPD_20 = 140;
+const OKILL_LIFE_10 = 1.65;
+const OKILL_LIFE_20 = 1.2;
+const OKILL_REST_10 = 0.72;
+const OKILL_REST_20 = 0.88;
+const OKILL_GRAV_10 = 0.45;
+const OKILL_GRAV_20 = 0.12;
+const OKILL_DRAG_10 = 0.995;
+const OKILL_DRAG_20 = 0.999;
+const OKILL_LIFE_CAP = 1.85;
+const PART_CAP = 500;
+const SPLAT_CAP = 56;
+const SPLAT_LIFE = 7.5;
+const KILL_R = new WeakMap<En, number>();
+let FORCE_OKILL_R: number | null = null;
+function smooth01(t: number): number { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); }
+function okillCurve(r: number): { spd: number; life: number; rest: number; grav: number; drag: number; trail: number; shake: number } {
+  const x = (!isFinite(r) || r < 1) ? 1 : r;
+  if (x <= 1 + 1e-9) return { spd: 1, life: 1, rest: 0, grav: 1, drag: 0.98, trail: 0, shake: 0 };
+  if (x <= OKILL_R10) {
+    const s = smooth01((x - 1) / (OKILL_R10 - 1));
+    return {
+      spd: 1 + s * (OKILL_SPD_10 - 1),
+      life: 1 + s * (OKILL_LIFE_10 - 1),
+      rest: s * OKILL_REST_10,
+      grav: 1 + s * (OKILL_GRAV_10 - 1),
+      drag: 0.98 + s * (OKILL_DRAG_10 - 0.98),
+      trail: s * 0.35,
+      shake: s * 2,
+    };
+  }
+  const s = smooth01(Math.min(1, (x - OKILL_R10) / (OKILL_R20 - OKILL_R10)));
+  return {
+    spd: OKILL_SPD_10 + s * (OKILL_SPD_20 - OKILL_SPD_10),
+    life: OKILL_LIFE_10 + s * (OKILL_LIFE_20 - OKILL_LIFE_10),
+    rest: OKILL_REST_10 + s * (OKILL_REST_20 - OKILL_REST_10),
+    grav: OKILL_GRAV_10 + s * (OKILL_GRAV_20 - OKILL_GRAV_10),
+    drag: OKILL_DRAG_10 + s * (OKILL_DRAG_20 - OKILL_DRAG_10),
+    trail: 0.35 + s * 0.65,
+    shake: 2 + s * 5,
+  };
+}
+function stampOverkill(e: En, dmg: number, hpBefore: number): void {
+  if (FORCE_OKILL_R != null) { KILL_R.set(e, Math.max(1, FORCE_OKILL_R)); return; }
+  if (!(dmg > 0)) return;
+  if (hpBefore <= 0) { if (!KILL_R.has(e)) KILL_R.set(e, 1); return; }
+  KILL_R.set(e, dmg / hpBefore);
+}
+function overkillOf(e: En): number {
+  if (FORCE_OKILL_R != null) return Math.max(1, FORCE_OKILL_R);
+  const r = KILL_R.get(e);
+  KILL_R.delete(e);
+  if (r == null || !isFinite(r) || r < 1) return 1;
+  return r;
+}
+function withOverkillR<T>(r: number | null, fn: () => T): T {
+  const prev = FORCE_OKILL_R;
+  FORCE_OKILL_R = r;
+  try { return fn(); } finally { FORCE_OKILL_R = prev; }
+}
+function applyHpDmg(e: En, dmg: number): void {
+  const hp0 = e.hp;
+  e.hp -= dmg;
+  if (e.hp <= 0) stampOverkill(e, dmg, hp0);
+}
+function partSolid(g: Game, x: number, y: number): boolean {
+  const tx = Math.floor(x / TS), ty = Math.floor(y / TS);
+  if (!inb(tx, ty)) return true;
+  return g.map[ty * MW + tx] === 0;
+}
+function bounceMove(g: Game, o: { x: number; y: number; vx: number; vy: number; rest?: number; bounces?: number }, dt: number): void {
+  const rest = o.rest ?? 0;
+  const speed = Math.hypot(o.vx, o.vy);
+  const steps = rest > 0.05 ? Math.max(1, Math.min(20, Math.ceil(speed * dt / 6))) : 1;
+  const h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    const ox = o.x, oy = o.y;
+    o.x += o.vx * h;
+    if (rest > 0.05 && partSolid(g, o.x, oy)) {
+      o.x = ox; o.vx = -o.vx * rest;
+      o.bounces = (o.bounces ?? 0) + 1;
+    }
+    o.y += o.vy * h;
+    if (rest > 0.05 && partSolid(g, o.x, o.y)) {
+      o.y = oy; o.vy = -o.vy * rest;
+      o.bounces = (o.bounces ?? 0) + 1;
+    }
+  }
+}
+function stepPart(g: Game, p: Part, dt: number): void {
+  if (p.gib && (p.rest ?? 0) > 0.05) bounceMove(g, p, dt);
+  else { p.x += p.vx * dt; p.y += p.vy * dt; }
+  p.vy += p.g * dt;
+  p.vx *= (p.drag ?? 0.98);
+  if (p.spin) p.ang = (p.ang || 0) + p.spin * dt;
+  p.life -= dt;
+}
+function tickParts(g: Game, dt: number): void {
+  for (const p of g.parts) stepPart(g, p, dt);
+  if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
+  tickShards(g, dt);
+  tickSplats(g, dt);
+}
+function splatsOf(g: Game): Splat[] { return (g as Game & { splats?: Splat[] }).splats || ((g as Game & { splats?: Splat[] }).splats = []); }
+function bloodColor(e: En): string {
+  const fam = FAMS[e.f];
+  if (e.f === 0 || (fam && fam.n === "Slime")) return "#3a5a18";
+  if (UNDEAD.includes(e.f)) return "#4a5a24";
+  return "#5a141c";
+}
+function addSplatCluster(g: Game, px: number, py: number, c: string, wall: boolean, n: number): void {
+  const list = splatsOf(g);
+  while (list.length >= SPLAT_CAP) list.shift();
+  const life = SPLAT_LIFE * (0.75 + R() * 0.4);
+  const dots: { x: number; y: number; s: number; a: number }[] = [];
+  const spread = wall ? 5 : 8;
+  for (let i = 0; i < n; i++) {
+    dots.push({
+      x: (R() - 0.5) * spread * 2,
+      y: (R() - 0.5) * (wall ? 8 : 6),
+      s: R() < 0.35 ? 2 : 1,
+      a: 0.14 + R() * 0.16,
+    });
+  }
+  list.push({ x: px, y: py, wall, c, life, max: life, dots });
+}
+function spawnBlood(g: Game, e: En, dx: number, dy: number): void {
+  let dir = normDir(dx, dy);
+  if (!dir) { const an = R() * 6.2832; dir = { dx: Math.cos(an), dy: Math.sin(an) }; }
+  const col = bloodColor(e);
+  const ox = (e.ax ?? e.x) * TS + 12, oy = (e.ay ?? e.y) * TS + 12;
+  addSplatCluster(g, ox, oy, col, false, 4 + ri(4));
+  const base = Math.atan2(dir.dy, dir.dx);
+  const steps = 2 + ri(2);
+  for (let i = 1; i <= steps; i++) {
+    const dist = (i / steps) * 2;
+    const a = base + (R() - 0.5) * 2 * GIB_CONE;
+    const tx = e.x + Math.cos(a) * dist, ty = e.y + Math.sin(a) * dist;
+    const ix = Math.round(tx), iy = Math.round(ty);
+    if (!inb(ix, iy) || g.map[iy * MW + ix] === 0) continue;
+    addSplatCluster(g, tx * TS + 12, ty * TS + 12, col, false, 3 + ri(3));
+  }
+  // small mark slightly behind the body (opposite the spray), still on the corpse tile
+  addSplatCluster(g, ox - dir.dx * 6, oy - dir.dy * 6, col, false, 2 + ri(2));
+  for (let step = 1; step <= 3; step++) {
+    const tx = Math.round(e.x + dir.dx * step), ty = Math.round(e.y + dir.dy * step);
+    if (!inb(tx, ty)) break;
+    if (g.map[ty * MW + tx] === 0) {
+      const faceX = (tx + 0.5) * TS - dir.dx * (TS * 0.5 - 2);
+      const faceY = (ty + 0.5) * TS - dir.dy * (TS * 0.5 - 2);
+      addSplatCluster(g, faceX, faceY, col, true, 4 + ri(3));
+      break;
+    }
+  }
+}
+function tickSplats(g: Game, dt: number): void {
+  const list = (g as Game & { splats?: Splat[] }).splats;
+  if (!list || !list.length) return;
+  for (const s of list) s.life -= dt;
+  (g as Game & { splats?: Splat[] }).splats = list.filter((s: Splat) => s.life > 0);
+}
+function drawSplats(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, walls: boolean): void {
+  const list = (g as Game & { splats?: Splat[] }).splats;
+  if (!list || !list.length) return;
+  for (const s of list) {
+    if (!!s.wall !== walls) continue;
+    const fade = Math.max(0, Math.min(1, s.life / Math.max(0.2, s.max)));
+    const tx = Math.floor(s.x / TS), ty = Math.floor(s.y / TS);
+    if (inb(tx, ty) && !g.vis[ty * MW + tx] && !g.seen[ty * MW + tx]) continue;
+    ctx.save();
+    for (const d of s.dots) {
+      ctx.globalAlpha = d.a * fade;
+      ctx.fillStyle = s.c;
+      ctx.fillRect(Math.round(s.x + d.x - camX), Math.round(s.y + d.y - camY), d.s, d.s);
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function burstGib(g: Game, x: number, y: number, n: number, cols: string[], sp: number, grav: number, dx: number, dy: number, r: number = 1): void {
   let dir = normDir(dx, dy);
   if (!dir) { const an = R() * 6.2832; dir = { dx: Math.cos(an), dy: Math.sin(an) }; }
   const base = Math.atan2(dir.dy, dir.dx);
-  for (let i = 0; i < n && g.parts.length < 500; i++) {
-    const an = base + (R() - 0.5) * 2 * GIB_CONE, v = sp * (0.55 + R() * 0.55), life = 0.45 + R() * 0.55;
-    g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v, life, max: life, c: pick(cols), s: R() < 0.4 ? 3 : 2, g: grav, ang: R() * 6.2832, spin: (R() - 0.5) * 10, gib: true });
+  const ok = okillCurve(r);
+  for (let i = 0; i < n && g.parts.length < PART_CAP; i++) {
+    const an = base + (R() - 0.5) * 2 * GIB_CONE;
+    const v = sp * (0.55 + R() * 0.55) * ok.spd;
+    const life = Math.min(OKILL_LIFE_CAP, (0.45 + R() * 0.55) * ok.life);
+    g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v, life, max: life, c: pick(cols), s: R() < 0.4 ? 3 : 2, g: grav * ok.grav, ang: R() * 6.2832, spin: (R() - 0.5) * 10, gib: true, rest: ok.rest, drag: ok.drag, streak: ok.trail, bounces: 0 });
   }
 }
 function floatTxt(g: Game, x: number, y: number, txt: string, c: string): void { const p = visOf(g, x, y); g.floats.push({ x: p[0] * TS + 12, y: p[1] * TS + 2, txt, c, life: 0.9 }); }
@@ -4022,6 +4231,7 @@ function setBanner(g: Game, txt: string, sub: string, c: string, rar: number, t:
 }
 
 function genFloor(g: Game): void {
+  g.splats = [];
   clearCracks(g);
   const map = new Uint8Array(MW * MH);
   const rooms: { x: number; y: number; w: number; h: number }[] = [];
@@ -4417,7 +4627,7 @@ function efDmg(g: Game, e: En, raw: number, c: string, pierce: number = 0.5): nu
   if (e.hp <= 0 || !(raw > 0)) return 0;
   const dmg = Math.max(1, Math.round(dmgF(raw, e.def * pierce) * (0.9 + R() * 0.2)));
   markHitDir(g, e);
-  e.hp -= dmg; e.hit = 0.18; e.awake = true;
+  applyHpDmg(e, dmg); e.hit = 0.18; e.awake = true;
   floatTxt(g, e.x + (R() - 0.5) * 0.6, e.y - 0.3, String(dmg), c);
   if (e.hp <= 0) kill(g, e);
   return dmg;
@@ -4475,7 +4685,7 @@ function efHit1(g: Game, id: number, p: number, tg: En, dmg: number, crit: boole
     } break;
     case 2: if (alive && R() < efc(0.25, p)) { tg.burn = Math.max(tg.burn, 3); tg.burnD = Math.max(tg.burnD, Math.max(1, Math.round(dmg * 0.15 * p))); burst(g, tx, ty, 8, [c, "#ffe060"], 50, -40); snd(); } break;
     case 3: if (alive && R() < efc(0.25, p)) { tg.slow = Math.max(tg.slow, 2); if (okMinor(tg) && R() < 0.15) { tg.stun = Math.max(tg.stun, 1); floatTxt(g, tg.x, tg.y - 0.6, "FROZEN", "#c8f4ff"); } burst(g, tx, ty, 8, [c, "#ffffff"], 40, 20); snd(); } break;
-    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); markHitDir(g, tg); tg.hp = 0; kill(g, tg); snd(); } break;
+    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); markHitDir(g, tg); applyHpDmg(tg, Math.max(1, tg.hp)); kill(g, tg); snd(); } break;
     case 5: if (crit && alive && R() < efc(0.35, p)) { efDmg(g, tg, st.atk * 0.6, c); if (R() < 0.5) efDmg(g, tg, st.atk * 0.3, c); floatTxt(g, tg.x, tg.y - 0.9, "CASCADE", c); burst(g, tx, ty, 10, [c, "#ffffff"], 90, 40); snd(); } break;
     case 6: if (R() < efc(0.05, p) && g.allies.length < 4) { g.allies.push({ t: 4, el: "holy", pw: st.atk * 0.3 * p, ph: R() * 6.28 }); fxAdd(g, "ring", hx, hy, 0, 0, 0.35, c, "#ffffff", TS); floatTxt(g, h.x, h.y - 0.9, "SPIRIT", c); snd(); } break;
     case 7: if (R() < efc(0.04, p)) { for (const o of nearEnemies(g, h.x, h.y, 2)) { if (okMinor(o)) o.stun = Math.max(o.stun, 1); else o.slow = Math.max(o.slow, 2); } fxAdd(g, "ring", hx, hy, 0, 0, 0.6, c, "#ffffff", 2.5 * TS); floatTxt(g, h.x, h.y - 0.9, "TIME WARP", c); snd(); } break;
@@ -4588,9 +4798,9 @@ const efGoldMul = (g: Game, e: En | null): number => {
 };
 // enemy status ticks from effects (bleed, poison, doom, marks); returns true if it died
 function efEnemyTick(g: Game, e: En): boolean {
-  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); e.hp -= d; e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
-  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); markHitDir(g, e); e.hp -= d; floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
-  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; markHitDir(g, e); e.hp -= d; e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
+  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); applyHpDmg(e, d); e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
+  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); markHitDir(g, e); applyHpDmg(e, d); floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
+  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; markHitDir(g, e); applyHpDmg(e, d); e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
   if ((e.mk ?? 0) > 0) e.mk = (e.mk ?? 1) - 1;
   if (e.hp <= 0) { kill(g, e); return true; }
   return false;
@@ -4600,7 +4810,7 @@ function charmAct(g: Game, e: En): void {
   let best: En | null = null, bd = 99;
   for (const o of g.en) { if (o === e || o.hp <= 0) continue; const d = Math.abs(o.x - e.x) + Math.abs(o.y - e.y); if (d <= 4 && d < bd) { bd = d; best = o; } }
   if (!best) return;
-  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); withHit({ dx: best.x - e.x, dy: best.y - e.y }, () => { markHitDir(g, best); best.hp -= d; best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }); }
+  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); withHit({ dx: best.x - e.x, dy: best.y - e.y }, () => { markHitDir(g, best); applyHpDmg(best, d); best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }); }
   else stepToward(g, e, best.x, best.y);
 }
 // armor effects every turn (+ the echo queue)
@@ -5587,6 +5797,7 @@ function enterVault(g: Game): void {
   const map = new Uint8Array(MW * MH);
   for (let y = VR.y; y < VR.y + VR.h; y++) for (let x = VR.x; x < VR.x + VR.w; x++) map[y * MW + x] = 1;
   g.map = map;
+  g.splats = [];
   g.seen = new Uint8Array(MW * MH);
   for (let y = VR.y - 1; y <= VR.y + VR.h; y++) for (let x = VR.x - 1; x <= VR.x + VR.w; x++) if (inb(x, y)) g.seen[y * MW + x] = 1;
   g.vis = new Uint8Array(MW * MH);
@@ -5615,6 +5826,7 @@ function exitVault(g: Game): void {
   try {
     const s = JSON.parse(g.vault ?? "") as { map: string; seen: string; en: En[]; chests: Chest[]; drops: Drop[]; trader: Trader | null; hx: number; hy: number; ft: number; ground: Ground[]; gobT: number };
     if (s && typeof s.map === "string" && s.map.length === MW * MH && typeof s.seen === "string" && s.seen.length === MW * MH && inb(s.hx, s.hy)) {
+      g.splats = [];
       g.map = su8(s.map); g.seen = su8(s.seen); g.vis = new Uint8Array(MW * MH);
       g.en = (Array.isArray(s.en) ? s.en : []).filter((e: En) => !!e && e.hp > 0 && inb(e.x, e.y)).map((e: En) => ({ ...e, ax: e.x, ay: e.y, bump: 0, hit: 0 }));
       g.pend = [];
@@ -6197,13 +6409,13 @@ function actBossPhaseFx(g: Game, e: En): void {
   if ((e.abt as number) === 3 || (e.abt as number) === 7) fxAdd(g, "vortex", cx, cy, 0, 0, 0.5, d.glow, e.pal[2], 22);
   g.flash = Math.max(g.flash, 0.3); g.flashC = d.glow;
 }
-function actBossDeathFx(g: Game, e: En, dir?: { dx: number; dy: number }): void {
+function actBossDeathFx(g: Game, e: En, dir?: { dx: number; dy: number }, r: number = 1): void {
   bindActBoss(e);
   const d = actBossDef(e.abt as number);
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
   const n = Math.min(90 + (e.abc ?? 0) * 12, Math.max(0, 520 - g.parts.length));
   const gd = dir || hitDirOf(g, e);
-  burstGib(g, cx, cy, n, [d.glow, e.pal[0], e.pal[1], e.pal[3], "#ffffff"], 170, 30, gd.dx, gd.dy);
+  burstGib(g, cx, cy, n, [d.glow, e.pal[0], e.pal[1], e.pal[3], "#ffffff"], 170, 30, gd.dx, gd.dy, r);
   fxAdd(g, "ring", cx, cy, 0, 0, 0.8, d.glow, "#ffffff", 44);
   g.shake = Math.max(g.shake, 11);
   g.flash = 0.55; g.flashC = d.glow;
@@ -6807,6 +7019,7 @@ function restAtCamp(g: Game): void {
   g.notify();
 }
 function genCamp(g: Game): void {
+  g.splats = [];
   clearCracks(g);
   const map = new Uint8Array(MW * MH);
   const x0 = 13, y0 = 13, w = 18, h = 18;
@@ -8075,6 +8288,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.eq = eq;
     g.bag = Array.isArray(s.bag) ? (s.bag as unknown[]).map((o: unknown) => validItem(o)).filter((x: Item | null): x is Item => x !== null) : [];
     enforceHandRules(g);
+    g.splats = [];
     g.map = map; g.seen = seen; g.vis = new Uint8Array(MW * MH);
     g.thSeen = thSeenParse(s.thSeen);
     g.theme = themeOf(g.depth);
@@ -8179,7 +8393,7 @@ function newGame(prev: Game | null): Game {
     flash: 0, flashC: "#ffffff", shake: 0, regenAcc: 0, kills: 0, lvlFx: 0, deadT: 0, time: 0,
     fx: [], ground: [], allies: [], echo: [], ward: 0, autoEq: prev ? prev.autoEq : true, music: prev ? prev.music : true, autoCombine: prev ? prev.autoCombine !== false : true,
     trader: null, merchant: null, shopOpen: false, gambOpen: false, chestShop: emptyChestShop(), chestTypes: emptyChestTypes(), chestTypeMig: true, merchSub: {}, ultAt: prev ? prev.ultAt : 0, ultAtA: prev ? (prev.ultAtA ?? 0) : 0, ultAts: prev && prev.ultAts ? { ...prev.ultAts } : {}, mmBig: false, toast: 0, saveT: 0, floorTurn: 0, deaths: prev ? prev.deaths || 0 : 0,
-    portal: null, vault: null, secret: null, gobPort: null, arena: null, gobCave: null, gobT: 0, locked: prev ? prev.locked : lockDefault(), torches: [], shards: [],
+    portal: null, vault: null, secret: null, gobPort: null, arena: null, gobCave: null, gobT: 0, locked: prev ? prev.locked : lockDefault(), torches: [], shards: [], splats: [],
     area: "dungeon", actCleared: 0, actCampAt: 0, gemBag: [], bagCap: BAG, gemCap: GEM_BAG, stash: [], stashGold: 0, bankGold: 0, stashOpen: false, gambler: null, gambPity: 0,
     front: 1, snapPrev: null, snapCur: null,
     muted: prev ? prev.muted : false, notify: prev ? prev.notify : () => undefined, sfx: prev ? prev.sfx : () => undefined,
@@ -8451,6 +8665,20 @@ function drawPart(ctx: CanvasRenderingContext2D, p: Part, camX: number, camY: nu
   const x = p.x - camX, y = p.y - camY;
   ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
   ctx.fillStyle = p.c;
+  if ((p.streak ?? 0) > 0.2 && p.gib) {
+    const len = Math.min(80, Math.hypot(p.vx, p.vy) * 0.03 * (p.streak ?? 0));
+    const spd = Math.hypot(p.vx, p.vy) || 1;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5) * 0.35 * (p.streak ?? 0);
+    ctx.strokeStyle = p.c;
+    ctx.lineWidth = Math.max(1, p.s);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - p.vx / spd * len, y - p.vy / spd * len);
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
+  }
   if (!p.k) {
     if (p.ang != null) {
       ctx.save();
@@ -8749,10 +8977,17 @@ function kill(g: Game, e: En): void {
   g.kills++;
   petHarvestOnKill(g);
   const gm = efGoldMul(g, e);
+  const okR = overkillOf(e);
   const gibDir = hitDirOf(g, e);
-  if (e.act) actBossDeathFx(g, e, gibDir);
-  else burstGib(g, cx, cy, e.cls === 2 ? 90 : 18, [e.pal[0], e.pal[1], e.pal[2]], e.cls === 2 ? 120 : 60, 80, gibDir.dx, gibDir.dy);
-  spawnShatter(g, e, gibDir.dx, gibDir.dy);
+  if (e.act) actBossDeathFx(g, e, gibDir, okR);
+  else burstGib(g, cx, cy, e.cls === 2 ? 90 : 18, [e.pal[0], e.pal[1], e.pal[2]], e.cls === 2 ? 120 : 60, 80, gibDir.dx, gibDir.dy, okR);
+  spawnShatter(g, e, gibDir.dx, gibDir.dy, okR);
+  spawnBlood(g, e, gibDir.dx, gibDir.dy);
+  if (!e.act) {
+    const ok = okillCurve(okR);
+    if (ok.shake >= 2) g.shake = Math.max(g.shake ?? 0, Math.min(8, ok.shake));
+    if (okR >= 20) g.sfx("boom");
+  }
   floatTxt(g, e.x, e.y - 0.4, "+" + e.xp + " XP", "#b090ff");
   if (!e.act) g.sfx(e.cls === 2 ? "boss" : "kill");
   gainXp(g, Math.round(e.xp * (1 + 0.1 * efP(g, 72))));
@@ -8764,7 +8999,7 @@ function kill(g: Game, e: En): void {
     const n = Math.max(2, Math.min(6, Math.round(2 + d * 0.08 + R() * 2)));
     for (let i = 0; i < n; i++) giveDroppedGem(g, e.x, e.y, d, true);
     runAutoCombine(g);
-    burstGib(g, cx, cy, 90, ["#40e0ff", "#ff60e0", "#ffffff", GOLD], 140, 50, gibDir.dx, gibDir.dy);
+    burstGib(g, cx, cy, 90, ["#40e0ff", "#ff60e0", "#ffffff", GOLD], 140, 50, gibDir.dx, gibDir.dy, okR);
     g.sfx("sparkle"); g.sfx("gob");
     setBanner(g, "GEM GOBLIN SLAIN!", n + " gemstones!", "#40e0ff", 5, 3);
     msg(g, "You caught the Gem Goblin! " + n + " gemstones", "#40e0ff");
@@ -8778,8 +9013,8 @@ function kill(g: Game, e: En): void {
       if (!inb(nx, ny) || g.map[ny * MW + nx] === 0) continue;
       g.drops.push({ x: nx, y: ny, item: null, pot: false, gold: Math.max(200, Math.round(gg * (0.04 + R() * 0.04))) });
     }
-    burstGib(g, cx, cy, 220, [GOLD, "#fff8c0", "#ffffff", "#ffb040", "#ffe080"], 240, 70, gibDir.dx, gibDir.dy);
-    burstGib(g, cx, cy - 8, 140, [GOLD, "#ffffff", "#ffe080"], 200, 90, gibDir.dx, gibDir.dy);
+    burstGib(g, cx, cy, 220, [GOLD, "#fff8c0", "#ffffff", "#ffb040", "#ffe080"], 240, 70, gibDir.dx, gibDir.dy, okR);
+    burstGib(g, cx, cy - 8, 140, [GOLD, "#ffffff", "#ffe080"], 200, 90, gibDir.dx, gibDir.dy, okR);
     g.sfx("coin"); g.sfx("sparkle"); g.sfx("coin");
     setBanner(g, "GOLD GOBLIN SLAIN!", "A rain of coins! +" + gg + " gold!", GOLD, 7, 3.4);
     msg(g, "You caught the Gold Goblin! +" + gg + " gold", GOLD);
@@ -8790,7 +9025,7 @@ function kill(g: Game, e: En): void {
     for (let i = 0; i < n; i++) { const r = jackpotRar(d); drop(makeItem(d + 1, r)); }
     const gg = Math.round(Math.min(6000, Math.max(2000, (2000 + d * 80) * (0.9 + R() * 0.2))));
     g.gold += gg; floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
-    burstGib(g, cx, cy, 70, [GOLD, "#ffffff", "#fff0a0", "#40ff60"], 130, 50, gibDir.dx, gibDir.dy);
+    burstGib(g, cx, cy, 70, [GOLD, "#ffffff", "#fff0a0", "#40ff60"], 130, 50, gibDir.dx, gibDir.dy, okR);
     g.sfx("sparkle"); g.sfx("coin");
     if (e.hunt) {
       setBanner(g, "HUNTER SLAIN!", n + " treasures + " + gg + " gold", "#e040ff", 8, 3.2);
@@ -9022,7 +9257,7 @@ function worldTick(g: Game, st: Stats): void {
     const e = enemyAt(g, gr.x, gr.y);
     if (e && e.hp > 0) {
       markHitDir(g, e);
-      e.hp -= gr.dmg; e.hit = 0.15; e.awake = true;
+      applyHpDmg(e, gr.dmg); e.hit = 0.15; e.awake = true;
       floatTxt(g, e.x, e.y - 0.1, String(gr.dmg), ELC[gr.el]);
       if (gr.el === "frost") e.slow = Math.max(e.slow, 1);
       if (gr.el === "dark") e.weak = Math.max(e.weak, 1);
@@ -9306,7 +9541,7 @@ function gemTick(g: Game, st: Stats): void {
       const md = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y));
       if (md > 2 || md < 1) continue;
       markHitDir(g, e);
-      e.hp -= dmg; e.hit = 0.12; e.awake = true; e.burn = Math.max(e.burn, 1);
+      applyHpDmg(e, dmg); e.hit = 0.12; e.awake = true; e.burn = Math.max(e.burn, 1);
       floatTxt(g, e.x, e.y - 0.15, String(dmg), "#ff3030");
       if (e.hp <= 0) kill(g, e);
     }
@@ -10068,7 +10303,9 @@ function hurtEn(g: Game, e: En, dmg: number): number {
     if (a > 0) floatTxt(g, e.x + 0.35, e.y - 0.35, "(" + a + ")", "#9ae8ff");
     if (dmg <= 0) { e.hit = 0.15; return 0; }
   }
+  const hp0 = e.hp;
   e.hp -= dmg; e.hit = 0.2; e.awake = true;
+  if (e.hp <= 0) stampOverkill(e, dmg, hp0);
   if (e.hp > 0 && e.act) actBossPhase(g, e);
   return dmg;
 }
@@ -11052,7 +11289,7 @@ function endTurn(g: Game, lockMove = true): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; markHitDir(g, e); e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; } // the Hunter shrugs off slow and fear - it never stops coming
@@ -11104,7 +11341,7 @@ function rtWorld(g: Game): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; markHitDir(g, e); e.hp -= e.burnD; e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; }
@@ -11991,7 +12228,7 @@ type GibKind = "melee" | "proj" | "aoe";
 type GibHold = {
   map: Uint8Array; vis: Uint8Array; seen: Uint8Array;
   en: En[]; pend: En[]; drops: Drop[]; parts: Part[]; floats: Float[]; shots: Shot[];
-  pshots: PShot[] | undefined; fx: Fx[]; ground: Ground[];
+  pshots: PShot[] | undefined; fx: Fx[]; ground: Ground[]; splats?: Splat[];
   gold: number; xp: number; lvl: number; hp: number; potions: number; kills: number;
   msgs: { t: string; c: string }[]; banner: Banner | null; toast: number; flash: number; shake: number;
   hero: { x: number; y: number; ax: number; ay: number; face: number; dir?: number; bump: number; bdx: number; bdy: number };
@@ -12006,7 +12243,7 @@ function gibRestore(): void {
   g.map.set(hld.map); g.vis.set(hld.vis); g.seen.set(hld.seen);
   g.en = hld.en; g.pend = hld.pend; g.drops = hld.drops;
   g.parts = hld.parts; g.floats = hld.floats; g.shots = hld.shots;
-  g.pshots = hld.pshots; g.fx = hld.fx; g.ground = hld.ground;
+  g.pshots = hld.pshots; g.fx = hld.fx; g.ground = hld.ground; g.splats = hld.splats || [];
   g.gold = hld.gold; g.xp = hld.xp; g.lvl = hld.lvl; g.hero.hp = hld.hp;
   g.potions = hld.potions; g.kills = hld.kills; g.msgs = hld.msgs;
   g.banner = hld.banner; g.toast = hld.toast; g.flash = hld.flash; g.shake = hld.shake;
@@ -12018,9 +12255,7 @@ function gibRestore(): void {
 function gibTick(dt: number): number {
   const g = LIVE;
   if (!g) return 0;
-  for (const p of g.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * dt; p.life -= dt; }
-  if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
-  tickShards(g, dt);
+  tickParts(g, dt);
   try { g.notify(); } catch { /* ignore */ }
   return g.parts.filter((p: Part) => p.gib).length;
 }
@@ -12033,7 +12268,7 @@ function gibBegin(kind: GibKind, dx: number, dy: number, faceDx?: number, faceDy
     map: g.map.slice(), vis: g.vis.slice(), seen: g.seen.slice(),
     en: g.en.slice(), pend: g.pend.slice(), drops: g.drops.slice(),
     parts: g.parts.slice(), floats: g.floats.slice(), shots: g.shots.slice(),
-    pshots: g.pshots ? g.pshots.slice() : g.pshots, fx: g.fx.slice(), ground: g.ground.slice(),
+    pshots: g.pshots ? g.pshots.slice() : g.pshots, fx: g.fx.slice(), ground: g.ground.slice(), splats: (g.splats || []).slice(),
     gold: g.gold, xp: g.xp, lvl: g.lvl, hp: g.hero.hp, potions: g.potions, kills: g.kills,
     msgs: g.msgs.slice(), banner: g.banner, toast: g.toast, flash: g.flash, shake: g.shake,
     hero: { x: g.hero.x, y: g.hero.y, ax: g.hero.ax, ay: g.hero.ay, face: g.hero.face, dir: g.hero.dir, bump: g.hero.bump, bdx: g.hero.bdx, bdy: g.hero.bdy },
@@ -12061,19 +12296,21 @@ function gibBegin(kind: GibKind, dx: number, dy: number, faceDx?: number, faceDy
     e.pal = ["#9cff4a", "#f0ffe8", "#3cff9a", "#ffffff"];
     g.en = [e]; g.pend = []; g.parts = []; g.floats = []; g.shots = []; g.fx = [];
     computeVis(g);
-    if (kind === "melee") {
-      const fdx = faceDx !== undefined ? faceDx : -dx;
-      const fdy = faceDy !== undefined ? faceDy : -dy;
-      if (fdx !== 0 || fdy !== 0) setHeroDir(g.hero, fdx, fdy);
-      const st = { ...calc(g.lvl, g.eq), range: 0, cleave: false, reach: 1 };
-      heroAttack(g, e, st, 1, dx, dy);
-    } else if (kind === "proj") {
-      const st = { ...calc(g.lvl, g.eq), range: 5, cleave: false };
-      heroAttack(g, e, st, span, dx, dy);
-    } else {
-      const sp: Spell = { el: "fire", sh: "nova", mod: 1, ch: 100, pw: 8, r: 6, name: "Test Nova" };
-      castSpell(g, sp, e, calc(g.lvl, g.eq), true);
-    }
+    withOverkillR(1, () => {
+      if (kind === "melee") {
+        const fdx = faceDx !== undefined ? faceDx : -dx;
+        const fdy = faceDy !== undefined ? faceDy : -dy;
+        if (fdx !== 0 || fdy !== 0) setHeroDir(g.hero, fdx, fdy);
+        const st = { ...calc(g.lvl, g.eq), range: 0, cleave: false, reach: 1 };
+        heroAttack(g, e, st, 1, dx, dy);
+      } else if (kind === "proj") {
+        const st = { ...calc(g.lvl, g.eq), range: 5, cleave: false };
+        heroAttack(g, e, st, span, dx, dy);
+      } else {
+        const sp: Spell = { el: "fire", sh: "nova", mod: 1, ch: 100, pw: 8, r: 6, name: "Test Nova" };
+        castSpell(g, sp, e, calc(g.lvl, g.eq), true);
+      }
+    });
     const gibs = g.parts.filter((p: Part) => p.gib);
     let sx = 0, sy = 0, inCone = 0;
     const ang0 = Math.atan2(dy, dx);
@@ -12186,7 +12423,7 @@ try {
       const g = LIVE; if (!g) return { ok: false };
       const e = g.en.find((q: En) => q.hp > 0) || { id: -1, x: g.hero.x + 1, y: g.hero.y, ax: (g.hero.x + 1) * 1, ay: g.hero.y, f: 0, pal: ["#ff4040", "#802020", "#401010"], cls: 0, act: 0, name: "Dummy", hp: 1, mhp: 1 } as En;
       if (e.ax === undefined) { e.ax = e.x; e.ay = e.y; }
-      spawnShatter(g, e, dx, dy);
+      withOverkillR(1, () => spawnShatter(g, e, dx, dy, 1));
       const sh = shardsOf(g);
       const ang = Math.atan2(dy, dx);
       let inCone = 0;
@@ -12198,6 +12435,114 @@ try {
       return { ok: true, n: sh.length, inCone, cone: GIB_CONE, cap: SHARD_CAP };
     },
   };
+  (window as unknown as { __ED16_OVERKILL?: object; __ED16_BLOOD?: object }).__ED16_OVERKILL = {
+    curve: (r: number) => okillCurve(r),
+    consts: { SPD_10: OKILL_SPD_10, SPD_20: OKILL_SPD_20, LIFE_10: OKILL_LIFE_10, LIFE_20: OKILL_LIFE_20, REST_10: OKILL_REST_10, REST_20: OKILL_REST_20, LIFE_CAP: OKILL_LIFE_CAP, PART_CAP, SPLAT_CAP, SPLAT_LIFE, CONE: GIB_CONE, TS },
+    colors: { def: "#5a141c", slime: "#3a5a18", undead: "#4a5a24" },
+    bloodColor: (f: number) => bloodColor({ f } as En),
+    state: (): Record<string, unknown> => {
+      const g = LIVE;
+      if (!g) return { ok: false };
+      const parts = (g.parts || []).filter((q: Part) => q.gib);
+      const shards = shardsOf(g);
+      const splats = (g.splats || []).map((s: Splat) => ({ x: s.x, y: s.y, wall: !!s.wall, c: s.c, life: s.life, n: s.dots.length }));
+      const ox = (g as Game & { _okillOx?: number })._okillOx ?? 0;
+      const oy = (g as Game & { _okillOy?: number })._okillOy ?? 0;
+      let spd = 0, dist = 0, bounces = 0, maxDist = 0;
+      for (const q of parts) { spd += Math.hypot(q.vx, q.vy); const d = Math.hypot(q.x - ox, q.y - oy); dist += d; if (d > maxDist) maxDist = d; bounces += q.bounces ?? 0; }
+      const n = parts.length || 1;
+      let sSpd = 0, sBounces = 0;
+      for (const sh of shards) { sSpd += Math.hypot(sh.vx, sh.vy); sBounces += sh.bounces ?? 0; }
+      return {
+        ok: true, n: parts.length, meanSpd: parts.length ? spd / parts.length : 0, meanDist: parts.length ? dist / parts.length : 0, maxDist,
+        bounces, shards: shards.length, shardMeanSpd: shards.length ? sSpd / shards.length : 0, shardBounces: sBounces,
+        splats, floor: splats.filter((s) => !s.wall).length, wall: splats.filter((s) => s.wall).length,
+        ox, oy, r: (g as Game & { _okillR?: number })._okillR ?? 1,
+      };
+    },
+    carve: (opt?: { wallDist?: number; dx?: number; dy?: number; span?: number }): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const span = opt?.span ?? 8;
+      const hx = g.hero.x, hy = g.hero.y;
+      for (let y = hy - span - 1; y <= hy + span + 1; y++) for (let x = hx - span - 1; x <= hx + span + 1; x++) {
+        if (!inb(x, y) || x <= 0 || y <= 0 || x >= MW - 1 || y >= MH - 1) continue;
+        const edge = (x === hx - span - 1 || x === hx + span + 1 || y === hy - span - 1 || y === hy + span + 1);
+        g.map[y * MW + x] = edge ? 0 : 1;
+        g.seen[y * MW + x] = 1; g.vis[y * MW + x] = 1;
+      }
+      const dx = opt?.dx ?? 1, dy = opt?.dy ?? 0;
+      const wd = opt?.wallDist;
+      if (wd && wd > 0) {
+        const wx = Math.round(hx + dx * wd), wy = Math.round(hy + dy * wd);
+        const px = -dy, py = dx;
+        for (let k = -5; k <= 5; k++) {
+          const x = wx + Math.round(px * k), y = wy + Math.round(py * k);
+          if (inb(x, y) && x > 0 && y > 0 && x < MW - 1 && y < MH - 1) {
+            g.map[y * MW + x] = 0; g.seen[y * MW + x] = 1; g.vis[y * MW + x] = 1;
+          }
+        }
+      }
+      try { computeVis(g); } catch { /* ignore */ }
+      for (let y = hy - span; y <= hy + span; y++) for (let x = hx - span; x <= hx + span; x++) {
+        if (inb(x, y)) { g.seen[y * MW + x] = 1; g.vis[y * MW + x] = 1; }
+      }
+      return { ok: true, hx, hy, wallDist: wd ?? null };
+    },
+    burst: (opt?: { r?: number; dx?: number; dy?: number; n?: number; sp?: number; shatter?: boolean; blood?: boolean; fam?: number; clearBlood?: boolean; x?: number; y?: number }): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const r = opt?.r ?? 1, dx = opt?.dx ?? 1, dy = opt?.dy ?? 0;
+      const n = opt?.n ?? 18, sp = opt?.sp ?? 60;
+      const tx = opt?.x ?? (g.hero.x + 1);
+      const ty = opt?.y ?? g.hero.y;
+      const px = tx * TS + 12, py = ty * TS + 12;
+      (g as Game & { _okillOx?: number })._okillOx = px;
+      (g as Game & { _okillOy?: number })._okillOy = py;
+      (g as Game & { _okillR?: number })._okillR = r;
+      g.parts = []; g.shards = [];
+      if (opt?.clearBlood !== false) g.splats = [];
+      burstGib(g, px, py, n, ["#ff4040", "#c02020", "#801010"], sp, 80, dx, dy, r);
+      const dummy: En = { id: -9, x: tx, y: ty, ax: tx, ay: ty, f: opt?.fam ?? 1, pal: ["#ff4040", "#802020", "#401010", "#200808"], cls: 0, name: "Dummy", hp: 1, mhp: 1, atk: 1, def: 0, xp: 0 } as En;
+      if (opt?.shatter) spawnShatter(g, dummy, dx, dy, r);
+      if (opt?.blood) spawnBlood(g, dummy, dx, dy);
+      if (g.notify) try { g.notify(); } catch { /* ignore */ }
+      return (window as unknown as { __ED16_OVERKILL: { state: () => Record<string, unknown> } }).__ED16_OVERKILL.state();
+    },
+    tick: (dt: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      tickParts(g, dt);
+      if (g.notify) try { g.notify(); } catch { /* ignore */ }
+      return (window as unknown as { __ED16_OVERKILL: { state: () => Record<string, unknown> } }).__ED16_OVERKILL.state();
+    },
+    killDummy: (opt?: { r?: number; dx?: number; dy?: number; remain?: number; dmg?: number; fam?: number; wallDist?: number }): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const dx = opt?.dx ?? 1, dy = opt?.dy ?? 0;
+      const tx = g.hero.x + (dx || 1), ty = g.hero.y + dy;
+      const remain = Math.max(1, opt?.remain ?? 10);
+      const rWant = opt?.r;
+      const dmg = opt?.dmg ?? (rWant != null ? remain * rWant : remain);
+      g.parts = []; g.shards = []; g.splats = [];
+      const e = mkEnemy(g, tx, ty, 0);
+      e.hp = e.mhp = remain; e.xp = 0; e.cls = 0; e.child = true; e.f = opt?.fam ?? 1;
+      e.ax = tx; e.ay = ty; e.awake = true; e.shd = 0; e.ovn = 0;
+      g.en = [e];
+      (g as Game & { _okillOx?: number })._okillOx = tx * TS + 12;
+      (g as Game & { _okillOy?: number })._okillOy = ty * TS + 12;
+      withHit({ dx, dy }, () => {
+        if (rWant != null) withOverkillR(rWant, () => { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); });
+        else { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); }
+      });
+      (g as Game & { _okillR?: number })._okillR = rWant ?? (dmg / remain);
+      if (g.notify) try { g.notify(); } catch { /* ignore */ }
+      return (window as unknown as { __ED16_OVERKILL: { state: () => Record<string, unknown> } }).__ED16_OVERKILL.state();
+    },
+    floorSnapHasSplats: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const snap = captureFloor(g);
+      const raw = JSON.stringify(snap);
+      return { ok: true, has: /splat/i.test(raw), keys: Object.keys(snap as object) };
+    },
+  };
+  (window as unknown as { __ED16_BLOOD?: object }).__ED16_BLOOD = (window as unknown as { __ED16_OVERKILL: object }).__ED16_OVERKILL;
   (window as unknown as { __ED16_DEEP?: object }).__ED16_DEEP = {
     MIN: DEEP_PRIS_MIN, OVSH_ATK, OVSH_W, OVSH_HP_FRAC, UE_FLOOR_CH, UE_BOSS_CH, SECRET_PORTAL_CH,
     LOOT_EXTRA_PER_BOSS, LOOT_EXTRA_PER_OVSH, UE_COL, caveChance: (g?: Game) => cavePortalChance(g || LIVE as Game),
@@ -13186,9 +13531,7 @@ function portalsTick(dt: number, n = 1): Record<string, unknown> {
     g.time += d;
     visTick(g, d);
     portalFxTick(g, d);
-    for (const p of g.parts) { p.x += p.vx * d; p.y += p.vy * d; p.vy += p.g * d; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * d; p.life -= d; }
-    if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
-    tickShards(g, d);
+    tickParts(g, d);
   }
   return portalsState(g);
 }
@@ -13203,9 +13546,7 @@ function portalsWalkGob(dx: number, dy: number, steps: number): Record<string, u
     if (inb(nx, ny) && g.map[ny * MW + nx] !== 0) { e.x = nx; e.y = ny; }
     visTick(g, 0.08);
     portalFxTick(g, 0.08);
-    for (const p of g.parts) { p.x += p.vx * 0.08; p.y += p.vy * 0.08; p.vy += p.g * 0.08; p.vx *= 0.98; p.life -= 0.08; }
-    if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
-    tickShards(g, 0.08);
+    tickParts(g, 0.08);
   }
   return portalsState(g);
 }
@@ -13273,9 +13614,7 @@ function portalsShotSetup(kind: string): Record<string, unknown> {
       for (let i = 0; i < 10; i++) {
         e.x += 1;
         visTick(g, 0.12);
-        for (const p of g.parts) { p.x += p.vx * 0.08; p.y += p.vy * 0.08; p.vy += p.g * 0.08; p.vx *= 0.98; p.life -= 0.08; }
-        if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
-        tickShards(g, 0.08);
+        tickParts(g, 0.08);
       }
     }
     IP.camOk = false;
@@ -14097,9 +14436,7 @@ export default function App() {
       const h = g.hero;
       h.bump = Math.max(0, h.bump - dt * 7);
       for (const e of g.en) { e.bump = Math.max(0, e.bump - dt * 7); e.hit = Math.max(0, e.hit - dt); }
-      for (const p of g.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= 0.98; if (p.spin) p.ang = (p.ang || 0) + p.spin * dt; p.life -= dt; }
-      if (g.parts.length) g.parts = g.parts.filter((p: Part) => p.life > 0);
-      tickShards(g, dt);
+      tickParts(g, dt);
       for (const f of g.floats) { f.y -= dt * 22; f.life -= dt; }
       if (g.floats.length) g.floats = g.floats.filter((f: Float) => f.life > 0);
       for (const s of g.shots) { s.t -= dt; if (s.t <= 0 && s.dmg) resolveShot(g, s); }
@@ -14194,6 +14531,8 @@ export default function App() {
       const [shx, shy] = shakeOff(g);
       ctx.translate(shx, shy);
       drawGround(ctx, g, camX, camY, t);
+      drawSplats(ctx, g, camX, camY, false);
+      drawSplats(ctx, g, camX, camY, true);
       for (const c of g.chests) {
         if (!g.vis[c.y * MW + c.x]) continue;
         const csx = c.x * TS - camX, csy = c.y * TS - camY;
