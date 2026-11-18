@@ -106,7 +106,7 @@ async function loadCode(page, code) {
     b.click();
   });
   await page.waitForFunction(() => {
-    const hook = (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || "");
+    const hook = (document.documentElement.dataset.ed16Import || window.__ED16_IMPORT_MSG || "") + "\n" + (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "") + "\n" + (document.body.innerText || ""); // ed16Import: the import message survives later log lines (e.g. auto-combine)
     return /Imported/i.test(hook) && /press Save Game/i.test(hook) && /saves on this device/i.test(hook);
   }, { timeout: 25000 }).catch(async (err) => {
     const last = await page.evaluate(() => (document.documentElement.dataset.ed16Msg || window.__ED16_LAST_MSG || "")).catch(() => "?");
