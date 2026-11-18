@@ -144,7 +144,7 @@ interface Game {
   portal: PortalSpot | null; vault: string | null; secret?: PortalSpot | null; gobPort?: PortalSpot | null; arena?: string | null; gobCave?: string | null; gobT: number; locked: boolean;
   torches: Torch[];
   area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
-  campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number };
+  campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null;
   gambler?: { x: number; y: number } | null; gambPity?: number;
   mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean;
   rt?: boolean; pcd?: number; acd?: number; qd?: number[]; wt?: number; swT?: number;
@@ -319,7 +319,7 @@ function applyWepEl(g: Game, e: En, el: El, dmg: number, light: boolean): void {
   else if (el === "elec") {
     let nxt: En | null = null, bd = 4;
     for (const o of g.en) { if (o === e || o.hp <= 0) continue; const dd = Math.abs(o.x - e.x) + Math.abs(o.y - e.y); if (dd > 0 && dd <= bd) { bd = dd; nxt = o; } }
-    if (nxt) { const arc = Math.max(1, Math.round(dmg * 0.35)); withHit({ dx: nxt.x - e.x, dy: nxt.y - e.y }, () => { hurtEn(g, nxt, arc); floatTxt(g, nxt.x, nxt.y - 0.2, String(arc), ELC.elec); if (nxt.hp <= 0) kill(g, nxt); }); }
+    if (nxt) { const arc = Math.max(1, Math.round(dmg * 0.35)); withHit({ dx: nxt.x - e.x, dy: nxt.y - e.y }, () => { hurtEn(g, nxt, arc, { n: "Storm Arc", t: ELN.elec, c: ELC.elec }); floatTxt(g, nxt.x, nxt.y - 0.2, String(arc), ELC.elec); if (nxt.hp <= 0) kill(g, nxt); }); }
   }
 }
 function magicWepRaw(e: En, el: El, raw: number): number {
@@ -2223,7 +2223,7 @@ function meleeAfterFx(g: Game, st: Stats, e: En, dx: number, dy: number, hit: Se
     }
     withHit({ dx: ddx, dy: ddy }, () => {
       const dmg = Math.max(1, Math.round(st.atk * mul * (0.85 + R() * 0.2)));
-      const dealt = hurtEn(g, o, dmg);
+      const dealt = hurtEn(g, o, dmg, { n: ((WI[wk as WT] && WI[wk as WT].n) || "Weapon") + " Sweep", t: "Physical", c: "#d8e8ff" });
       if (dealt > 0) floatTxt(g, o.x, o.y, String(dealt), "#d8e8ff");
       if (o.hp <= 0) kill(g, o);
     });
@@ -4239,7 +4239,8 @@ function withOverkillR<T>(r: number | null, fn: () => T): T {
   FORCE_OKILL_R = r;
   try { return fn(); } finally { FORCE_OKILL_R = prev; }
 }
-function applyHpDmg(e: En, dmg: number): void {
+function applyHpDmg(e: En, dmg: number, g?: Game | null, src?: DmgSrc | null): void {
+  if (dmg > 0 && e.hp > 0) peakNote(g ?? LIVE, dmg, src);
   const hp0 = e.hp;
   e.hp -= dmg;
   if (e.hp <= 0) stampOverkill(e, dmg, hp0);
@@ -4775,7 +4776,7 @@ function efDmg(g: Game, e: En, raw: number, c: string, pierce: number = 0.5): nu
   if (e.hp <= 0 || !(raw > 0)) return 0;
   const dmg = Math.max(1, Math.round(dmgF(raw, e.def * pierce) * (0.9 + R() * 0.2)));
   markHitDir(g, e);
-  applyHpDmg(e, dmg); e.hit = 0.18; e.awake = true;
+  applyHpDmg(e, dmg, g, efSrcCol(g, c)); e.hit = 0.18; e.awake = true;
   floatTxt(g, e.x + (R() - 0.5) * 0.6, e.y - 0.3, String(dmg), c);
   if (e.hp <= 0) kill(g, e);
   return dmg;
@@ -4810,7 +4811,7 @@ function efOnHit(g: Game, tg: En, dmg: number, crit: boolean, st: Stats, died: b
   for (const k of ["rh", "lh"] as EqKey[]) {
     const it = g.eq[k];
     if (!it || !it.ef || isArmor(it.kind) || it.kind === "shield") continue;
-    for (const e of it.ef) if (e[0] < 50) efHit1(g, e[0], e[1], tg, dmg, crit, st, died);
+    for (const e of it.ef) if (e[0] < 50) withDmg(efSrcId(e[0]), () => efHit1(g, e[0], e[1], tg, dmg, crit, st, died));
   }
 }
 function efHit1(g: Game, id: number, p: number, tg: En, dmg: number, crit: boolean, st: Stats, died: boolean): void {
@@ -4833,7 +4834,7 @@ function efHit1(g: Game, id: number, p: number, tg: En, dmg: number, crit: boole
     } break;
     case 2: if (alive && R() < efc(0.25, p)) { tg.burn = Math.max(tg.burn, 3); tg.burnD = Math.max(tg.burnD, Math.max(1, Math.round(dmg * 0.15 * p))); burst(g, tx, ty, 8, [c, "#ffe060"], 50, -40); snd(); } break;
     case 3: if (alive && R() < efc(0.25, p)) { tg.slow = Math.max(tg.slow, 2); if (okMinor(tg) && R() < 0.15) { tg.stun = Math.max(tg.stun, 1); floatTxt(g, tg.x, tg.y - 0.6, "FROZEN", "#c8f4ff"); } burst(g, tx, ty, 8, [c, "#ffffff"], 40, 20); snd(); } break;
-    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); markHitDir(g, tg); applyHpDmg(tg, Math.max(1, tg.hp)); kill(g, tg); snd(); } break;
+    case 4: if (alive && okMinor(tg) && tg.hp < tg.mhp * 0.06 * p) { floatTxt(g, tg.x, tg.y - 0.7, "EXECUTE", c); fxAdd(g, "pillar", tx, ty, 0, 0, 0.35, c, "#ffffff", 8); markHitDir(g, tg); applyHpDmg(tg, Math.max(1, tg.hp), g, { n: EFX[4].n, t: "Execute", c }); kill(g, tg); snd(); } break;
     case 5: if (crit && alive && R() < efc(0.35, p)) { efDmg(g, tg, st.atk * 0.6, c); if (R() < 0.5) efDmg(g, tg, st.atk * 0.3, c); floatTxt(g, tg.x, tg.y - 0.9, "CASCADE", c); burst(g, tx, ty, 10, [c, "#ffffff"], 90, 40); snd(); } break;
     case 6: if (R() < efc(0.05, p) && g.allies.length < 4) { g.allies.push({ t: 4, el: "holy", pw: st.atk * 0.3 * p, ph: R() * 6.28 }); fxAdd(g, "ring", hx, hy, 0, 0, 0.35, c, "#ffffff", TS); floatTxt(g, h.x, h.y - 0.9, "SPIRIT", c); snd(); } break;
     case 7: if (R() < efc(0.04, p)) { for (const o of nearEnemies(g, h.x, h.y, 2)) { if (okMinor(o)) o.stun = Math.max(o.stun, 1); else o.slow = Math.max(o.slow, 2); } fxAdd(g, "ring", hx, hy, 0, 0, 0.6, c, "#ffffff", 2.5 * TS); floatTxt(g, h.x, h.y - 0.9, "TIME WARP", c); snd(); } break;
@@ -4946,9 +4947,9 @@ const efGoldMul = (g: Game, e: En | null): number => {
 };
 // enemy status ticks from effects (bleed, poison, doom, marks); returns true if it died
 function efEnemyTick(g: Game, e: En): boolean {
-  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); applyHpDmg(e, d); e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
-  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); markHitDir(g, e); applyHpDmg(e, d); floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
-  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; markHitDir(g, e); applyHpDmg(e, d); e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
+  if ((e.bl ?? 0) > 0) { e.bl = (e.bl ?? 1) - 1; const d = e.blD ?? 1; markHitDir(g, e); applyHpDmg(e, d, g, { n: "Bleed", t: "Bleed", c: "#d01030" }); e.hit = 0.12; floatTxt(g, e.x, e.y - 0.2, String(d), "#d01030"); }
+  if ((e.poi ?? 0) > 0) { const d = (e.poD ?? 1) * (e.poi ?? 1); markHitDir(g, e); applyHpDmg(e, d, g, { n: "Poison", t: "Poison", c: "#60ff40" }); floatTxt(g, e.x + 0.2, e.y - 0.1, String(d), "#60ff40"); if (R() < 0.25) e.poi = (e.poi ?? 1) - 1; }
+  if ((e.doom ?? 0) > 0) { e.doom = (e.doom ?? 1) - 1; if (e.doom === 0 && e.hp > 0) { const d = e.doomD ?? 1; markHitDir(g, e); applyHpDmg(e, d, g, { n: EFX[15].n, t: "Doom", c: EFX[15].c }); e.hit = 0.25; floatTxt(g, e.x, e.y - 0.6, "DOOM " + d, EFX[15].c); fxAdd(g, "pillar", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.4, EFX[15].c, "#ff60ff", 10); efSfx(g, 15); } }
   if ((e.mk ?? 0) > 0) e.mk = (e.mk ?? 1) - 1;
   if (e.hp <= 0) { kill(g, e); return true; }
   return false;
@@ -4958,7 +4959,7 @@ function charmAct(g: Game, e: En): void {
   let best: En | null = null, bd = 99;
   for (const o of g.en) { if (o === e || o.hp <= 0) continue; const d = Math.abs(o.x - e.x) + Math.abs(o.y - e.y); if (d <= 4 && d < bd) { bd = d; best = o; } }
   if (!best) return;
-  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); withHit({ dx: best.x - e.x, dy: best.y - e.y }, () => { markHitDir(g, best); applyHpDmg(best, d); best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }); }
+  if (bd === 1) { e.bump = 1; e.bdx = Math.sign(best.x - e.x); e.bdy = Math.sign(best.y - e.y); const d = Math.max(1, Math.round(dmgF(e.atk, best.def))); withHit({ dx: best.x - e.x, dy: best.y - e.y }, () => { markHitDir(g, best); applyHpDmg(best, d, g, { n: "", t: "", c: "", x: true }); best.hit = 0.2; best.awake = true; floatTxt(g, best.x, best.y, String(d), "#ff80ff"); if (best.hp <= 0) kill(g, best); }); }
   else stepToward(g, e, best.x, best.y);
 }
 // armor effects every turn (+ the echo queue)
@@ -5131,7 +5132,7 @@ function tryPetPhoenix(g: Game, st: Stats): boolean {
   for (const e of nearEnemies(g, g.hero.x, g.hero.y, 3)) {
     if (e.hp <= 0) continue;
     const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
-    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); });
+    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg, elSrc(ultBestEl(e), { n: "Pet Phoenix Blast", t: "", c: "" })); if (e.hp <= 0) kill(g, e); });
   }
   g.sfx("sparkle");
   return true;
@@ -5184,7 +5185,7 @@ function petStorm(g: Game, mul: number): void {
   const stunT = petAbiSec(1.2 * mul / RT_TICK);
   for (const e of nearEnemies(g, g.hero.x, g.hero.y, 4)) {
     const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
-    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg); if (e.cls === 0) e.stun = Math.max(e.stun, stunT); if (e.hp <= 0) kill(g, e); });
+    withHit({ ox: g.hero.x, oy: g.hero.y }, () => { hurtEn(g, e, dmg, elSrc(ultBestEl(e), { n: "Pet Storm", t: "", c: "" })); if (e.cls === 0) e.stun = Math.max(e.stun, stunT); if (e.hp <= 0) kill(g, e); });
   }
   g.sfx("sparkle");
 }
@@ -5221,11 +5222,12 @@ function petShotCopies(g: Game): number {
   if (petAbiOf(g, 6) && (g.petSplitUntil ?? 0) > now) return Math.max(2, Math.min(5, g.petSplitN ?? 2));
   return 1;
 }
+const PET_DEAL_N: Record<string, string> = { "#c0a0ff": "Pet Needles", "#ffe060": "Pet Thunder", "#d0f0ff": "Pet Legion" };
 function petDeal(g: Game, e: En, raw: number, c: string, tag?: string): void {
   if (!e || e.hp <= 0 || raw <= 0) return;
   const dmg = Math.max(1, safeRound(magicWepRaw(e, ultBestEl(e), raw)));
   withHit({ ox: g.hero.x, oy: g.hero.y }, () => {
-    const dealt = hurtEn(g, e, dmg);
+    const dealt = hurtEn(g, e, dmg, elSrc(ultBestEl(e), { n: tag || PET_DEAL_N[c] || "Pet Ability", t: "", c: "" }));
     floatTxt(g, e.x, e.y - 0.15, String(dmg), c);
     const pact = petAbiOf(g, 10);
     if (pact && dealt > 0) {
@@ -5503,7 +5505,7 @@ function petTurn(g: Game, st: Stats): void {
   const fireOnce = (ox: number, oy: number): void => {
     if (g.pshots && g.pshots.length < 24) g.pshots.push({ x0: pp[0] + ox, y0: pp[1] + oy, x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.16 + bd * 0.03, pt: it.pt, rar: it.rar, hit: false });
     withHit({ dx: best.ax * TS + 12 - pp[0], dy: best.ay * TS + 12 - pp[1] }, () => {
-      const dealt = hurtEn(g, best, dmg);
+      const dealt = hurtEn(g, best, dmg, { n: (PETN[it.pt ?? 0] || "Pet") + " Shot", t: "Pet", c: petCol(it.pt) });
       g.petDmg = (g.petDmg ?? 0) + dmg;
       floatTxt(g, best.x + 0.3, best.y - 0.1, String(dmg), petCol(it.pt));
       g.sfx("mx", petSnd(it.pt));
@@ -5512,7 +5514,7 @@ function petTurn(g: Game, st: Stats): void {
         const heal = Math.max(1, Math.round(dealt * Math.min(0.6, 0.35 * petAbiMul(pact))));
         g.hero.hp = Math.min(st.maxHp, g.hero.hp + heal);
       }
-      if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2); if (g.pshots && g.pshots.length < 24) g.pshots.push({ x0: pp[0] + ox, y0: pp[1] + oy, x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
+      if (setCounts(g.eq)[3] >= 4 && best.hp > 0) { const d2 = Math.max(1, Math.round(dmg * 0.5)); hurtEn(g, best, d2, { n: "Beastbond Second Shot", t: "Pet", c: petCol(it.pt) }); if (g.pshots && g.pshots.length < 24) g.pshots.push({ x0: pp[0] + ox, y0: pp[1] + oy, x1: best.ax * TS + 12, y1: best.ay * TS + 12, t: 0, max: 0.12, pt: it.pt, rar: it.rar, hit: false }); floatTxt(g, best.x, best.y - 0.5, String(d2), petCol(it.pt)); }
       if (best.hp <= 0) kill(g, best);
     });
   };
@@ -7214,6 +7216,7 @@ function enterCamp(g: Game): void {
   g.shopOpen = false;
   g.stashOpen = false;
   g.gambOpen = false;
+  peakArriveCamp(g);
   genCamp(g);
   restHero(g, false);
   attachBank(g);
@@ -7229,6 +7232,7 @@ function leaveCamp(g: Game): void {
   g.shopOpen = false; g.stashOpen = false; g.gambOpen = false; g.gambler = null; g.merchant = null;
   g.actCampAt = 0;
   const nxt = (g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth) + 1;
+  peakStretchStart(g, nxt);
   g.area = "dungeon";
   g.restAt = undefined; g.stashAt = undefined; g.fireAt = undefined;
   const cur = g.snapCur && g.snapCur.d === nxt ? g.snapCur : null;
@@ -7946,6 +7950,8 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     gi: g.area === "goblin" ? packSideInterior(g) : null,
     sc: packPortal(g.secret),
     gp: packPortal(g.gobPort),
+    pk: g.pk && (g.pk.s || g.pk.u || g.pk.d0) ? g.pk : null,
+    pks: g.pkShow ?? null,
   };
 }
 
@@ -7958,7 +7964,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     turn: g.turn, kills: g.kills, regenAcc: g.regenAcc, muted: g.muted,
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
-    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
+    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
     wallBreak: !!g.wallBreak, cracks: packCracks(g),
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
   };
@@ -8281,6 +8287,8 @@ function decodeCode(code: string, prev: Game | null): Game | null {
       g.secret = unpackPortal(s.sc) || g.secret;
       g.gobPort = unpackPortal(s.gp) || g.gobPort;
     }
+    g.pk = cleanPeakTrack(s.pk) ?? {};
+    g.pkShow = cleanPeakTrack(s.pks) ?? null;
     if (s.ar === "arena" && applySideInterior(g, s.ai)) g.area = "arena";
     else if (s.ar === "goblin" && applySideInterior(g, s.gi)) g.area = "goblin";
     g.mode = "play";
@@ -8505,6 +8513,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
       return p && typeof p === "object" && typeof p.x === "number" && typeof p.y === "number" && inb(p.x, p.y) ? { x: Math.floor(p.x), y: Math.floor(p.y) } : undefined;
     };
     g.campSpot = pt(s.campSpot); g.stashAt = pt(s.stashAt); g.restAt = pt(s.restAt); g.fireAt = pt(s.fireAt);
+    g.pk = cleanPeakTrack(s.pk) ?? {}; g.pkShow = cleanPeakTrack(s.pkShow) ?? null;
     g.gambler = null;
     if (g.area === "camp") placeMerchant(g);
     const fromSaveItems = Array.isArray(s.stash) ? (s.stash as unknown[]).map((o: unknown) => validItem(o)).filter((x: Item | null): x is Item => x !== null) : [];
@@ -9272,7 +9281,7 @@ function pullEn(g: Game, e: En): void {
   const opts = Math.abs(h.x - e.x) >= Math.abs(h.y - e.y) ? [[dx, 0], [0, dy]] : [[0, dy], [dx, 0]];
   for (const [ox, oy] of opts) { if (ox === 0 && oy === 0) continue; const nx = e.x + ox, ny = e.y + oy; if (!(nx === h.x && ny === h.y) && walkable(g, nx, ny)) { e.x = nx; e.y = ny; return; } }
 }
-function elHit(g: Game, e: En, el: El, raw: number, light: boolean, mod: number): number {
+function elHit(g: Game, e: En, el: El, raw: number, light: boolean, mod: number, src?: DmgSrc | null): number {
   if (e.hp <= 0) return 0;
   let d = raw;
   let def = e.def * 0.5;
@@ -9283,7 +9292,7 @@ function elHit(g: Game, e: En, el: El, raw: number, light: boolean, mod: number)
   if (el === "void") d += e.mhp * (e.cls === 2 ? 0.01 : 0.03) * (light ? 0.4 : 1);
   if (mod === 7) d *= 1 + R() * 2;
   const dmg = Math.max(1, Math.round(dmgF(d, def) * (0.9 + R() * 0.2)));
-  hurtEn(g, e, dmg);
+  hurtEn(g, e, dmg, elSrc(el, src));
   floatTxt(g, e.x + (R() - 0.5) * 0.5, e.y - 0.2, String(dmg), ELC[el]);
   const ext = mod === 4 ? 2 : 0;
   if (el === "fire") { e.burn = Math.max(e.burn, 3 + ext); e.burnD = Math.max(e.burnD, Math.max(1, Math.round(dmg * 0.25))); }
@@ -9341,14 +9350,14 @@ function castSpell(g: Game, sp: Spell, tg: En, st: Stats, echo: boolean): void {
       else if (sp.sh === "chain") { ctx = { dx: e.x - prev.x, dy: e.y - prev.y }; prev = e; }
       else if (sp.sh === "beam" || sp.sh === "rupture") ctx = { dx: tg.x - h.x, dy: tg.y - h.y };
       else ctx = { dx: e.x - h.x, dy: e.y - h.y };
-      withHit(ctx, () => { elHit(g, e, sp.el, base, false, sp.mod); });
+      withHit(ctx, () => { elHit(g, e, sp.el, base, false, sp.mod, { n: sp.name || (ELN[sp.el] + " " + SHN[sp.sh]), t: "", c: "" }); });
     }
   }
   if (sp.el === "holy") heal(g, st.maxHp * 0.03, true);
   if (sp.el === "elec" && sp.sh !== "chain") {
     let nx: En | null = null, bd = 99;
     for (const e of g.en) { if (e.hp <= 0 || e === tg) continue; const dd = Math.abs(e.x - tg.x) + Math.abs(e.y - tg.y); if (dd <= 3 && dd < bd) { bd = dd; nx = e; } }
-    if (nx) { fxAdd(g, "arc", tx, ty, nx.ax * TS + 12, nx.ay * TS + 12, 0.3, c, c2, 1); withHit({ dx: nx.x - tg.x, dy: nx.y - tg.y }, () => { elHit(g, nx, "elec", base * 0.5, true, sp.mod); }); }
+    if (nx) { fxAdd(g, "arc", tx, ty, nx.ax * TS + 12, nx.ay * TS + 12, 0.3, c, c2, 1); withHit({ dx: nx.x - tg.x, dy: nx.y - tg.y }, () => { elHit(g, nx, "elec", base * 0.5, true, sp.mod, { n: (sp.name || "Spell") + " Arc", t: "", c: "" }); }); }
   }
   if (sp.el === "void") fxAdd(g, "vortex", tx, ty, 0, 0, 0.6, c, c2, 20 + inten * 6);
   burst(g, tx, ty, Math.round(10 + inten * 14), [c, c2, "#ffffff"], 80 + inten * 20, sp.el === "fire" || sp.el === "hell" || sp.el === "holy" ? -40 : 40);
@@ -9361,7 +9370,7 @@ function castSpell(g: Game, sp: Spell, tg: En, st: Stats, echo: boolean): void {
 function passiveTick(g: Game, st: Stats): void {
   const h = g.hero;
   const hx = h.ax * TS + 12, hy = h.ay * TS + 12;
-  allPassives(g.eq).forEach((p: Passive, pi: number) => {
+  allPassives(g.eq).forEach((p: Passive, pi: number) => withDmg({ n: p.name || (ELN[p.el] + " " + PTN[p.ty]), t: ELN[p.el], c: ELC[p.el] }, () => {
     const base = st.atk * p.pw, vast = p.mod === 0 ? 1 : 0, twin = p.mod === 3 ? 2 : 1, rapid = p.mod === 1;
     const c = ELC[p.el], c2 = EL2[p.el];
     if (p.ty === "orbs") {
@@ -9382,7 +9391,7 @@ function passiveTick(g: Game, st: Stats): void {
     } else if (p.ty === "sentinel") {
       if (g.turn % (rapid ? 1 : 2) === 0) { const e = nearestEnemy(g, 5 + vast); if (e) { fxAdd(g, "bolt", hx - 14, hy - 16, e.ax * TS + 12, e.ay * TS + 12, 0.22, c, c2, 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, p.el, base * 1.1 * twin, true, p.mod); }); g.sfx("mx", pasSnd(p)); } }
     }
-  });
+  }));
 }
 function worldTick(g: Game, st: Stats): void {
   const h = g.hero;
@@ -9391,7 +9400,7 @@ function worldTick(g: Game, st: Stats): void {
     const e = enemyAt(g, gr.x, gr.y);
     if (e && e.hp > 0) {
       markHitDir(g, e);
-      applyHpDmg(e, gr.dmg); e.hit = 0.15; e.awake = true;
+      applyHpDmg(e, gr.dmg, g, { n: ELN[gr.el] + " Ground", t: ELN[gr.el], c: ELC[gr.el] }); e.hit = 0.15; e.awake = true;
       floatTxt(g, e.x, e.y - 0.1, String(gr.dmg), ELC[gr.el]);
       if (gr.el === "frost") e.slow = Math.max(e.slow, 1);
       if (gr.el === "dark") e.weak = Math.max(e.weak, 1);
@@ -9403,7 +9412,7 @@ function worldTick(g: Game, st: Stats): void {
   for (const a of g.allies) {
     a.t--;
     const e = nearestEnemy(g, 5);
-    if (e) { const an = g.time * 1.8 + a.ph; fxAdd(g, "bolt", h.ax * TS + 12 + Math.cos(an) * 24, h.ay * TS + 6 + Math.sin(an) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.22, ELC[a.el], EL2[a.el], 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, a.el, a.pw * (1 + 0.4 * efP(g, 94)), true, -1); }); }
+    if (e) { const an = g.time * 1.8 + a.ph; fxAdd(g, "bolt", h.ax * TS + 12 + Math.cos(an) * 24, h.ay * TS + 6 + Math.sin(an) * 9, e.ax * TS + 12, e.ay * TS + 12, 0.22, ELC[a.el], EL2[a.el], 3); withHit({ dx: e.x - h.x, dy: e.y - h.y }, () => { elHit(g, e, a.el, a.pw * (1 + 0.4 * efP(g, 94)), true, -1, { n: ELN[a.el] + " Spirit", t: "", c: "" }); }); }
   }
   g.allies = g.allies.filter((a: Ally) => a.t > 0);
   if (g.echo.length) { const list = g.echo; g.echo = []; for (const sp of list) { const e = nearestEnemy(g, 6); if (e) castSpell(g, sp, e, st, true); } }
@@ -9675,7 +9684,7 @@ function gemTick(g: Game, st: Stats): void {
       const md = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y));
       if (md > 2 || md < 1) continue;
       markHitDir(g, e);
-      applyHpDmg(e, dmg); e.hit = 0.12; e.awake = true; e.burn = Math.max(e.burn, 1);
+      applyHpDmg(e, dmg, g, { n: "Ruby Aura", t: "Ruby", c: "#ff3030" }); e.hit = 0.12; e.awake = true; e.burn = Math.max(e.burn, 1);
       floatTxt(g, e.x, e.y - 0.15, String(dmg), "#ff3030");
       if (e.hp <= 0) kill(g, e);
     }
@@ -10185,6 +10194,20 @@ function runEquippedCombine(g: Game): number {
   }
   return 0;
 }
+// Retroactive combine: the first frame a loaded/restored/new run is in play, combine everything already in the bag
+// (and equipped + bag), then persist the result. Runs once per Game object, so every profile load / Save Code import / reload gets it.
+const LOAD_COMBINED = new WeakSet<Game>();
+function loadCombinePass(g: Game): number {
+  LOAD_COMBINED.add(g);
+  if (!autoCombineOn(g)) return 0;
+  let n = 0;
+  try { n = runAutoCombine(g); } catch { n = 0; }
+  if (n > 0) {
+    msg(g, "Auto-combined " + n + " group" + (n === 1 ? "" : "s") + " of items already in your bag.", SET_COL);
+    try { saveGame(g, true, true); } catch { /* save errors are reported by the save path */ }
+  }
+  return n;
+}
 function runAutoCombine(g: Game): number {
   if (COMBINE_DEPTH > 0) return 0;
   COMBINE_DEPTH++;
@@ -10437,11 +10460,141 @@ function rollAffix(e: En, lesser = false): void {
   if (sch && R() < sch) { e.mshd = e.shd = Math.round(e.mhp * (e.rare ? 0.22 : bossy ? 0.4 + R() * 0.15 : 0.28)); }
 }
 function elMul(e: En, el: El): number { if (e.elW === el) return 1.7; if (e.elR && e.elR.includes(el)) return 0.55; return 1; }
-function hurtEn(g: Game, e: En, dmg: number): number {
+// ---------- peak-damage tracker (per five-layer stretch between camp visits) ----------
+// Every player-owned damage impact goes through hurtEn / applyHpDmg and is noted here.
+// Two separate maxima: s = anything that is not a Prismatic ultimate, u = Prismatic ultimate hits only.
+interface PeakHit { v: number; n: string; t: string; c: string; k: number; u?: number }
+interface PeakTrack { s?: PeakHit; u?: PeakHit; d0?: number; d1?: number }
+interface DmgSrc { n: string; t: string; c: string; k?: number; u?: number; x?: boolean }
+const PHYS_COL = "#ffffff";
+const PEAK_FB: DmgSrc = { n: "Hit", t: "Physical", c: PHYS_COL };
+let DMG_SRC: DmgSrc | null = null;
+function withDmg<T>(src: DmgSrc, fn: () => T): T {
+  const prev = DMG_SRC;
+  DMG_SRC = src;
+  try { return fn(); } finally { DMG_SRC = prev; }
+}
+function elSrc(el: El, src?: DmgSrc | null): DmgSrc {
+  const b = src ?? DMG_SRC;
+  return b ? { ...b, t: ELN[el], c: ELC[el] } : { n: ELN[el] + " Magic", t: ELN[el], c: ELC[el] };
+}
+function efSrcId(id: number): DmgSrc { const d = EFX[id]; return { n: d ? d.n : "Effect", t: "Effect", c: d ? d.c : "#ffffff" }; }
+function efSrcCol(g: Game, c: string): DmgSrc {
+  if (DMG_SRC) return { ...DMG_SRC, c: DMG_SRC.c || c };
+  for (let i = 0; i < EFX.length; i++) if (EFX[i].c === c && efP(g, i) > 0) return efSrcId(i);
+  for (let i = 0; i < EFX.length; i++) if (EFX[i].c === c) return efSrcId(i);
+  return { n: "Effect", t: "Effect", c };
+}
+function cleanPeak(x: unknown): PeakHit | undefined {
+  if (!x || typeof x !== "object") return undefined;
+  const o = x as Record<string, unknown>;
+  const v = Number(o.v);
+  if (!isFinite(v) || v <= 0) return undefined;
+  const out: PeakHit = { v: Math.round(v), n: String(o.n ?? "Hit").slice(0, 60), t: String(o.t ?? "Physical").slice(0, 30), c: typeof o.c === "string" && /^#[0-9a-fA-F]{3,8}$|^hsl\(/.test(o.c) ? o.c : PHYS_COL, k: Math.max(0, Math.min(2, Math.floor(Number(o.k) || 0))) };
+  if (o.u !== undefined && o.u !== null && isFinite(Number(o.u))) out.u = Math.max(0, Math.min(ULTS.length - 1, Math.floor(Number(o.u))));
+  return out;
+}
+function cleanPeakTrack(x: unknown): PeakTrack | undefined {
+  if (!x || typeof x !== "object") return undefined;
+  const o = x as Record<string, unknown>;
+  const t: PeakTrack = {};
+  const s = cleanPeak(o.s); if (s) t.s = s;
+  const u = cleanPeak(o.u); if (u) t.u = u;
+  if (isFinite(Number(o.d0)) && Number(o.d0) > 0) t.d0 = Math.floor(Number(o.d0));
+  if (isFinite(Number(o.d1)) && Number(o.d1) > 0) t.d1 = Math.floor(Number(o.d1));
+  return t;
+}
+function peakNote(g: Game | null, dmg: number, src?: DmgSrc | null): void {
+  const s = src ?? DMG_SRC ?? PEAK_FB;
+  if (!g || s.x || !(dmg > 0) || !isFinite(dmg)) return;
+  if (!g.pk) g.pk = {};
+  const v = Math.round(dmg);
+  const rec: PeakHit = { v, n: s.n, t: s.t, c: s.c, k: s.k ?? 0 };
+  if (s.u !== undefined) {
+    rec.u = s.u;
+    if (!g.pk.u || v > g.pk.u.v) g.pk.u = rec;
+  } else if (!g.pk.s || v > g.pk.s.v) g.pk.s = rec;
+}
+function peakStretchStart(g: Game, d0: number): void { g.pk = { d0 }; }
+function peakArriveCamp(g: Game): void {
+  const pk = g.pk;
+  if (pk && (pk.s || pk.u)) g.pkShow = { s: pk.s, u: pk.u, d0: pk.d0, d1: g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth };
+}
+function fmtFull(n: number): string {
+  const v = Math.max(0, Math.round(n));
+  if (!isFinite(v)) return "0";
+  try { return v.toLocaleString("en-US", { maximumFractionDigits: 0 }); } catch { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+}
+// Camp: TOP HIT / TOP PRISMATIC ULT for the stretch just finished, between the campfire and the proceed portal.
+// Drawn on the canvas under the hero sprite; it is not a DOM element, so it never intercepts taps.
+const PEAK_FONT = "\"Arial Black\", \"Helvetica Neue\", Arial, sans-serif";
+let PEAK_LAST_RECT: { x: number; y: number; w: number; h: number; fireY: number; portalY: number; cx: number } | null = null;
+function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number): void {
+  PEAK_LAST_RECT = null;
+  const pk = g.pkShow;
+  if (g.area !== "camp" || !pk || (!pk.s && !pk.u) || !g.fireAt) return;
+  const fx = g.fireAt.x * TS - camX + 12, fyTop = g.fireAt.y * TS - camY - 8;
+  const por = g.portal && g.portal.kind === "proceed" ? g.portal : null;
+  const pcx = por ? (por.x + (por.w ?? 1) / 2) * TS - camX : fx;
+  const pBot = por ? (por.y + (por.h ?? 1)) * TS - camY : fyTop - 4 * TS;
+  const cx0 = (fx + pcx) / 2;
+  const maxW = VW - 10;
+  const big = (txt: string): number => {
+    let sz = 21;
+    for (; sz > 10; sz--) { ctx.font = "900 " + sz + "px " + PEAK_FONT; if (ctx.measureText(txt).width <= maxW) break; }
+    return sz;
+  };
+  const sNum = pk.s ? fmtFull(pk.s.v) : "", uNum = pk.u ? fmtFull(pk.u.v) : "";
+  const sSz = pk.s ? big(sNum) : 0, uSz = pk.u ? big(uNum) : 0;
+  const LBL = 8, SUB = 7;
+  const blockH = (sz: number): number => LBL + 2 + sz + 2 + SUB + 1;
+  const hS = pk.s ? blockH(sSz) : 12, hU = pk.u ? blockH(uSz) : 12, gap = 4;
+  const H = hS + gap + hU;
+  const bandTop = pBot, bandBot = fyTop;
+  let y0 = bandBot - bandTop >= H ? bandTop + (bandBot - bandTop - H) / 2 : bandTop;
+  y0 = Math.max(HUD + 2, Math.min(HUD + VIEWH - H - 2, y0));
+  y0 = Math.min(y0, fyTop - H); // never cover the campfire, even when the view is short
+  const cx = Math.max(maxW / 2 + 5, Math.min(VW - maxW / 2 - 5, cx0));
+  const range = pk.d1 ? "LAYERS " + Math.max(1, pk.d0 ?? pk.d1 - 4) + "\u2013" + pk.d1 : "LAST STRETCH";
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(8,4,16,0.42)";
+  ctx.fillRect(4, y0 - 3, VW - 8, H + 6);
+  const outlined = (txt: string, x: number, y: number, sz: number, col: string, weight = "900", lw = 4): void => {
+    ctx.font = weight + " " + sz + "px " + PEAK_FONT;
+    ctx.lineJoin = "round";
+    ctx.shadowColor = "rgba(0,0,0,0.85)"; ctx.shadowBlur = 0; ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
+    ctx.strokeStyle = "#000000"; ctx.lineWidth = lw; ctx.strokeText(txt, x, y);
+    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    ctx.fillStyle = col; ctx.fillText(txt, x, y);
+  };
+  const block = (title: string, h: PeakHit, sz: number, num: string, y: number): void => {
+    outlined(title + "  \u00b7  " + range, cx, y, LBL, "#ffd080", "800", 3);
+    outlined(num, cx, y + LBL + 2, sz, h.c, "900", Math.max(4, Math.round(sz / 5)));
+    const tag = h.k === 2 ? "SUPER CRIT" : h.k === 1 ? "CRIT" : "NORMAL HIT";
+    const sub = h.n + "  \u00b7  " + h.t + "  \u00b7  ";
+    ctx.font = "800 " + SUB + "px " + PEAK_FONT;
+    const w1 = ctx.measureText(sub).width, w2 = ctx.measureText(tag).width;
+    const sx = cx - (w1 + w2) / 2, sy = y + LBL + 2 + sz + 2;
+    ctx.textAlign = "left";
+    outlined(sub, sx, sy, SUB, h.c, "800", 3);
+    outlined(tag, sx + w1, sy, SUB, h.k === 2 ? "#ff60e0" : h.k === 1 ? GOLD : "#a8a0b8", "900", 3);
+    ctx.textAlign = "center";
+  };
+  if (pk.s) block("TOP HIT", pk.s, sSz, sNum, y0);
+  else outlined("No hits recorded", cx, y0 + 2, 8, "#8a8498", "800", 3);
+  const yU = y0 + hS + gap;
+  if (pk.u) block("TOP PRISMATIC ULT", pk.u, uSz, uNum, yU);
+  else { ctx.globalAlpha = 0.6; outlined("No Prismatic ult used", cx, yU + 2, 8, "#9a94a8", "800", 3); ctx.globalAlpha = 1; }
+  ctx.restore();
+  PEAK_LAST_RECT = { x: 4, y: y0, w: VW - 8, h: H, fireY: fyTop + 10, portalY: pBot - 4, cx };
+}
+function hurtEn(g: Game, e: En, dmg: number, src?: DmgSrc | null): number {
   if (dmg <= 0 || e.hp <= 0) return 0;
   markHitDir(g, e);
   const fortune = petAbiOf(g, 5);
   if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.25 * petAbiMul(fortune))));
+  peakNote(g, dmg, src);
   while (dmg > 0 && (e.ovn ?? 0) > 0) {
     const layer = Math.max(0, e.ovhp ?? 0);
     const a = Math.min(layer, dmg);
@@ -10577,30 +10730,32 @@ function starOnHit(g: Game, tg: En, dmg: number, crit: boolean, st: Stats, died:
     if (id === 14 && crit) extra += Math.max(1, Math.round(dmg * 0.25 * p));
     if (id === 17) extra += Math.max(1, Math.round(dmg * 0.12 * p));
     if (id === 19) extra += Math.max(1, Math.round(dmg * 0.06 * p));
-    if (extra > 0 && tg.hp > 0) { hurtEn(g, tg, extra); floatTxt(g, tg.x, tg.y - 0.55, "\u2605" + extra, GOLD); }
-    if (id === 2) { const n = nearFoe(g, tg); if (n) { const sp = Math.max(1, Math.round(dmg * 0.25 * p)); hurtEn(g, n, sp); floatTxt(g, n.x, n.y, "\u2605" + sp, GOLD); } }
+    if (extra > 0 && tg.hp > 0) { hurtEn(g, tg, extra, starSrc(id)); floatTxt(g, tg.x, tg.y - 0.55, "\u2605" + extra, GOLD); }
+    if (id === 2) { const n = nearFoe(g, tg); if (n) { const sp = Math.max(1, Math.round(dmg * 0.25 * p)); hurtEn(g, n, sp, starSrc(id)); floatTxt(g, n.x, n.y, "\u2605" + sp, GOLD); } }
     if (id === 3) { tg.bl = Math.max(tg.bl ?? 0, 2); tg.blD = Math.max(tg.blD ?? 0, Math.max(1, Math.round(st.atk * 0.08 * p))); }
     if (id === 6) { const es = esOf(g); es.rage = Math.min(3, (es.rage ?? 0) + 1); }
     if (id === 7 && R() < 0.08 * p && tg.hp > 0) { tg.stun = Math.max(tg.stun, 1); floatTxt(g, tg.x, tg.y - 0.5, "\u2605STUN", "#80c0ff"); }
     if (id === 8) g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.max(1, Math.round(dmg * 0.04 * p)));
-    if (id === 9 && R() < 0.06 * p && tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.4)));
+    if (id === 9 && R() < 0.06 * p && tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.4)), starSrc(id));
     if (id === 10) tg.mk = (tg.mk ?? 0) + 1;
     if (id === 11 && R() < 0.12 * p) tg.slow = Math.max(tg.slow, 2);
     if (id === 12 && R() < 0.12 * p) { tg.burn = Math.max(tg.burn, 2); tg.burnD = Math.max(tg.burnD, Math.max(1, Math.round(st.atk * 0.1 * p))); }
-    if (id === 13) { const n = nearFoe(g, tg); if (n) hurtEn(g, n, Math.max(1, Math.round(dmg * 0.3 * p))); }
+    if (id === 13) { const n = nearFoe(g, tg); if (n) hurtEn(g, n, Math.max(1, Math.round(dmg * 0.3 * p)), starSrc(id)); }
     if (id === 15) tg.weak = Math.max(tg.weak, 2);
     if (id === 16 && R() < 0.08 * p) tg.fear = Math.max(tg.fear, 2);
-    if (id === 18 && (died || tg.hp <= 0)) { const n = nearFoe(g, tg); if (n) hurtEn(g, n, Math.max(1, Math.round(dmg * 0.35 * p))); }
+    if (id === 18 && (died || tg.hp <= 0)) { const n = nearFoe(g, tg); if (n) hurtEn(g, n, Math.max(1, Math.round(dmg * 0.35 * p)), starSrc(id)); }
     if (id === 21 && (died || tg.hp <= 0)) g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.round(calc(g.lvl, g.eq).maxHp * 0.05 * p));
   }
   if (tg.hp <= 0 && !died) kill(g, tg);
 }
+function starSrc(id: number, def = false): DmgSrc { const d = (def ? STAR_DEF : STAR_OFF)[id]; return { n: d ? d.n : "Star", t: "Star", c: GOLD }; }
+function setSrc(i: number, c: string = SET_COL): DmgSrc { return { n: (SETS[i] ? SETS[i].n : "Set") + " Set Bonus", t: "Set", c }; }
 function setOnHit(g: Game, tg: En, dmg: number, _crit: boolean, st: Stats, died: boolean): void {
   const c = setCounts(g.eq);
-  if (c[0] >= 4) { const x = Math.max(1, Math.round(dmg * 0.12)); if (tg.hp > 0) hurtEn(g, tg, x); g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.max(1, Math.round(dmg * 0.03))); }
-  if (c[4] >= 4 && tg.hp > 0) { const x = Math.max(1, Math.round(st.atk * 0.2)); hurtEn(g, tg, x); floatTxt(g, tg.x, tg.y - 0.4, String(x), "#d080ff"); }
-  if (c[5] >= 4 && _crit) { if (tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.35))); if (R() < 0.1 && tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.5))); }
-  if (c[8] >= 2 && R() < (c[8] >= 4 ? 0.22 : 0.12) && tg.hp > 0) { const n = c[8] >= 4 ? nearFoe(g, tg) : tg; const t = n ?? tg; hurtEn(g, t, Math.max(1, Math.round(st.atk * (c[8] >= 4 ? 0.25 : 0.14)))); }
+  if (c[0] >= 4) { const x = Math.max(1, Math.round(dmg * 0.12)); if (tg.hp > 0) hurtEn(g, tg, x, setSrc(0)); g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.max(1, Math.round(dmg * 0.03))); }
+  if (c[4] >= 4 && tg.hp > 0) { const x = Math.max(1, Math.round(st.atk * 0.2)); hurtEn(g, tg, x, setSrc(4, "#d080ff")); floatTxt(g, tg.x, tg.y - 0.4, String(x), "#d080ff"); }
+  if (c[5] >= 4 && _crit) { if (tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.35)), setSrc(5)); if (R() < 0.1 && tg.hp > 0) hurtEn(g, tg, Math.max(1, Math.round(dmg * 0.5)), setSrc(5)); }
+  if (c[8] >= 2 && R() < (c[8] >= 4 ? 0.22 : 0.12) && tg.hp > 0) { const n = c[8] >= 4 ? nearFoe(g, tg) : tg; const t = n ?? tg; hurtEn(g, t, Math.max(1, Math.round(st.atk * (c[8] >= 4 ? 0.25 : 0.14))), { n: SETS[8].n + " Shock", t: ELN.elec, c: ELC.elec }); }
   if (c[9] >= 2) tg.weak = Math.max(tg.weak, 2);
   if (c[9] >= 4) { g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.max(1, Math.round(dmg * 0.08))); if (R() < 0.08) tg.fear = Math.max(tg.fear, 2); }
   if (c[6] >= 4 && (died || tg.hp <= 0)) g.hero.hp = Math.min(calc(g.lvl, g.eq).maxHp, g.hero.hp + Math.round(calc(g.lvl, g.eq).maxHp * 0.06));
@@ -10622,14 +10777,14 @@ function starPreHurt(g: Game, e: En, dmgIn: number, st: Stats, ranged: boolean):
     if (id === 18 && es.still) d = Math.max(1, Math.round(d * (1 - 0.08 * p)));
     if (id === 20 && h.hp > st.maxHp * 0.7) d = Math.max(1, Math.round(d * (1 - 0.04 * p)));
     if (id === 21 && ranged) d = Math.max(1, Math.round(d * (1 - 0.08 * p)));
-    if (id === 2 && e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.08 * p)));
+    if (id === 2 && e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.08 * p)), starSrc(id, true));
     if (id === 8 && R() < 0.25 * p) h.hp = Math.min(st.maxHp, h.hp + Math.max(1, Math.round(st.maxHp * 0.02 * p)));
     if (id === 12 && R() < 0.15 * p) e.slow = Math.max(e.slow, 2);
-    if (id === 13 && e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.1 * p)));
+    if (id === 13 && e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.1 * p)), starSrc(id, true));
     if (id === 17 && h.hp < st.maxHp * 0.5) h.hp = Math.min(st.maxHp, h.hp + Math.max(1, Math.round(st.maxHp * 0.03 * p)));
   }
   const c = setCounts(g.eq);
-  if (c[1] >= 4) { d = Math.max(1, Math.round(d * 0.9)); if (e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.08))); }
+  if (c[1] >= 4) { d = Math.max(1, Math.round(d * 0.9)); if (e.hp > 0) hurtEn(g, e, Math.max(1, Math.round(st.atk * 0.08)), setSrc(1)); }
   return d;
 }
 function packStep(g: Game, e: En): boolean {
@@ -11258,8 +11413,9 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     const world = petRareOf(g, PRT_WORLD);
     if (world) dmg = Math.max(1, safeRound(dmg * (1 + 0.15 * petAbiMul(world))));
     const hitV = { dx: tg.x - h.x, dy: tg.y - h.y };
+    const atkSrc: DmgSrc = { n: (main ? ((WI[main.kind as WT] && WI[main.kind as WT].n) || "Weapon") : "Unarmed") + " Attack", t: st.magic && wel ? ELN[wel] : "Physical", c: st.magic && wel ? ELC[wel] : PHYS_COL, k: scrit ? 2 : crit ? 1 : 0 };
     withHit(hitV, () => {
-      dmg = hurtEn(g, tg, dmg);
+      dmg = hurtEn(g, tg, dmg, atkSrc);
     });
     if (world && !twin && R() < 0.12) {
       const raw = st.atk * petAbiMul(world);
@@ -11268,13 +11424,13 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
       for (const o of nearEnemies(g, tg.x, tg.y, 2)) {
         if (o === tg || o.hp <= 0) continue;
         const wave = Math.max(1, safeRound(magicWepRaw(o, ultBestEl(o), raw)));
-        withHit({ ox: tg.x, oy: tg.y }, () => { hurtEn(g, o, wave); if (o.cls === 0) o.stun = Math.max(o.stun, stunT); if (o.hp <= 0) kill(g, o); });
+        withHit({ ox: tg.x, oy: tg.y }, () => { hurtEn(g, o, wave, elSrc(ultBestEl(o), { n: "Worldbreaker Quake", t: "", c: "" })); if (o.cls === 0) o.stun = Math.max(o.stun, stunT); if (o.hp <= 0) kill(g, o); });
       }
     }
     if (st.magic && wel) withHit(hitV, () => { applyWepEl(g, tg, wel, dmg, true); });
     else if (main && main.kind === "beamsword" && wel && tg.hp > 0) {
       const slice = Math.max(1, Math.round(st.atk * mul * 0.22 * elMul(tg, wel)));
-      const sd = withHit(hitV, () => hurtEn(g, tg, slice));
+      const sd = withHit(hitV, () => hurtEn(g, tg, slice, { n: "Beam Slice", t: ELN[wel], c: ELC[wel] }));
       floatTxt(g, tg.x + 0.3, tg.y - 0.15, String(sd), ELC[wel]);
       withHit(hitV, () => { applyWepEl(g, tg, wel, sd, true); });
     }
@@ -11382,11 +11538,11 @@ function enemyAttack(g: Game, e: En, mul: number, st: Stats): void {
   if (h.hp <= 0 || g.mode !== "play") return;
   efPostHurt(g, e, dmg, st);
   for (const p of allPassives(g.eq)) {
-    if (p.ty === "thorns" && e.hp > 0) { elHit(g, e, p.el, st.atk * p.pw * 0.9 * (p.mod === 3 ? 2 : 1), true, p.mod); g.sfx("mx", pasSnd(p)); }
+    if (p.ty === "thorns" && e.hp > 0) { elHit(g, e, p.el, st.atk * p.pw * 0.9 * (p.mod === 3 ? 2 : 1), true, p.mod, { n: p.name || "Thorns", t: "", c: "" }); g.sfx("mx", pasSnd(p)); }
     else if (p.ty === "retal" && R() < (p.mod === 1 ? 0.45 : 0.3)) {
       const r = 2 + (p.mod === 0 ? 1 : 0);
       fxAdd(g, "ring", h.ax * TS + 12, h.ay * TS + 12, 0, 0, 0.4, ELC[p.el], EL2[p.el], (r + 0.5) * TS);
-      for (const o of nearEnemies(g, h.x, h.y, r)) elHit(g, o, p.el, st.atk * p.pw * 1.3 * (p.mod === 3 ? 1.6 : 1), true, p.mod);
+      for (const o of nearEnemies(g, h.x, h.y, r)) elHit(g, o, p.el, st.atk * p.pw * 1.3 * (p.mod === 3 ? 1.6 : 1), true, p.mod, { n: p.name || "Retribution", t: "", c: "" });
       g.sfx("mx", pasSnd(p));
     }
   }
@@ -11450,7 +11606,7 @@ function endTurn(g: Game, lockMove = true): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD, g, { n: "Burn", t: ELN.fire, c: ELC.fire }); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; } // the Hunter shrugs off slow and fear - it never stops coming
@@ -11502,7 +11658,7 @@ function rtWorld(g: Game): void {
   for (const e of g.en.slice()) {
     if (g.mode !== "play") break;
     if (e.hp <= 0) continue;
-    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
+    if (e.burn > 0) { e.burn--; markHitDir(g, e); applyHpDmg(e, e.burnD, g, { n: "Burn", t: ELN.fire, c: ELC.fire }); e.hit = 0.15; floatTxt(g, e.x, e.y - 0.2, String(e.burnD), ELC.fire); if (e.hp <= 0) { kill(g, e); continue; } }
     if ((e.bl || e.poi || e.doom || e.mk) && efEnemyTick(g, e)) continue;
     if (e.weak > 0) e.weak--;
     if (e.hunt) { e.slow = 0; e.fear = 0; }
@@ -11567,6 +11723,12 @@ function camTick(g: Game, dt: number): void {
   const maxX = Math.max(0, MW * TS - VW);
   const minY = -HUD;
   const maxY = Math.max(minY, MH * TS - HUD - VIEWH);
+  if (g.area === "camp" && g.pkShow && (g.pkShow.s || g.pkShow.u) && g.portal && g.portal.kind === "proceed") {
+    // Camp with a peak-damage board: frame the portal-to-hero span so the board between campfire and portal is on screen.
+    const want = (g.portal.y * TS + (h.ay + 1) * TS) / 2 - (HUD + VIEWH / 2);
+    const lim = Math.max(0, VIEWH / 2 - 30);
+    ty = Math.max(ty - lim, Math.min(ty + lim, want));
+  }
   tx = Math.max(0, Math.min(maxX, tx));
   ty = Math.max(minY, Math.min(maxY, ty));
   const key = String(g.depth) + (g.vault ? "v" : "f");
@@ -11741,7 +11903,8 @@ function castUlt(g: Game, slot?: EqKey): boolean {
     const dmg = ultDamage(g, st, w, e);
     if (dmg <= 0) continue;
     withHit({ ox: h.x, oy: h.y }, () => {
-      hurtEn(g, e, dmg); e.hit = 0.4; e.awake = true;
+      const uel = ultBestEl(e);
+      hurtEn(g, e, dmg, { n: u.n, t: ELN[uel], c: ELC[uel], k: 0, u: w.ult }); e.hit = 0.4; e.awake = true;
       floatTxt(g, e.x, e.y - 0.3, String(dmg), w.golden ? GOLD : u.c2);
       if (e.hp <= 0) { killed++; kill(g, e); }
     });
@@ -12737,8 +12900,8 @@ try {
       (g as Game & { _okillOx?: number })._okillOx = tx * TS + 12;
       (g as Game & { _okillOy?: number })._okillOy = ty * TS + 12;
       withHit({ dx, dy }, () => {
-        if (rWant != null) withOverkillR(rWant, () => { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); });
-        else { hurtEn(g, e, dmg); if (e.hp <= 0) kill(g, e); }
+        if (rWant != null) withOverkillR(rWant, () => { hurtEn(g, e, dmg, { n: "", t: "", c: "", x: true }); if (e.hp <= 0) kill(g, e); });
+        else { hurtEn(g, e, dmg, { n: "", t: "", c: "", x: true }); if (e.hp <= 0) kill(g, e); }
       });
       (g as Game & { _okillR?: number })._okillR = rWant ?? (dmg / remain);
       if (g.notify) try { g.notify(); } catch { /* ignore */ }
@@ -13207,6 +13370,208 @@ function loottestPets(n = 20000, d = 12, petCh?: number): Record<string, unknown
   return res;
 }
 try { (window as unknown as { __ED16_LOOTTEST?: object }).__ED16_LOOTTEST = { set: loottestSet, pets: loottestPets }; } catch { /* ignore */ }
+// ---------- test hooks: combine audit (every rarity / type, incl. set pieces at any rarity) ----------
+function auditCombine(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const rows: Record<string, unknown>[] = [];
+    const fails: string[] = [];
+    const nStars = (it: Item | null): number => (it && it.st ? it.st.length : 0);
+    const mkT = (kind: Kind, rar: number, stars: number, set?: number, gt?: number, pt?: number): Item => {
+      let it: Item;
+      if (kind === "gem") it = makeGem(rar, gt ?? 0, 10);
+      else if (set !== undefined) it = makeSetPiece(10, kind as AK, set, 10, rar);
+      else { it = makeItem(10, rar, kind, 10); delete it.set; if (pt !== undefined) it.pt = pt; }
+      if (kind !== "gem") { if (stars > 0) forceStars(it, stars); else delete it.st; }
+      delete it.golden;
+      return it;
+    };
+    const check = (label: string, typ: string, rar: number, stars: number, mk: () => Item, expect: (out: Item | null, ins: Item[]) => string | null, wantNoKey = false): void => {
+      const ins = [mk(), mk(), mk()];
+      const keys = ins.map(combineKey);
+      let err: string | null = null;
+      let out: Item | null = null;
+      if (wantNoKey) { if (keys[0] !== null && makeCombined(ins, 5, ins[0]) !== null) err = "combined but should not (key " + keys[0] + ")"; }
+      else if (!keys[0] || !keys.every((k: string | null) => k === keys[0])) err = "no shared key: " + keys.join(",");
+      else { out = makeCombined(ins, 5, ins[0]); err = expect(out, ins); }
+      // bag path (same inputs in a bag)
+      if (!err && !wantNoKey) {
+        const g = newGame(null); g.mode = "play"; g.depth = 10; g.lvl = 20; g.autoEq = false; g.autoCombine = true;
+        g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+        const bag = typ === "gem" ? ensureGemBag(g) : g.bag;
+        bag.length = 0; for (const x of [mk(), mk(), mk()]) bag.push(x);
+        const n = runAutoCombineIn(g, bag);
+        if (n < 1) err = "bag pass did not combine";
+      }
+      rows.push({ label, typ, rar, stars, ok: !err, key: keys[0], out: out ? { kind: out.kind, rar: out.rar, stars: nStars(out), set: out.set, golden: !!out.golden } : null, err });
+      if (err) fails.push(label + " r" + rar + " s" + stars + ": " + err);
+    };
+    const normalExpect = (kindOk: (o: Item, ins: Item[]) => boolean) => (out: Item | null, ins: Item[]): string | null => {
+      if (!out) return "makeCombined returned null";
+      const a = ins[0], s0 = nStars(a), cap = STAR_COMBINE_MAX[a.rar] ?? 0;
+      if (!kindOk(out, ins)) return "wrong kind " + out.kind;
+      if (out.set !== undefined) return "result became a set piece";
+      if (a.rar < 7) {
+        if (s0 < cap) { if (out.rar !== a.rar || nStars(out) !== s0 + 1) return "want r" + a.rar + " s" + (s0 + 1) + " got r" + out.rar + " s" + nStars(out); }
+        else { if (out.rar !== a.rar + 1) return "want rarity up to " + (a.rar + 1) + " got " + out.rar; const c2 = STAR_COMBINE_MAX[out.rar] ?? 0; if (nStars(out) > Math.max(c2, 0) || (out.rar >= 3 && c2 >= 1 && nStars(out) < 1)) return "bad stars after tier-up " + nStars(out); }
+      } else if (out.rar !== 7 || nStars(out) !== s0 + 1) return "want prismatic s" + (s0 + 1) + " got r" + out.rar + " s" + nStars(out);
+      if (out.rar === 7 && nStars(out) >= 10 && !out.golden) return "10-star prismatic not golden";
+      return null;
+    };
+    for (let r = 0; r <= 7; r++) {
+      const cap = STAR_COMBINE_MAX[r] ?? 0;
+      for (let st = 0; st <= (r === 7 ? 10 : cap); st++) {
+        const top = r === 7 && st >= 10;
+        for (const k of ARMOR_K) check("armor " + k, "armor", r, st, () => mkT(k, r, st), normalExpect((o: Item) => o.kind === k), top);
+        for (const k of ONE_HAND_WEPS) check("1H " + k, "1h", r, st, () => mkT(k, r, st), normalExpect((o: Item) => o.kind === k), top);
+        for (const k of TWO_HAND_WEPS) check("2H " + k, "2h", r, st, () => mkT(k, r, st), normalExpect((o: Item) => o.kind === k), top);
+        check("shield", "1h", r, st, () => mkT("shield", r, st), normalExpect((o: Item) => o.kind === "shield"), top);
+        check("pet", "pet", r, st, () => mkT("pet", r, st, undefined, undefined, 7), normalExpect((o: Item) => o.kind === "pet" && o.pt === 7), top);
+      }
+      // mixed subtypes inside a hand track
+      if (r < 7) {
+        const mix1 = [mkT("sword", r, 0), mkT("axe", r, 0), mkT("mace", r, 0)];
+        const k1 = mix1.map(combineKey); const lowAnyStars = r < 3;
+        const o1 = k1[0] && k1.every((k: string | null) => k === k1[0]) ? makeCombined(mix1, 5, mix1[0]) : null;
+        const ok1 = !!o1 && isOneHand(o1) && o1.kind !== "shield";
+        rows.push({ label: "1H mixed subtypes", typ: "1h", rar: r, stars: 0, ok: ok1, key: k1[0], out: o1 ? { kind: o1.kind, rar: o1.rar, stars: nStars(o1) } : null, err: ok1 ? null : "mixed 1H did not combine to a 1H", lowAnyStars });
+        if (!ok1) fails.push("1H mixed r" + r);
+      }
+      // gems
+      if (r <= 7) for (let gt = 0; gt < GEMT.length; gt++) check("gem " + GEMT[gt].n, "gem", r, 0, () => mkT("gem", r, 0, undefined, gt), (out: Item | null): string | null => (!out ? "null" : out.kind !== "gem" || out.gt !== gt || out.rar !== r + 1 ? "want gem " + gt + " r" + (r + 1) + " got " + out.gt + " r" + out.rar : null), r >= 7);
+      // set pieces at this rarity: same set -> same set +1 star; mixes -> random set +1 star; cap 4 -> no combine
+      for (let st = 0; st <= 4; st++) for (const k of ARMOR_K) {
+        const capd = st >= 4;
+        check("set " + k + " same-set", "set", r, st, () => mkT(k, r, st, 3), (out: Item | null): string | null => (!out ? "null" : out.set !== 3 || out.kind !== k || out.rar !== r || nStars(out) !== st + 1 || out.name !== SETS[3].parts[k as AK] ? "got set " + out.set + " " + out.kind + " r" + out.rar + " s" + nStars(out) : null), capd);
+        if (!capd) {
+          const mixes: [string, number[]][] = [["2+1", [1, 1, 6]], ["3 different", [0, 4, 8]]];
+          for (const [lab, sids] of mixes) {
+            let i = 0;
+            const ins = sids.map((sid: number) => mkT(k, r, st, sid));
+            void i;
+            const keys = ins.map(combineKey);
+            const out = keys[0] && keys.every((x: string | null) => x === keys[0]) ? makeCombined(ins, 5, ins[0]) : null;
+            const ok = !!out && out.set !== undefined && out.kind === k && out.rar === r && nStars(out) === st + 1;
+            rows.push({ label: "set " + k + " " + lab, typ: "set", rar: r, stars: st, ok, key: keys[0], out: out ? { kind: out.kind, rar: out.rar, stars: nStars(out), set: out.set } : null, err: ok ? null : "mix failed" });
+            if (!ok) fails.push("set " + k + " " + lab + " r" + r + " s" + st);
+          }
+        }
+      }
+    }
+    // set vs non-set never mix; different kinds / stars never mix
+    const iso = [
+      combineKey(mkT("legs", 6, 0, 2)) !== combineKey(mkT("legs", 6, 0)),
+      makeCombined([mkT("legs", 6, 0, 2), mkT("legs", 6, 0, 2), mkT("legs", 6, 0)], 5) === null,
+      combineKey(mkT("legs", 6, 0, 2)) !== combineKey(mkT("head", 6, 0, 2)),
+      combineKey(mkT("legs", 6, 0, 2)) !== combineKey(mkT("legs", 6, 1, 2)),
+      combineKey(mkT("legs", 5, 0, 2)) !== combineKey(mkT("legs", 6, 0, 2)),
+    ];
+    if (!iso.every(Boolean)) fails.push("isolation " + JSON.stringify(iso));
+    // retroactive: a loaded bag full of triples combines on the first play frame (loadCombinePass)
+    const g = newGame(null); g.mode = "play"; g.depth = 12; g.lvl = 30; g.autoEq = false; g.autoCombine = true;
+    g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+    g.bag = []; const gb = ensureGemBag(g); gb.length = 0;
+    for (let r = 0; r <= 7; r++) {
+      for (const k of ARMOR_K) for (let i = 0; i < 3; i++) { g.bag.push(mkT(k, r, 0)); g.bag.push(mkT(k, r, Math.min(1, 4), (i * 3) % SETS.length)); }
+      for (const k of ["sword", "greatsword", "shield", "pet"] as Kind[]) for (let i = 0; i < 3; i++) g.bag.push(mkT(k, r, 0, undefined, undefined, 2));
+      if (r < 7) for (let i = 0; i < 3; i++) gb.push(mkT("gem", r, 0, undefined, 1));
+    }
+    const before = { bag: g.bag.length, gems: gb.length };
+    const n = loadCombinePass(g);
+    const leftover: string[] = [];
+    for (const bagX of [g.bag, ensureGemBag(g)]) for (const [k, arr] of bagGroupsOf(bagX)) if (arr.length >= 3) { const c = arr.slice(0, 3).map((i: number) => bagX[i]); if (makeCombined(c, 5, c[0])) leftover.push(k + " x" + arr.length); }
+    const retro = { before, after: { bag: g.bag.length, gems: ensureGemBag(g).length }, combines: n, leftover };
+    if (leftover.length || n < 1) fails.push("retroactive leftover " + leftover.join(";"));
+    // summary table: per rarity x type
+    const table: Record<string, Record<string, string>> = {};
+    for (const rw of rows) {
+      const r = RT[rw.rar as number] ?? String(rw.rar), t = rw.typ as string;
+      table[r] = table[r] || {};
+      const cur = table[r][t];
+      const okn = (cur ? Number(cur.split("/")[0]) : 0) + (rw.ok ? 1 : 0), tot = (cur ? Number(cur.split("/")[1]) : 0) + 1;
+      table[r][t] = okn + "/" + tot;
+    }
+    return { ok: fails.length === 0, cases: rows.length, fails: fails.slice(0, 60), failCount: fails.length, table, retro, iso };
+  });
+}
+function auditSaveCode(code: string): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = decodeCode(code.trim(), null);
+    if (!g) return { ok: false, error: "decode failed" };
+    const sets = g.bag.filter((it: Item) => it.set !== undefined);
+    const by: Record<string, number> = {};
+    for (const it of sets) { const k = it.kind + "|r" + it.rar + "|s" + (it.st ? it.st.length : 0); by[k] = (by[k] || 0) + 1; }
+    const groupsBefore: Record<string, number> = {};
+    for (const [k, arr] of bagGroupsOf(g.bag)) groupsBefore[k] = arr.length;
+    const autoCombine = g.autoCombine !== false;
+    const bagBefore = g.bag.length;
+    g.mode = "play";
+    const n = loadCombinePass(g);
+    return { ok: true, depth: g.depth, lvl: g.lvl, autoCombine, bagBefore, bagAfter: g.bag.length, setPieces: sets.length, setByKindRarStars: by, combinesOnLoad: n, eqSets: EQK.map((k: EqKey) => g.eq[k] && g.eq[k]!.set !== undefined ? k + ":" + (g.eq[k]!.st ? g.eq[k]!.st!.length : 0) : "").filter(Boolean) };
+  });
+}
+// ---------- test hooks: peak-damage tracker ----------
+function peakFeed(): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = newGame(null); g.mode = "play"; g.depth = 6; g.lvl = 30; g.area = "dungeon";
+    peakStretchStart(g, 6);
+    const e = mkEnemy(g, 5, 5, 0); e.hp = e.mhp = 1e12; e.shd = 0; e.ovn = 0;
+    const hits: [number, DmgSrc][] = [
+      [500, { n: "Sword Attack", t: "Physical", c: PHYS_COL, k: 0 }],
+      [1200, { n: "Sword Attack", t: "Fire", c: ELC.fire, k: 1 }],
+      [3456, { n: "Greatsword Attack", t: "Physical", c: PHYS_COL, k: 2 }],
+      [800, { n: "Starfire", t: "Star", c: GOLD }],
+      [3000, { n: "Inferno Bolt", t: "Fire", c: ELC.fire }],
+      [50000, { n: ULTS[12].n, t: ELN.void, c: ELC.void, k: 0, u: 12 }],
+      [20000, { n: ULTS[3].n, t: ELN.holy, c: ELC.holy, k: 0, u: 3 }],
+      [999999, { n: "", t: "", c: "", x: true }],
+    ];
+    for (const [d, src] of hits) hurtEn(g, e, d, src);
+    applyHpDmg(e, 3400, g, { n: "Bleed", t: "Bleed", c: "#d01030" });
+    const afterFeed = JSON.parse(JSON.stringify(g.pk));
+    // real paths: elemental spell hit (elHit) and a real Prismatic ultimate (castUlt)
+    const sp: Spell = { el: "frost", sh: "bolt", mod: -1, ch: 8, pw: 1, r: 1, name: "Frost Bolt" };
+    elHit(g, e, "frost", 10, false, -1, { n: sp.name, t: "", c: "" });
+    const w = makeItem(30, 7, "sword", 30); w.ult = 7; g.eq.rh = w; g.eq.lh = null;
+    const t2 = mkEnemy(g, g.hero.x + 1, g.hero.y, 0); t2.hp = t2.mhp = 1e12; t2.shd = 0; t2.ovn = 0;
+    g.en = [t2]; g.vis.fill(1); g.ultAts = {}; g.paused = false;
+    const ulted = castUlt(g, "rh");
+    const afterUlt = JSON.parse(JSON.stringify(g.pk));
+    // save round trip (Save Code body and persisted save)
+    const code = makeCode(g);
+    const g2 = decodeCode(code, null);
+    const rt = g2 ? JSON.parse(JSON.stringify(g2.pk)) : null;
+    // camp arrival snapshot, then leaving camp resets the tracker
+    g.actCleared = 10; g.depth = 10;
+    peakArriveCamp(g);
+    const show = JSON.parse(JSON.stringify(g.pkShow));
+    g.area = "camp";
+    leaveCamp(g);
+    const afterLeave = JSON.parse(JSON.stringify(g.pk));
+    const code2 = makeCode(g);
+    const g3 = decodeCode(code2, null);
+    // old save with no pk fields still loads
+    const oldBody = JSON.parse(lzd(code2.slice(CODE_PRE.length)) || "{}"); delete oldBody.pk; delete oldBody.pks;
+    const g4 = decodeCode(CODE_PRE + lzc(JSON.stringify(oldBody)), null);
+    return { afterFeed, ulted, afterUlt, ultName: ULTS[7].n, roundTrip: rt, show, afterLeave, showSurvivesLeave: g3 ? JSON.parse(JSON.stringify(g3.pkShow)) : null, oldSaveLoads: !!g4, oldSavePk: g4 ? g4.pk : null, oldSavePkShow: g4 ? g4.pkShow : null };
+  });
+}
+function peakShot(withUlt = true): Record<string, unknown> {
+  return withPortalsTest(() => {
+    const g = newGame(null);
+    g.mode = "play"; g.lvl = 40; g.depth = 10; g.front = 10; g.actCleared = 10;
+    genCamp(g);
+    g.pkShow = { d0: 6, d1: 10, s: { v: 1234567, n: "Greatsword Attack", t: "Physical", c: PHYS_COL, k: 2 } };
+    if (withUlt) g.pkShow.u = { v: 98765432, n: ULTS[12].n, t: ELN[ULTS[12].el], c: ELC[ULTS[12].el], k: 0, u: 12 };
+    g.pk = {};
+    g.hero.x = g.hero.ax = 20; g.hero.y = g.hero.ay = 22;
+    computeVis(g);
+    LOAD_COMBINED.add(g);
+    if (installTestGame) installTestGame(g);
+    IP.camOk = false;
+    return { ok: true, fire: g.fireAt, portal: g.portal, hero: { x: g.hero.x, y: g.hero.y } };
+  });
+}
+try { (window as unknown as { __ED16_PEAK?: object }).__ED16_PEAK = { feed: peakFeed, shot: peakShot, rect: (): object | null => PEAK_LAST_RECT, audit: auditCombine, auditCode: auditSaveCode, end: portalsEnd }; } catch { /* ignore */ }
 let PETS_TEST_G: Game | null = null;
 function withPetsTest<T>(fn: () => T): T {
   const prev = GIB_SKIP_SAVE;
@@ -14043,7 +14408,7 @@ export default function App() {
   const [padHeld, setPadHeld] = useState<string>("");
 
   const bump = (): void => setTick((n: number) => n + 1);
-  const openInv = (): void => { const g = gRef.current; if (!g || g.mode !== "play") return; sortInventory(g); holdRef.current = null; setPadHeld(""); invRef.current = true; setInv(true); setNote(""); };
+  const openInv = (): void => { const g = gRef.current; if (!g || g.mode !== "play") return; if (autoCombineOn(g) && runAutoCombine(g) > 0) saveGame(g, true, true); sortInventory(g); holdRef.current = null; setPadHeld(""); invRef.current = true; setInv(true); setNote(""); };
   const closeInv = (): void => { invRef.current = false; setInv(false); setSel(""); setNote(""); setConfirmMS(false); setConfirmSL(false); };
   openTestInvFn = (on: boolean): void => { if (on) openInv(); else closeInv(); };
   apiRef.current = { openInv, closeInv, closeShop, closeStash };
@@ -14879,6 +15244,7 @@ export default function App() {
     const update = (dt: number): void => {
       const g = gRef.current;
       if (!g) return;
+      if (g.mode === "play" && !LOAD_COMBINED.has(g)) loadCombinePass(g);
       if (PRIS_T_FREEZE != null) g.time = PRIS_T_FREEZE;
       else g.time += dt;
       RC[7] = "hsl(" + Math.floor((g.time * 140) % 360) + ",100%,62%)";
@@ -15056,6 +15422,7 @@ export default function App() {
         ctx.fillStyle = "#2a1a08"; ctx.fillRect(sx0 + 10, sy0 + 13, 4, 4);
         text("BANK", sx0 + 12, sy0 - 4, GOLD, "center", 5);
       }
+      drawPeakCamp(ctx, g, camX, camY);
       const ens = g.en.filter((e: En) => e.hp > 0 && g.vis[e.y * MW + e.x]).sort((a: En, b: En) => a.y - b.y);
       let boss: En | null = null;
       const bosses: En[] = [];

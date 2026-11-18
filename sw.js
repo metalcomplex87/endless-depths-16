@@ -1,11 +1,11 @@
 /* Tiny service worker so Chrome can offer Install app.
    HTML and JS are network-first so a new deploy is not stuck behind an old cache.
    Icons stay cache-first. Cache name is stamped per build. */
-const CACHE = "ed16-smoke-1794973126671";
+const CACHE = "ed16-20261117-215617";
 const ASSETS = [
   "./",
   "./index.html",
-  "./game.js?v=smoke-1794973126671",
+  "./game.js?v=20261117-215617",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
@@ -36,7 +36,8 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith("/") || url.pathname.endsWith("/endless-depths-16");
   if (networkFirst) {
     event.respondWith(
-      fetch(event.request).then((res) => {
+      // no-store: bypass the browser HTTP cache too (GitHub Pages sends max-age=600), so a reload always gets the newest build.
+      fetch(event.request.mode === "navigate" ? new Request(event.request.url, { cache: "no-store", credentials: "same-origin" }) : new Request(event.request, { cache: "no-store" })).then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy));

@@ -36,7 +36,8 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith("/") || url.pathname.endsWith("/endless-depths-16");
   if (networkFirst) {
     event.respondWith(
-      fetch(event.request).then((res) => {
+      // no-store: bypass the browser HTTP cache too (GitHub Pages sends max-age=600), so a reload always gets the newest build.
+      fetch(event.request.mode === "navigate" ? new Request(event.request.url, { cache: "no-store", credentials: "same-origin" }) : new Request(event.request, { cache: "no-store" })).then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy));
