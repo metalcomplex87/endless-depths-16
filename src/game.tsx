@@ -2763,14 +2763,8 @@ function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
   draw(pp);
   if (box.x1 < box.x0) return;
   const x = box.x0, y = box.y0, w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1;
-  // Keep sparkles on the model itself. Do not draw a bounding-box rectangle.
-  const n = 3;
-  for (let i = 0; i < n; i++) {
-    const ph = t * 3.2 + seed * 0.17 + i * 1.7;
-    const sx = Math.round(x + (Math.sin(ph) * 0.5 + 0.5) * Math.max(0, w - 1));
-    const sy = Math.round(y + (Math.cos(ph * 1.31 + i) * 0.5 + 0.5) * Math.max(0, h - 1));
-    p(sx, sy, 1, 1, i % 2 ? "#ffffff" : hsl(Math.floor(prisHue(t, seed, i * 80)), 100, 90));
-  }
+  // Hue-tint only. Do not sprinkle moving sparkles on the sprite — at bag scale those
+  // become large blocks sitting on the character. Weapon arcs are drawn separately.
   if (isPrisWep(it)) drawPrisWeaponArcs(p, x, y, w, h, t, seed);
 }
 function prisPieces(eq: Eq): { slot: EqKey; it: Item }[] {
@@ -3873,7 +3867,7 @@ function chestGlow(ctx: CanvasRenderingContext2D, sx: number, sy: number, rar: n
   } catch { /* ignore */ }
 }
 
-function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, rar: number, t: number): void {
+function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, rar: number, t: number, onChar = false): void {
   if (rar < 3) return;
   const c = RC[rar];
   const pulse = 0.5 + 0.5 * Math.sin(t * (rar >= 6 ? 9 : 4));
@@ -3884,7 +3878,8 @@ function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, 
     ctx.globalAlpha = 0.25 + 0.5 * pulse; ctx.strokeStyle = c; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(cx, cy, r * 1.08, 0, 6.2832); ctx.stroke();
   }
-  if (rar >= 5) {
+  // 1px mythic motes stay for non-character auras. On the hero they sit on the sprite, so skip them there too when Prismatic.
+  if (rar >= 5 && !(onChar && rar >= 7)) {
     ctx.globalAlpha = 0.9;
     for (let i = 0; i < 6; i++) {
       const an = t * 2.2 + i * 1.047;
@@ -3893,7 +3888,8 @@ function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, 
       ctx.fillRect(Math.round(cx + Math.cos(an) * rr), Math.round(cy + Math.sin(an) * rr), 1, 1);
     }
   }
-  if (rar >= 6) {
+  // Rising 2x2 relic motes and the tight Prismatic 2x2 orbit sit on top of the character and float awkwardly. Keep them on ground-item auras only.
+  if (rar >= 6 && !(onChar && rar >= 7)) {
     const fc = ["#ff3030", "#ff8020", "#ffe040"];
     for (let i = 0; i < 10; i++) {
       const fx = cx - r + ((i * 7.3 + t * 9) % (2 * r));
@@ -3907,7 +3903,7 @@ function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, 
       ctx.moveTo(cx - r * 0.6, cy - r); ctx.lineTo(cx - r * 0.2, cy - r * 0.3); ctx.lineTo(cx - r * 0.5, cy - r * 0.1); ctx.lineTo(cx, cy + r * 0.5); ctx.stroke();
     }
   }
-  if (rar >= 7) {
+  if (rar >= 7 && !onChar) {
     for (let i = 0; i < 14; i++) {
       const an = t * 3 + i * 0.4488;
       ctx.globalAlpha = 0.95;
@@ -3916,6 +3912,15 @@ function aura(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, 
     }
   }
   ctx.globalAlpha = 1;
+}
+function prisAuraSpec(rar: number, onChar: boolean): { disc: boolean; ring: boolean; px1: boolean; rise2: boolean; orbit2: boolean } {
+  return {
+    disc: rar >= 3,
+    ring: rar >= 4,
+    px1: rar >= 5 && !(onChar && rar >= 7),
+    rise2: rar >= 6 && !(onChar && rar >= 7),
+    orbit2: rar >= 7 && !onChar,
+  };
 }
 
 // ---------- world ----------
@@ -13604,6 +13609,8 @@ try {
     arcGaps: (seed: number, i: number, n: number) => prisArcGaps(seed, i, n),
     arcT0: (seed: number, i: number) => prisArcT0(seed, i),
     glint: { MIN: PRIS_GLINT_MIN, MAX: PRIS_GLINT_MAX, MARGIN: PRIS_GLINT_MARGIN, TWINKLE: PRIS_GLINT_TWINKLE, PERIOD: PRIS_GLINT_PERIOD },
+    spriteSparkles: 0,
+    auraSpec: (rar: number, onChar: boolean) => prisAuraSpec(rar, onChar),
     pieces: (): Record<string, unknown> => {
       const g = PRIS_TEST_G || LIVE;
       if (!g) return { ok: false, error: "not begun" };
@@ -14835,7 +14842,7 @@ export default function App() {
       text("DEPTHS", VW / 2, 58, "#ff8c1a", "center", 18);
       text("an infinite pixel dungeon crawler", VW / 2, 78, "#c8b8f0", "center", 7);
       const rar = (demoR + 7) % 8;
-      aura(ctx, VW / 2, 150, 46, rar, t);
+      aura(ctx, VW / 2, 150, 46, rar, t, true);
       drawHero(ctx, VW / 2 - 48, 104, 4, 1, demoEq, 0, { ...P0, bob: Math.sin(t * 2.4) > 0.45 ? -1 : 0, sway: Math.sin(t * 1.3) * 0.8 });
       text(RT[rar].toUpperCase() + " GEAR", VW / 2, 206, RC[rar], "center", 9);
       for (let i = 0; i < 8; i++) { ctx.fillStyle = RC[i]; ctx.fillRect(VW / 2 - 56 + i * 14, 216, 12, 4); }
@@ -15023,7 +15030,7 @@ export default function App() {
       let best = -1;
       for (const k of EQK) { const it = g.eq[k]; if (it && it.rar > best) best = it.rar; }
       if (g.mode !== "dead") {
-        aura(ctx, hsx + 12, hsy + 12, 15, best, t);
+        aura(ctx, hsx + 12, hsy + 12, 15, best, t, true);
         const wardMax = calc(g.lvl, g.eq).ward;
         drawPassives(ctx, g, hsx, hsy, t, 0, wardMax);
         if (g.lvlFx > 0) {
