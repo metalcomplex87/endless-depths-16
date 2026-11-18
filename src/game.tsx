@@ -2338,19 +2338,6 @@ function drawShards(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: 
   if (!list || !list.length) return;
   for (const s of list) {
     const fade = Math.max(0, Math.min(1, s.life / Math.max(0.15, s.max) * 1.4));
-    if ((s.streak ?? 0) > 0.2) {
-      const len = Math.min(90, Math.hypot(s.vx, s.vy) * 0.035 * (s.streak ?? 0));
-      const spd = Math.hypot(s.vx, s.vy) || 1;
-      ctx.save();
-      ctx.globalAlpha = fade * 0.28 * (s.streak ?? 0);
-      ctx.strokeStyle = "#f0e8e0";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(s.x - camX, s.y - camY);
-      ctx.lineTo(s.x - camX - s.vx / spd * len, s.y - camY - s.vy / spd * len);
-      ctx.stroke();
-      ctx.restore();
-    }
     ctx.save();
     ctx.globalAlpha = fade;
     ctx.translate(s.x - camX, s.y - camY);
@@ -8665,20 +8652,6 @@ function drawPart(ctx: CanvasRenderingContext2D, p: Part, camX: number, camY: nu
   const x = p.x - camX, y = p.y - camY;
   ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
   ctx.fillStyle = p.c;
-  if ((p.streak ?? 0) > 0.2 && p.gib) {
-    const len = Math.min(80, Math.hypot(p.vx, p.vy) * 0.03 * (p.streak ?? 0));
-    const spd = Math.hypot(p.vx, p.vy) || 1;
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5) * 0.35 * (p.streak ?? 0);
-    ctx.strokeStyle = p.c;
-    ctx.lineWidth = Math.max(1, p.s);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x - p.vx / spd * len, y - p.vy / spd * len);
-    ctx.stroke();
-    ctx.restore();
-    ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
-  }
   if (!p.k) {
     if (p.ang != null) {
       ctx.save();

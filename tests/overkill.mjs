@@ -56,8 +56,8 @@ async function main() {
     record("R=10 curve reaches the screen-cross / bounce max (spd=16, rest=0.72)",
       !!(c10 && c10.spd === 16 && Math.abs(c10.rest - 0.72) < 1e-9 && c10.life === 1.65),
       JSON.stringify(c10));
-    record("R=20 curve is the near-instant blast (spd=140, trails on)",
-      !!(c20 && c20.spd === 140 && c20.trail >= 0.99 && c20.rest >= 0.88),
+    record("R=20 curve is the near-instant blast (spd=140, rest=0.88)",
+      !!(c20 && c20.spd === 140 && c20.rest >= 0.88 && c20.life === 1.2),
       JSON.stringify(c20));
     record("R<1 is treated as 1",
       meta.curves[0.5] && meta.curves[0.5].spd === 1 && meta.curves[0.5].rest === 0,
