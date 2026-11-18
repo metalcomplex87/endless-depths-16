@@ -123,7 +123,7 @@ interface Ult { n: string; el: El; pat: number; c2: string; i: number; fx?: numb
 interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number; mvv?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number; o6?: number; o6m?: number; o6ph?: number; o6inv?: number; o6t?: number; o6b?: number; o6rt?: number }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean; fit?: number } // fit 1 = 2x2 footprint at x..x+1,y..y+1; 2 = legacy 1x1 (no room for 2x2)
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
@@ -4516,6 +4516,81 @@ function drawLootChest(p: Pt, open: boolean, rar: number = 0): void {
   }
 }
 let CH_CV: HTMLCanvasElement | null = null, CH_TINT: HTMLCanvasElement | null = null;
+// 2026-11-18 13:2x: 2x2 chests keep their footprint but the sprite is drawn at ~1.25 tiles, centred, with a rarity aura + rising sparks.
+const CHEST_BIG_W = 30;                    // drawn chest width in px for a 2x2 chest (TS = 24 -> 1.25 tiles)
+const CHEST_AURA_R = [17, 19, 21, 24, 27]; // aura radius (px) per chest rarity (Normal..Mythic)
+const CHEST_AURA_A = [0.22, 0.32, 0.4, 0.5, 0.6];
+const CHEST_SPARKS = [1, 2, 3, 4, 6];
+const CH_SPR = new Map<string, HTMLCanvasElement>();
+function chestSprite(rar: number, open: boolean, tint: boolean): HTMLCanvasElement | null {
+  const key = rar + (open ? "o" : "c") + (tint ? "t" : "");
+  const hit = CH_SPR.get(key); if (hit) return hit;
+  try {
+    const cv = document.createElement("canvas"); cv.width = 24; cv.height = 24;
+    const c2 = cv.getContext("2d"); if (!c2) return null;
+    drawLootChest(painter(c2, 0, 0, 2, false, 0), open, rar);
+    if (tint) { c2.globalCompositeOperation = "source-in"; c2.fillStyle = RC[Math.max(0, Math.min(4, rar))]; c2.fillRect(0, 0, 24, 24); c2.globalCompositeOperation = "source-over"; }
+    CH_SPR.set(key, cv); return cv;
+  } catch { return null; }
+}
+const CH_AURA = new Map<number, HTMLCanvasElement>();
+function chestAuraSprite(rar: number): HTMLCanvasElement | null {
+  const hit = CH_AURA.get(rar); if (hit) return hit;
+  try {
+    const R = 64, cv = document.createElement("canvas"); cv.width = R * 2; cv.height = R * 2;
+    const c2 = cv.getContext("2d"); if (!c2) return null;
+    const col = rar <= 0 ? "#fff4d8" : RC[Math.max(0, Math.min(4, rar))];
+    const gr = c2.createRadialGradient(R, R, 0, R, R, R);
+    gr.addColorStop(0, col); gr.addColorStop(0.35, col + "aa"); gr.addColorStop(1, col + "00");
+    c2.fillStyle = gr; c2.fillRect(0, 0, R * 2, R * 2);
+    CH_AURA.set(rar, cv); return cv;
+  } catch { return null; }
+}
+// shining aura (pulsing, rarity colour) + small sparks rising from the chest; static and spark-free with reduced motion
+function chestAuraFx(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, rar: number, t: number, seed: number): void {
+  const r = Math.max(0, Math.min(4, rar | 0));
+  const calm = reducedFx();
+  const pulse = calm ? 0.8 : 0.72 + 0.28 * Math.sin(t * (2.2 + 0.4 * r) + seed);
+  const rad = CHEST_AURA_R[r] * (w / CHEST_BIG_W) * (calm ? 1 : 0.94 + 0.06 * pulse);
+  const spr = chestAuraSprite(r);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  if (spr) { ctx.globalAlpha = CHEST_AURA_A[r] * pulse; ctx.drawImage(spr, cx - rad, cy - rad * 0.8, rad * 2, rad * 1.6); }
+  if (!calm) {
+    const n = CHEST_SPARKS[r], col = r <= 0 ? "#fff0c0" : RC[r], rise = (14 + 3 * r) * (w / CHEST_BIG_W);
+    for (let i = 0; i < n; i++) {
+      const sp = 0.45 + 0.12 * ((i * 7 + seed) % 5);
+      const ph = (t * sp + i / n + seed * 0.13) % 1;
+      const x = cx + Math.sin(i * 2.399 + seed + Math.floor(t * sp + i / n + seed * 0.13) * 1.7) * w * 0.38 + Math.sin(t * 3 + i) * 1.2;
+      const y = cy + w * 0.12 - ph * rise;
+      const a = Math.sin(ph * Math.PI);
+      ctx.globalAlpha = 0.85 * a;
+      ctx.fillStyle = i % 3 === 0 ? "#ffffff" : col;
+      const z = r >= 3 && i % 2 === 0 ? 1.5 + a : 1;
+      ctx.fillRect(x - z / 2, y - 0.5, z, 1); ctx.fillRect(x - 0.5, y - z / 2, 1, z);
+    }
+  }
+  ctx.restore();
+}
+// the chest body, centred on (cx, cy), w px wide, crisp pixels; rarity outline glow like before
+function drawChestSized(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, rar: number, open: boolean, t: number): void {
+  const spr = chestSprite(rar, open, false); if (!spr) return;
+  const x0 = Math.round(cx - w / 2), y0 = Math.round(cy - w / 2);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(0,0,0,0.32)"; ctx.beginPath(); ctx.ellipse(cx, y0 + w * 0.92, w * 0.42, w * 0.1, 0, 0, 6.2832); ctx.fill();
+  if (!open && rar >= 1) {
+    const tn = chestSprite(rar, false, true);
+    if (tn) {
+      const pulse = reducedFx() ? 0.6 : 0.45 + 0.35 * Math.sin(t * (3 + rar));
+      ctx.globalAlpha = pulse;
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.drawImage(tn, x0 + dx, y0 + dy, w, w);
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.drawImage(spr, x0, y0, w, w);
+  ctx.restore();
+}
 function chestGlow(ctx: CanvasRenderingContext2D, sx: number, sy: number, rar: number, t: number, open: boolean): void {
   if (rar < 1 || open) return;
   try {
@@ -4911,9 +4986,16 @@ function withOverkillR<T>(r: number | null, fn: () => T): T {
   try { return fn(); } finally { FORCE_OKILL_R = prev; }
 }
 function applyHpDmg(e: En, dmg: number, g?: Game | null, src?: DmgSrc | null): void {
-  if (dmg > 0 && e.hp > 0) peakNote(g ?? LIVE, dmg, src);
+  const gg = g ?? LIVE;
+  const o6 = !!gg && dmg > 0 && e.hp > 0 && o6On(gg, e), para = !!(src && src.p); // O6: damage-over-time and effect damage obey the same cap/phases
+  if (o6 && gg) {
+    o6Apply(gg, e);
+    if (!para) { dmg = o6Gate(gg, e, dmg); if (dmg > 0) dmg = o6PhaseClamp(e, dmg); if (dmg <= 0) return; }
+  }
+  if (dmg > 0 && e.hp > 0) peakNote(gg, dmg, src);
   const hp0 = e.hp;
   e.hp -= dmg;
+  if (o6 && gg) o6PhaseAfter(gg, e, para);
   if (e.hp <= 0) stampOverkill(e, dmg, hp0);
 }
 function partSolid(g: Game, x: number, y: number): boolean {
@@ -5745,12 +5827,14 @@ const petHue = (pt: number): number => (pt * 37 + 11) % 360;
 const petPB = (pt: number): number => (Math.floor(pt / 10) + (pt % 10)) % 12; // (shape, hue band) is unique for every type
 const petCol = (pt: number): string => "hsl(" + (petPB(pt) * 30 + 6) + ",95%,62%)";
 const petProjName = (pt: number): string => HUEN[petPB(pt)] + " " + PROJN[petShape(pt)];
+const PET_ULT_GIVEN = { n: 0 };
+function petUltOf(it: Item): number { return ((it.seed >>> 0) * 2654435761 >>> 0) % ULTS.length; }
 function makePet(ilvl: number, rar: number, depth?: number): Item {
   const pt = ri(100);
   const it: Item = { id: NID++, seed: Math.floor(R() * 2147483646) + 1, kind: "pet", rar, ilvl, name: PRE[rar][ri(6)] + " " + PETN[pt], atk: 0, def: 0, block: 0, bonus: {}, d: [0, 0, 0, 0], pt };
   const st = rollStars("pet", rar, false, depth ?? ilvl);
   if (st) it.st = st;
-  if (rar >= 7) { it.pab = petAbiRoll(it); it.prt = petRareRoll(it); }
+  if (rar >= 7) { it.pab = petAbiRoll(it); it.prt = petRareRoll(it); it.ult = ri(ULTS.length); }
   if (R() < MVCH[Math.max(0, Math.min(7, rar))]) it.bonus.mv = mvRoll(ilvl, rar); // pets can roll run speed too (2026-11-18 v2)
   rollWW(it, true);
   return it;
@@ -7754,6 +7838,51 @@ function simBwFight(depth: number, stars: number, on: boolean, nPris = 6, swings
     return { depth, stars, nPris, on, act, ilvl, maxHp: st.maxHp, def: st.def, atk: st.atk, s: bw ? bw.s : 0, k: bw ? +bw.k.toFixed(3) : 0, r: bw ? +bw.r.toFixed(3) : 0, hpMul: bw ? +bw.hpMul.toFixed(3) : 1, dr: bw ? +bw.dr.toFixed(3) : 0, res: bw ? +bw.res.toFixed(3) : 0, cap: bw ? +bw.cap.toFixed(3) : 1, bossMul: bw ? +bw.bossMul.toFixed(3) : 1, pct: bw ? +bw.pct.toFixed(5) : 0, lsCd: bw ? bw.lsCd : 0, bossHp: boss.mhp, pool, perHit: per, ttk, ttkBasic, worstHit: +worst.toFixed(3), worstSpecial: +worstSp.toFixed(3), oneShots: dead, lastStand: ls };
   } finally { STAT_G = oldG; BW_OFF = oldOff; BOSS_PM_TEST_FORCE = oldPm; }
 }
+// O6 fight simulator (test hook): a real act boss fought to the end on a 0.33 s attack clock.
+// mode "basic": expected swing damage + C1 %-strike through hurtEn each attack; "full": real heroAttack (spells/procs/on-hit).
+function simO6Fight(depth: number, stars: number, full: boolean, on: boolean, maxSec = 1800): Record<string, number | boolean> {
+  const oldG = STAT_G, oldOff = O6_OFF;
+  O6_OFF = !on;
+  try {
+    const act = actOf(depth);
+    const ilvl = Math.max(1, depth + 1 + Math.floor(act / 2));
+    const fe = fullPrisEq(ilvl, stars);
+    const eq: Eq = { head: fe.head, chest: fe.chest, arms: fe.arms, legs: fe.legs, rh: fe.rh, lh: fe.lh, pet: null };
+    const lvl = Math.max(1, depth);
+    const g = newGame(null);
+    g.mode = "play"; g.depth = depth; g.lvl = lvl; g.area = "dungeon"; g.eq = eq; g.petAbiT = 0;
+    g.sfx = () => undefined; g.notify = () => undefined;
+    STAT_G = g;
+    const st = calc(lvl, eq);
+    g.hero.hp = st.maxHp;
+    const hx = g.hero.x, hy = g.hero.y;
+    const boss = mkActBoss(g, hx + 1, hy);
+    boss.x = hx + 1; boss.y = hy; boss.ax = boss.x; boss.ay = boss.y; boss.awake = true; boss.abIntro = true;
+    boss.ovn = 0; boss.ovhp = 0;
+    g.en = [boss];
+    const mhp0 = boss.mhp, pool0 = boss.mhp + (boss.mshd ?? 0);
+    const main = eq.rh;
+    const ev = Math.max(1, st.atk * combatSwingMul(st, isTwo(main)));
+    const raw = Math.max(1, dmgF(ev, boss.def));
+    const bw = st.bw;
+    const l0 = { ...O6_LOG };
+    let t = 0, n = 0;
+    const maxN = Math.ceil(maxSec / RT_ATK);
+    while (boss.hp > 0 && n < maxN) {
+      t += RT_ATK; g.petAbiT = t; n++;
+      g.mode = "play"; g.hero.hp = st.maxHp;
+      if (full) { heroAttack(g, boss, st, 1, 1, 0); boss.stun = 0; }
+      else {
+        hurtEn(g, boss, raw, { n: "sim", t: "", c: "" });
+        if (bw && bw.pct > 0 && boss.hp > 0) hurtEn(g, boss, Math.max(1, safeRound(safeMul(boss.mhp, bw.pct) / bw.bossMul)), { n: "sim%", t: "", c: "" });
+      }
+    }
+    const dead = boss.hp <= 0;
+    let sec = t;
+    if (!dead) { const left = Math.max(0, boss.hp) + Math.max(0, boss.shd ?? 0), tot = boss.mhp + (boss.mshd ?? 0); const done = Math.max(1e-12, (tot - left) / tot); sec = t / done; }
+    return { depth, stars, full, on, dead, sec, mul: boss.o6m ?? 1, mhp0, mhp: boss.mhp, pool0, k: bw ? bw.k : 0, phases: O6_LOG.phases - l0.phases, capped: O6_LOG.capped - l0.capped, blocked: O6_LOG.blocked - l0.blocked };
+  } finally { STAT_G = oldG; O6_OFF = oldOff; }
+}
 function spillTiles(g: Game, x: number, y: number, n: number): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
   for (let r = 0; r <= 7 && out.length < n; r++) {
@@ -9448,7 +9577,10 @@ function validItem(o: unknown): Item | null {
   it.d = it.d.map((v: number, i: number) => Math.max(0, Math.min([5, 4, 3, 5][i], Math.floor(Number(v) || 0))));
   it.spells = Array.isArray(it.spells) ? it.spells.filter((s: Spell) => !!s && ELS.includes(s.el) && SHAPES.includes(s.sh) && typeof s.ch === "number" && typeof s.pw === "number" && typeof s.r === "number" && typeof s.name === "string").map((s: Spell) => ({ ...s, mod: Math.max(0, Math.min(7, Math.floor(Number(s.mod) || 0))) })) : undefined;
   it.pas = Array.isArray(it.pas) ? it.pas.filter((p: Passive) => !!p && ELS.includes(p.el) && PTYPES.includes(p.ty) && typeof p.pw === "number" && typeof p.name === "string").map((p: Passive) => ({ ...p, mod: Math.max(0, Math.min(4, Math.floor(Number(p.mod) || 0))) })) : undefined;
-  if (typeof it.ult === "number" && it.ult >= 0 && it.ult < ULTS.length && it.kind !== "shield" && it.kind !== "pet") it.ult = Math.floor(it.ult); else it.ult = undefined;
+  if (typeof it.ult === "number" && it.ult >= 0 && it.ult < ULTS.length && it.kind !== "shield") it.ult = Math.floor(it.ult); else it.ult = undefined;
+  // 2026-11-18 (1:51 PM CT): every Prismatic pet grants its own ultimate. Old pets had none: give one, derived from the
+  // pet's seed so every load picks the same one (it is then saved with the pet). Non-Prismatic pets carry none.
+  if (it.kind === "pet") { if (it.rar >= 7) { if (it.ult === undefined) { it.ult = petUltOf(it); PET_ULT_GIVEN.n++; } } else it.ult = undefined; }
   if (it.kind === "pet") { const pt = Math.floor(Number(it.pt)); it.pt = pt >= 0 && pt < 100 ? pt : 0; it.spells = undefined; it.pas = undefined; ensurePetAbi(it); if (it.prt !== undefined) { const prt = Math.floor(Number(it.prt)); it.prt = prt >= 0 && prt <= 7 ? prt : undefined; } } else { it.pt = undefined; it.pab = undefined; it.prt = undefined; }
   if (Array.isArray(it.ef) && it.kind !== "pet") {
     const wpn = !isArmor(it.kind) && it.kind !== "shield";
@@ -11127,6 +11259,13 @@ function combinePrimary(g: Game, inputs: Item[]): Item {
   }
   return inputs[0];
 }
+const COMBINE_ULT_LOG: Record<string, unknown>[] = [];
+function combineSameType(inputs: Item[]): boolean {
+  const a = inputs[0];
+  if (a.kind === "pet") return inputs.every((x: Item) => x.kind === "pet" && (x.pt ?? 0) === (a.pt ?? 0));
+  if (isArmor(a.kind)) return inputs.every((x: Item) => x.kind === a.kind && x.d[0] === a.d[0]);
+  return inputs.every((x: Item) => x.kind === a.kind);
+}
 function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | null {
   if (inputs.length < 3) return null;
   const a = inputs[0], b = inputs[1], c = inputs[2];
@@ -11151,10 +11290,30 @@ function makeCombined(inputs: Item[], depth: number, primary?: Item): Item | nul
   else if (stars < 10) nxt = stars + 1;
   else return null;
   const it = makeItem(ilvl, rar, pickCombinedKind(inputs));
+  // Prismatic combine rules (confirmed 2026-11-18 1:49 PM CT): "exact same type" = pets with the same pet type,
+  // weapons of the same weapon kind, armor of the same kind AND the same base design (d[0]).
+  const sameType = combineSameType(inputs);
+  const prim = primary ?? a;
   if (a.kind === "pet") {
-    it.pt = a.pt;
+    if (a.rar >= 7 && !sameType) {
+      // 3 Prismatic pets of mixed types -> a totally new pet: a type none of the inputs had, fresh ability + rare power
+      const used = new Set<number>(inputs.map((x: Item) => x.pt ?? 0));
+      let pt = ri(100), guard = 0;
+      while (used.has(pt) && guard++ < 200) pt = ri(100);
+      it.pt = pt;
+      it.pab = petAbiRoll(it); it.prt = petRareRoll(it);
+    } else {
+      it.pt = a.pt;
+      if (it.rar >= 7) { it.pab = petAbiFromInputs(a, b, c, it); it.prt = petRareFromInputs(a, b, c, it); }
+    }
     it.name = PRE[it.rar][0] + " " + PETN[it.pt ?? 0];
-    if (it.rar >= 7) { it.pab = petAbiFromInputs(a, b, c, it); it.prt = petRareFromInputs(a, b, c, it); }
+  }
+  // Ultimate: a Prismatic result rolls a NEW ultimate (may match an input by chance); three of the exact same type
+  // keep the primary input's ultimate. Shields never carry one.
+  if (it.rar >= 7 && it.kind !== "shield") {
+    it.ult = sameType && a.rar >= 7 && prim.ult !== undefined ? prim.ult : ri(ULTS.length);
+    COMBINE_ULT_LOG.push({ kind: it.kind, same: sameType, ult: it.ult, ins: inputs.map((x: Item) => x.ult ?? -1), pt: it.pt, inPt: inputs.map((x: Item) => x.pt ?? -1) });
+    if (COMBINE_ULT_LOG.length > 50) COMBINE_ULT_LOG.shift();
   }
   delete it.set;
   forceStars(it, nxt);
@@ -11803,6 +11962,100 @@ function drawPeakCamp(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY
   ctx.restore();
   PEAK_LAST_RECT = { x: 4, y: y0, w: VW - 8, h: H, fireY: fyTop + 10, portalY: pBot - 4, cx };
 }
+// ---------- Boss scaling from depth 500 (option O6 of BOSS-SCALING-D500-OPTIONS.md), approved 2026-11-18 13:19 CT ----------
+// Bosses only (isBossFoe), depth >= 500 only. Player side, A1/C1, run speed and Paramount are untouched (Paramount is exempt).
+// O2 raise-only gear-matched HP: on a boss's first hit, max HP (and its shield / overshield pools) is raised so basic attacks of
+//    the equipped kit need T = 150 - 80k seconds (k = Bulwark star power / 78: ~132 s at 0*, ~101 s at 5*, 70 s at 10*):
+//    HP = max(HP_now, Pn / (1/N - pct) / sh), N = T / RT_ATK, Pn = expected swing damage x C1 boss bonus, pct = C1 %-strike,
+//    sh = (max HP + shield) / max HP. If the %-strike alone finishes inside T (pct >= 1/N), HP is raised by the max factor.
+// O3 star-tiered damage cap: a boss loses at most c = 2% + 1.5%*k of its max HP per second (shield damage included,
+//    %-strike included, Paramount exempt). Excess is wasted ("RESIST").
+// O5 light phases: at 75/50/25% HP a 4 s invulnerable transition (the boss still acts), no extra shield. Paramount ignores it.
+const O6_D0 = 500;
+const O6_T0 = 150, O6_TK = 80;           // target seconds = 150 - 80k
+const O6_MAXMUL = 1e6;                   // raise factor when the %-strike alone would finish inside T
+const O6_CAP0 = 0.02, O6_CAPK = 0.015;   // per-second HP-loss cap = 2% + 1.5%*k of max HP
+const O6_PH = [0.75, 0.5, 0.25], O6_PH_T = 4;
+const O6_LOG = { raised: 0, capped: 0, wasted: 0, phases: 0, blocked: 0 };
+let O6_OFF = false; // test-only before/after switch
+function o6On(g: Game, e: En): boolean { return !O6_OFF && (g.depth || 0) >= O6_D0 && g.area !== "camp" && isBossFoe(e); }
+function o6K(g: Game): number { const bw = bulwarkOf(g.eq, g.depth); return bw ? bw.k : 0; }
+function o6Clock(g: Game): number { return g.petAbiT ?? 0; }
+function scaleBossPools(e: En, m: number): void {
+  if (!(m > 1)) return;
+  e.mhp = safeRound(safeMul(e.mhp, m));
+  e.hp = safeRound(safeMul(Math.max(1, e.hp), m));
+  if ((e.mshd ?? 0) > 0) { e.mshd = safeRound(safeMul(e.mshd as number, m)); e.shd = safeRound(safeMul(e.shd ?? 0, m)); }
+  if ((e.ovmhp ?? 0) > 0) { e.ovmhp = safeRound(safeMul(e.ovmhp as number, m)); e.ovhp = safeRound(safeMul(e.ovhp ?? 0, m)); }
+}
+function o6TargetMul(g: Game, e: En): number {
+  const st = calc(g.lvl, g.eq);
+  const bw = st.bw;
+  const k = bw ? bw.k : 0;
+  const T = O6_T0 - O6_TK * k, N = T / RT_ATK;
+  const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
+  const ev = Math.max(1, st.atk * combatSwingMul(st, isTwo(main)));
+  const Pn = Math.max(1, dmgF(ev, e.def) * (bw ? bw.bossMul : 1));
+  const pct = bw ? bw.pct : 0;
+  const sh = (e.mhp + (e.mshd ?? 0)) / Math.max(1, e.mhp);
+  const need = 1 / N - pct;
+  if (need <= 0) return O6_MAXMUL;
+  const want = Pn / need / sh;
+  return Math.min(O6_MAXMUL, Math.max(1, want / Math.max(1, e.mhp)));
+}
+function o6Apply(g: Game, e: En): void {
+  if (e.o6) return;
+  e.o6 = 1;
+  const m = o6TargetMul(g, e);
+  e.o6m = m;
+  if (m > 1) { scaleBossPools(e, m); O6_LOG.raised++; }
+  const f = e.hp / Math.max(1, e.mhp);
+  let ph = 0; for (const t of O6_PH) if (f <= t) ph++;
+  e.o6ph = ph;
+}
+// returns the damage allowed through (0 = fully blocked) for a non-Paramount hit on a boss at d500+
+function o6Gate(g: Game, e: En, dmg: number): number {
+  const now = o6Clock(g);
+  if ((e.o6inv ?? 0) - now > O6_PH_T + 0.01) e.o6inv = 0; // clock reset after a reload: never strand a boss in a transition
+  if ((e.o6inv ?? 0) > now) {
+    O6_LOG.blocked++;
+    if ((e.o6rt ?? -9) + 0.5 <= now) { e.o6rt = now; floatTxt(g, e.x, e.y - 0.4, "INVULNERABLE", "#ffe080"); }
+    return 0;
+  }
+  const c = (O6_CAP0 + O6_CAPK * o6K(g)) * e.mhp; // allowed HP loss per second
+  if ((e.o6t ?? 0) > now + 0.01 || e.o6b === undefined) { e.o6t = now; e.o6b = c; }
+  const dt = Math.max(0, now - (e.o6t ?? now));
+  e.o6t = now;
+  e.o6b = Math.min(c, (e.o6b ?? c) + c * dt); // at most one second of budget banked
+  const ok = Math.floor(Math.min(dmg, Math.max(0, e.o6b)));
+  e.o6b = (e.o6b ?? 0) - ok;
+  if (ok < dmg) {
+    O6_LOG.capped++; O6_LOG.wasted += dmg - ok;
+    if ((e.o6rt ?? -9) + 0.5 <= now) { e.o6rt = now; floatTxt(g, e.x + 0.3, e.y - 0.6, "RESIST", "#c0a0ff"); }
+  }
+  return ok;
+}
+// clamps a non-Paramount hit at the next phase threshold and starts the 4 s transition when it is reached
+function o6PhaseClamp(e: En, dmg: number): number {
+  const ph = e.o6ph ?? 0;
+  if (ph >= O6_PH.length) return dmg;
+  const floor = Math.floor(O6_PH[ph] * e.mhp);
+  if (e.hp - dmg > floor) return dmg;
+  return Math.max(0, e.hp - floor);
+}
+function o6PhaseAfter(g: Game, e: En, paramount: boolean): void {
+  let ph = e.o6ph ?? 0;
+  const f = e.hp / Math.max(1, e.mhp);
+  if (paramount) { while (ph < O6_PH.length && f <= O6_PH[ph]) ph++; e.o6ph = ph; return; }
+  if (ph < O6_PH.length && e.hp > 0 && e.hp <= Math.floor(O6_PH[ph] * e.mhp)) {
+    e.o6ph = ph + 1;
+    e.o6inv = o6Clock(g) + O6_PH_T;
+    O6_LOG.phases++;
+    floatTxt(g, e.x, e.y - 0.8, "PHASE " + (ph + 1) + "/3", "#ffe080");
+    fxAdd(g, "ring", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.6, "#ffe080", "#ffffff", 3 * TS);
+    g.shake = Math.max(g.shake, 4);
+  }
+}
 function hurtEn(g: Game, e: En, dmg: number, src?: DmgSrc | null): number {
   if (dmg <= 0 || e.hp <= 0) return 0;
   markHitDir(g, e);
@@ -11812,6 +12065,11 @@ function hurtEn(g: Game, e: En, dmg: number, src?: DmgSrc | null): number {
   }
   const fortune = petAbiOf(g, 5);
   if (fortune && (e.cls >= 1 || e.act)) dmg = Math.max(1, safeRound(dmg * (1 + 0.25 * petAbiMul(fortune))));
+  const o6 = o6On(g, e), para = !!(src && src.p);
+  if (o6) {
+    o6Apply(g, e);
+    if (!para) { dmg = o6Gate(g, e, dmg); if (dmg <= 0) { e.hit = 0.15; e.awake = true; return 0; } }
+  }
   peakNote(g, dmg, src);
   while (dmg > 0 && (e.ovn ?? 0) > 0) {
     const layer = Math.max(0, e.ovhp ?? 0);
@@ -11832,8 +12090,10 @@ function hurtEn(g: Game, e: En, dmg: number, src?: DmgSrc | null): number {
     if (a > 0) floatTxt(g, e.x + 0.35, e.y - 0.35, "(" + a + ")", "#9ae8ff");
     if (dmg <= 0) { e.hit = 0.15; return 0; }
   }
+  if (o6 && !para) { dmg = o6PhaseClamp(e, dmg); if (dmg <= 0) { e.hit = 0.15; return 0; } }
   const hp0 = e.hp;
   e.hp -= dmg; e.hit = 0.2; e.awake = true;
+  if (o6) o6PhaseAfter(g, e, para);
   if (e.hp <= 0) stampOverkill(e, dmg, hp0);
   if (e.hp > 0 && e.act) actBossPhase(g, e);
   return dmg;
@@ -12046,13 +12306,13 @@ function ultsOf(eq: Eq): { slot: EqKey; it: Item }[] {
   const o: { slot: EqKey; it: Item }[] = [];
   for (const k of EQK) {
     const it = eq[k]; if (!it || it.ult === undefined || it.rar < 7) continue;
-    if (it.kind === "pet" || it.kind === "shield") continue;
+    if (it.kind === "shield") continue; // Prismatic pets grant an ultimate too (2026-11-18); shields never do
     o.push({ slot: k, it });
   }
   return o;
 }
-// Each equipped Prismatic item (armor/weapon, not pet or shield) is its own
-// ultimate with its own button and independent cooldown. Pets never grant an ult.
+// Each equipped Prismatic item (armor, weapon or pet; never a shield) is its own
+// ultimate with its own button and independent cooldown.
 const PRIS_FUSE_MUL = 2.5;
 const PRIS_FUSE_CAP = 7; // 4 armor + 2 weapons + 1 Prismatic pet
 function prisPetFuse(_eq: Eq): number { return 0; }
@@ -12199,7 +12459,7 @@ function ultBtnSize(vw: number, vh: number, n: number = 1): { w: number; h: numb
 }
 function layoutPlay(vw: number, vh: number, nUlt: number, safeBottom: number = 0): { vw: number; vh: number; wrapW: number; stageW: number; stageH: number; ctrlY: number; ults: { x: number; y: number; w: number; h: number }[]; visible: boolean; overStage: boolean; padW: number } {
   const wrapW = Math.min(ULT_LAYOUT.wrapMax, Math.max(1, vw));
-  const n = Math.max(0, Math.min(6, Math.floor(nUlt)));
+  const n = Math.max(0, Math.min(7, Math.floor(nUlt)));
   const sz = ultBtnSize(vw, vh, n);
   const btnW = sz.w, btnH = sz.h, gap = sz.gap, cols = sz.cols;
   const rows = n <= 0 ? 0 : Math.ceil(n / cols);
@@ -13086,11 +13346,12 @@ function ultDamage(g: Game, st: Stats, w: Item, e: En, jitter?: number): number 
 // each tinted and dressed by the ult's element (motes: holy sparkles, fire flames, frost flakes, storm sparks,
 // hellfire embers, void specks, shadow wisps) with Prismatic rainbow accents. Visual + sound only: damage, the damage
 // formula and cooldowns are unchanged (damage still lands at cast, as before). Shows are capped (3 live) for phones.
-interface UShowEv { t: number; x: number; y: number; n: number; done?: boolean }
+interface UShowEv { t: number; x: number; y: number; n: number; done?: boolean; hit?: number; dx?: number; dy?: number; big?: boolean }
 interface UShow {
   pat: number; el: El; elI: number; row: number; golden: boolean; t: number; dur: number;
   x: number; y: number; vx: number; vy: number; vw: number; vh: number;
   tg: number[][]; seed: number; r: number[]; ev: UShowEv[]; c: string; c2: string; map?: unknown;
+  en?: En[]; rh?: number[][]; sndT?: number; sndN?: number; // Eternal Reapers: struck foes, per-target cut info, hit-sound throttle
 }
 const USHOWS: UShow[] = [];
 const USHOW_CAP = 3;
@@ -13099,11 +13360,12 @@ function ushowRand(n: number, seed: number): number[] { const f = rng32(seed | 1
 function ultShowStart(g: Game, u: Ult, hx: number, hy: number, ts: En[], golden: boolean): UShow {
   const [cx, cy] = camXY();
   const s: UShow = {
-    pat: u.fx ?? u.pat, el: u.el, elI: Math.max(0, ELS.indexOf(u.el)), row: Math.floor(u.i / 10), golden, t: 0, dur: UDUR[u.pat] ?? 2.2,
+    pat: u.fx ?? u.pat, el: u.el, elI: Math.max(0, ELS.indexOf(u.el)), row: Math.floor(u.i / 10), golden, t: 0, dur: (u.fx === 10 ? UREAP_DUR : UDUR[u.pat]) ?? 2.2,
     x: hx, y: hy, vx: cx, vy: cy + HUD, vw: VW, vh: VIEWH,
     tg: ts.slice(0, 24).map((e: En) => [e.ax * TS + 12, e.ay * TS + 12]), seed: (R() * 1e9) | 0, r: [], ev: [],
     c: golden ? GOLD : ELC[u.el], c2: golden ? "#fff8c0" : u.c2, map: g.map,
   };
+  if (u.fx === 10) s.en = ts.slice(0, 24);
   s.r = ushowRand(600, s.seed);
   ushowEvents(s);
   while (USHOWS.length >= USHOW_CAP) USHOWS.shift();
@@ -13142,11 +13404,11 @@ function ushowEvents(s: UShow): void {
     case 6: { s.tg.forEach((p: number[]) => { let a = Math.atan2(p[1] - s.y, p[0] - s.x) + Math.PI / 2; if (a < 0) a += 6.2832; E(0.1 + (a / 6.2832) * 0.65, p, 12); }); break; }
     case 7: { const n = Math.max(6, s.tg.length); for (let i = 0; i < Math.min(26, n); i++) E(0.5 + i * 0.07, uSpot(s, i), 14); break; }
     case 8: { s.tg.forEach((p: number[], i: number) => E(0.25 + (i % 8) * 0.12, p, 10)); break; }
-    case 10: { // Eternal Reapers: each target is cut by one of four sweeps, then all by the great scythe
-      s.tg.forEach((p: number[], i: number) => E(UREAP_T0[i % 4] + 0.32, p, 10));
-      for (let i = 0; i < 4; i++) E(UREAP_T0[i] + 0.3, uSpot(s, 30 + i), 8);
-      E(UREAP_BIG + 0.55, [s.x, s.y], 30);
-      s.tg.forEach((p: number[]) => E(UREAP_BIG + 0.6, p, 8));
+    case 10: { // Eternal Reapers: each target is cut blade-first by one of four sweeps, then all by the great scythe
+      s.rh = s.tg.map((p: number[], i: number) => reapHitInfo(s, i, p));
+      s.tg.forEach((p: number[], i: number) => { const h = s.rh![i]; E(h[0], p, 12); s.ev[s.ev.length - 1].hit = i; s.ev[s.ev.length - 1].dx = h[1]; s.ev[s.ev.length - 1].dy = h[2]; });
+      E(UREAP_BIG + UREAP_RISE + UREAP_SPIN + 0.02, [s.x, s.y], 30);
+      s.tg.forEach((p: number[], i: number) => { const h = s.rh![i]; E(h[3], p, 10); const ev = s.ev[s.ev.length - 1]; ev.hit = i; ev.dx = h[4]; ev.dy = h[5]; ev.big = true; });
       break;
     }
     default: { const m = uMael(s); s.tg.forEach((p: number[], i: number) => E(m.hitT[i], p, 12)); break; }
@@ -13157,15 +13419,46 @@ function ultShowTick(g: Game, dt: number): void {
   for (let i = USHOWS.length - 1; i >= 0; i--) {
     const s = USHOWS[i];
     if (s.map !== g.map) { USHOWS.splice(i, 1); continue; } // left the floor
+    if (REAP_FREEZE !== null && s.pat === 10) { s.t = REAP_FREEZE; continue; } // test hook: hold an Eternal Reapers frame
     s.t += dt;
     for (const e of s.ev) {
       if (e.done || s.t < e.t) continue;
       e.done = true;
       burst(g, e.x, e.y, e.n, [s.c, s.c2, "#ffffff", uHue(s, e.t * 3)], 110, 40);
       g.shake = Math.max(g.shake, e.n >= 30 ? 9 : 3);
+      if (e.hit !== undefined) reapStrike(g, s, e);
     }
     if (s.t > s.dur) USHOWS.splice(i, 1);
   }
+}
+// Eternal Reapers hit: flinch + knockback nudge (visual only, positions unchanged), blood toward the blade's travel, sparks,
+// and a throttled slash/flesh sound so a mass hit never stacks dozens of voices.
+function reapStrike(g: Game, s: UShow, ev: UShowEv): void {
+  const en = s.en?.[ev.hit ?? -1], dx = ev.dx ?? 0, dy = ev.dy ?? 0;
+  if (en && en.hp > 0 && g.en.includes(en)) {
+    en.hit = Math.max(en.hit, 0.28); en.bump = 1; en.bdx = dx * (ev.big ? 2.2 : 1.7); en.bdy = dy * (ev.big ? 2.2 : 1.7);
+  }
+  if (en) try { spawnBlood(g, en, dx, dy); } catch { /* cosmetic */ }
+  burst(g, ev.x, ev.y, 8, ["#ff2030", "#8a0010", "#fff2a0", "#ffffff"], 150, 30);
+  g.shake = Math.max(g.shake, ev.big ? 5 : 4);
+  const now = s.t;
+  if ((s.sndN ?? 0) < UREAP_HIT_MAX && now - (s.sndT ?? -9) >= UREAP_HIT_GAP) { s.sndT = now; s.sndN = (s.sndN ?? 0) + 1; g.sfx("reapHit", ev.big ? 1 : 0); }
+}
+// minimap act-boss marker: a 5x5 pixel skull (u = pixel size), dark outline, pulsing red/white with a soft halo
+const MM_SKULL = [".XXX.", "XXXXX", "X.X.X", "XXXXX", ".X.X."];
+const MM_SKULL_LOG = { n: 0 };
+function mmBossSkull(ctx: CanvasRenderingContext2D, cx: number, cy: number, u: number, t: number): void {
+  MM_SKULL_LOG.n++;
+  const pulse = reducedFx() ? 0.5 : 0.5 + 0.5 * Math.sin(t * 6);
+  const x0 = Math.round(cx - 2.5 * u), y0 = Math.round(cy - 2.5 * u);
+  ctx.save();
+  ctx.globalAlpha = 0.25 + 0.35 * pulse; ctx.fillStyle = "#ff2020";
+  ctx.beginPath(); ctx.arc(cx, cy, (4 + 3 * pulse) * u, 0, 6.2832); ctx.fill();
+  ctx.globalAlpha = 1; ctx.fillStyle = "#000000";
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) if (MM_SKULL[r][c] === "X") ctx.fillRect(x0 + (c - 1) * u, y0 + (r - 1) * u, u * 3, u * 3);
+  ctx.fillStyle = pulse > 0.75 ? "#ffffff" : pulse > 0.4 ? "#ff9090" : "#ff2828";
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) if (MM_SKULL[r][c] === "X") ctx.fillRect(x0 + c * u, y0 + r * u, u, u);
+  ctx.restore();
 }
 function uHue(s: UShow, k: number): string { return s.golden ? (k % 2 < 1 ? "#ffe070" : "#fff6d0") : "hsl(" + Math.round((k * 57 + s.seed % 360) % 360) + ",100%,66%)"; }
 function uHueA(s: UShow, k: number, a: number): string { return s.golden ? "rgba(255,224,112," + a.toFixed(3) + ")" : "hsla(" + Math.round((k * 57 + s.seed % 360) % 360) + ",100%,66%," + a.toFixed(3) + ")"; }
@@ -13210,19 +13503,61 @@ function uImpact(ctx: CanvasRenderingContext2D, s: UShow, x: number, y: number, 
   ctx.beginPath(); ctx.ellipse(x, y, size * (0.3 + p * 1.2), size * (0.15 + p * 0.55), 0, 0, 6.2832); ctx.stroke();
   for (let j = 0; j < 6; j++) { const an = j * 1.047 + k, d = size * (0.2 + p * 1.1); uMote(ctx, s, x + Math.cos(an) * d, y + Math.sin(an) * d * 0.55 - p * 10, 0.9, an + p * 4, 1 - p); }
 }
-const UREAP_T0 = [0.12, 0.42, 0.72, 1.02]; // start of the four giant scythe sweeps
-const UREAP_BIG = 1.35;                    // the great rainbow scythe
-function uScythe(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number, R: number, fill: string | CanvasGradient, edge: string, a: number): void {
-  // a reaper's scythe: long shaft along ang, a crescent blade at its head curving back
-  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.globalAlpha = a;
-  ctx.strokeStyle = "rgba(60,40,30,0.9)"; ctx.lineWidth = Math.max(2, R * 0.05);
-  ctx.beginPath(); ctx.moveTo(-R * 0.75, 0); ctx.lineTo(R * 0.3, 0); ctx.stroke();
+// ---------- Eternal Reapers (ult id 26) rewrite, 2026-11-18 1:31 PM CT ----------
+// Four fast, huge sweeps from the screen corners, then a colossal rainbow scythe that whirls a full circle around the hero.
+// Blade-first: every scythe is drawn with its blade on the LEADING side of the swing (bright cutting edge facing the
+// direction of travel, dark spine trailing). `lead` = +1 when the swing runs toward increasing angle, -1 otherwise.
+const UREAP_T0 = [0.06, 0.27, 0.48, 0.69]; // start of the four giant sweeps (faster cadence than before)
+const UREAP_SW = 0.32;                     // seconds per sweep (was 0.55)
+const UREAP_BIG = 0.98;                    // the great rainbow scythe appears
+const UREAP_RISE = 0.2, UREAP_SPIN = 0.46; // rise/wind-up, then one full brutal revolution
+const UREAP_DUR = 2.35;
+const UREAP_HIT_GAP = 0.05, UREAP_HIT_MAX = 14; // hit-sound throttle: >= 50 ms apart, at most 14 per cast
+const REAP_LOG: { k: number; lead: number; vel: number }[] = [];
+let REAP_FREEZE: number | null = null; // test hook only
+interface ReapSweep { cx: number; cy: number; a0: number; span: number; dirn: number; R: number }
+// sweep k, in world (vx/vy) or screen (left/top) space: pivot in a screen corner, arcing across the view
+function reapSweep(left: number, top: number, W: number, H: number, k: number): ReapSweep {
+  const D = Math.min(W, H);
+  const cx = left + W * (k % 2 === 0 ? 0.04 : 0.96), cy = top + H * (k < 2 ? 0.06 : 0.94);
+  const dirn = k % 2 === 0 ? 1 : -1, R = Math.max(D * 0.95, Math.hypot(W, H) * 0.55);
+  const a0 = Math.atan2(top + H / 2 - cy, left + W / 2 - cx) - dirn * 1.25, span = dirn * 2.5;
+  return { cx, cy, a0, span, dirn, R };
+}
+function reapEase(p: number): number { const e = Math.max(0, Math.min(1, p)); return e < 0.5 ? 4 * e * e * e : 1 - Math.pow(-2 * e + 2, 3) / 2; }
+// [sweepHitT, dx, dy, bigHitT, bdx, bdy]: when each target is cut and which way the blade travels through it
+function reapHitInfo(s: UShow, i: number, p: number[]): number[] {
+  const k = i % 4, sw = reapSweep(s.vx, s.vy, s.vw, s.vh, k);
+  let a = Math.atan2(p[1] - sw.cy, p[0] - sw.cx), f = (a - sw.a0) / sw.span;
+  while (f < 0) f += 6.2832 / Math.abs(sw.span); f = Math.max(0.05, Math.min(0.95, f));
+  // invert the ease to find when the blade passes the target's angle
+  let lo = 0, hi = 1; for (let n = 0; n < 18; n++) { const m = (lo + hi) / 2; if (reapEase(m) < f) lo = m; else hi = m; }
+  a = sw.a0 + sw.span * f;
+  const tx = -Math.sin(a) * sw.dirn, ty = Math.cos(a) * sw.dirn; // travel direction of the blade
+  const ab = Math.atan2(p[1] - s.y, p[0] - s.x) + Math.PI / 2 + 0.5; // great scythe starts straight up (-PI/2 - 0.5) and spins clockwise
+  let fb = ab / 6.2832; fb -= Math.floor(fb);
+  let lo2 = 0, hi2 = 1; for (let n = 0; n < 18; n++) { const m = (lo2 + hi2) / 2; if (1 - Math.pow(1 - m, 3) < fb) lo2 = m; else hi2 = m; }
+  const aa = Math.atan2(p[1] - s.y, p[0] - s.x);
+  return [UREAP_T0[k] + UREAP_SW * lo, tx, ty, UREAP_BIG + UREAP_RISE + UREAP_SPIN * lo2, -Math.sin(aa), Math.cos(aa)];
+}
+function uScythe(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number, R: number, fill: string | CanvasGradient, edge: string, a: number, lead = 1): void {
+  // local frame: +x = shaft pointing out from the swing pivot, +y = the direction the swing travels (mirrored by `lead`).
+  // The blade sweeps out from the head and hooks FORWARD, so its concave cutting edge faces the direction of travel.
+  ctx.save(); ctx.globalCompositeOperation = "source-over"; // solid steel, not washed out by the additive glow layers
+  ctx.translate(x, y); ctx.rotate(ang); ctx.scale(1, lead >= 0 ? 1 : -1); ctx.globalAlpha = a;
+  ctx.strokeStyle = "rgba(40,26,20,0.95)"; ctx.lineWidth = Math.max(2, R * 0.05); ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-R * 0.8, 0); ctx.lineTo(R * 0.34, 0); ctx.stroke();           // snath
+  ctx.fillStyle = "rgba(200,190,210,0.95)"; ctx.fillRect(R * 0.22, -R * 0.045, R * 0.12, R * 0.09); // steel collar
   ctx.fillStyle = fill;
-  ctx.beginPath(); ctx.moveTo(R * 0.28, -R * 0.02);
-  ctx.quadraticCurveTo(R * 0.2, -R * 0.75, -R * 0.55, -R * 0.62);
-  ctx.quadraticCurveTo(R * 0.02, -R * 0.5, R * 0.3, R * 0.06); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, R * 0.025);
-  ctx.beginPath(); ctx.moveTo(R * 0.28, -R * 0.02); ctx.quadraticCurveTo(R * 0.2, -R * 0.75, -R * 0.55, -R * 0.62); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(R * 0.3, -R * 0.07);                                               // blade root (spine side)
+  ctx.quadraticCurveTo(R * 0.98, -R * 0.2, R * 1.06, R * 0.5);                                  // spine (trailing, convex)
+  ctx.quadraticCurveTo(R * 0.74, R * 0.1, R * 0.3, R * 0.07); ctx.closePath(); ctx.fill();     // edge (leading, concave)
+  ctx.strokeStyle = "rgba(30,20,40,0.85)"; ctx.lineWidth = Math.max(2, R * 0.04);                // dark spine
+  ctx.beginPath(); ctx.moveTo(R * 0.3, -R * 0.07); ctx.quadraticCurveTo(R * 0.98, -R * 0.2, R * 1.06, R * 0.5); ctx.stroke();
+  ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.5, R * 0.03);                               // honed cutting edge, glinting
+  ctx.beginPath(); ctx.moveTo(R * 1.06, R * 0.5); ctx.quadraticCurveTo(R * 0.74, R * 0.1, R * 0.3, R * 0.07); ctx.stroke();
+  ctx.globalAlpha = a * 0.5; ctx.lineWidth = Math.max(3, R * 0.08); ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.stroke();
   ctx.restore();
 }
 function drawUltShows(ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
@@ -13380,55 +13715,77 @@ function drawUltShow(ctx: CanvasRenderingContext2D, s: UShow, camX: number, camY
       });
       break;
     }
-    case 10: { // ETERNAL REAPERS: four giant scythes sweep the screen from different sides, then a colossal rainbow scythe
+    case 10: { // ETERNAL REAPERS (rewrite): four brutal blade-first sweeps from the corners, then a colossal rainbow scythe
       const D = Math.min(W, H);
       for (let k = 0; k < 4; k++) {
-        const t0 = UREAP_T0[k], p = (t - t0) / 0.55; if (p < 0 || p > 1.9) continue;
-        const cxk = left + W * (k % 2 === 0 ? 0.08 : 0.92), cyk = top + H * (k < 2 ? 0.1 : 0.9);
-        const dirn = k % 2 === 0 ? 1 : -1, R = D * 0.78;
-        const a0 = Math.atan2(top + H / 2 - cyk, left + W / 2 - cxk) - dirn * 1.1, span = dirn * 2.2;
-        const e = Math.min(1, p), ee = 1 - (1 - e) * (1 - e), an = a0 + span * ee;
-        const fade = Math.max(0, 1 - Math.max(0, p - 1) * 1.15);
-        // the slash: a wide rainbow crescent that lingers after the blade passes
-        for (let b = 0; b < 4; b++) {
-          ctx.globalAlpha = (0.55 - b * 0.1) * fade; ctx.strokeStyle = b === 0 ? "#ffffff" : uHue(s, k * 3 + b); ctx.lineWidth = (14 - b * 3) * (0.6 + 0.4 * fade);
-          ctx.beginPath();
-          const s0 = a0 + span * Math.max(0, ee - 0.55), s1 = an;
-          ctx.arc(cxk, cyk, R * (0.98 - b * 0.03), Math.min(s0, s1), Math.max(s0, s1)); ctx.stroke();
+        const p = (t - UREAP_T0[k]) / UREAP_SW; if (p < 0 || p > 2.2) continue;
+        const sw = reapSweep(left, top, W, H, k), R = sw.R, dirn = sw.dirn;
+        const ee = reapEase(p), an = sw.a0 + sw.span * ee;
+        const fade = Math.max(0, 1 - Math.max(0, p - 1) * 0.85);
+        // slash trail: white-hot core, coloured halo, and a blood-red underlayer that lingers after the blade passes
+        const s0 = sw.a0 + sw.span * Math.max(0, ee - 0.6), s1 = an;
+        for (let b = 0; b < 5; b++) {
+          ctx.globalAlpha = (0.7 - b * 0.11) * fade;
+          ctx.strokeStyle = b === 0 ? "#ffffff" : b === 4 ? "#b0001a" : uHue(s, k * 3 + b);
+          ctx.lineWidth = (b === 0 ? 7 : 22 - b * 3) * (0.55 + 0.45 * fade);
+          ctx.beginPath(); ctx.arc(sw.cx, sw.cy, R * (0.97 - b * 0.035), Math.min(s0, s1), Math.max(s0, s1)); ctx.stroke();
         }
-        if (p <= 1.05) {
-          const bx = cxk + Math.cos(an) * R, by = cyk + Math.sin(an) * R;
-          const gr = ctx.createLinearGradient(bx - 40, by - 40, bx + 40, by + 40); gr.addColorStop(0, s.c); gr.addColorStop(0.5, s.c2); gr.addColorStop(1, "#ffffff");
-          for (let gh = 3; gh >= 0; gh--) uScythe(ctx, cxk + Math.cos(an - dirn * gh * 0.06) * R * 0.62, cyk + Math.sin(an - dirn * gh * 0.06) * R * 0.62, an - dirn * gh * 0.06 + (dirn > 0 ? 0 : Math.PI), D * 0.42, gr, "#ffffff", gh === 0 ? 0.95 : 0.25);
+        if (p <= 1.02) {
+          const bR = R * 0.6, sz = D * 0.5;
+          const bx = sw.cx + Math.cos(an) * bR, by = sw.cy + Math.sin(an) * bR;
+          const gr = ctx.createLinearGradient(bx - sz, by - sz, bx + sz, by + sz); gr.addColorStop(0, s.c); gr.addColorStop(0.55, s.c2); gr.addColorStop(1, "#ffffff");
+          // motion-blur ghosts trail BEHIND the blade (opposite the travel direction)
+          for (let gh = 4; gh >= 0; gh--) { const ag = an - dirn * gh * 0.07; uScythe(ctx, sw.cx + Math.cos(ag) * bR, sw.cy + Math.sin(ag) * bR, ag, sz, gr, "#ffffff", gh === 0 ? 0.97 : 0.18, dirn); }
+          REAP_LOG.push({ k, lead: dirn, vel: Math.sign(reapEase(p + 0.02) - reapEase(p)) * Math.sign(sw.span) || dirn });
+          if (REAP_LOG.length > 400) REAP_LOG.splice(0, 200);
+          // sparks shed from the cutting edge
+          for (let j = 0; j < 5; j++) { const q = (p * 7 + j * 0.37) % 1, ag = an - dirn * q * 0.25, rr = bR + sz * (0.6 + R0[(k * 11 + j) % R0.length] * 0.45);
+            ctx.globalAlpha = (1 - q) * fade; ctx.fillStyle = j % 2 ? "#fff6c8" : s.c2; ctx.fillRect(sw.cx + Math.cos(ag) * rr - 1.5, sw.cy + Math.sin(ag) * rr - 1.5, 3, 3); }
         }
       }
-      // the great rainbow scythe: rises over the hero, winds up, and reaps a full circle
-      const pb = (t - UREAP_BIG) / 1.0;
-      if (pb >= 0 && pb <= 1.5) {
-        const R = D * 0.62, rise = Math.min(1, pb / 0.25), spin = pb < 0.25 ? 0 : Math.min(1, (pb - 0.25) / 0.55), sp = 1 - Math.pow(1 - spin, 3);
-        const an = -Math.PI / 2 - 0.5 * rise + sp * 6.2832, fade = Math.max(0, 1 - Math.max(0, pb - 0.85) * 1.6);
-        uGlow(ctx, hx, hy, R * 1.1, s.c, 0.35 * fade);
-        if (spin > 0) for (let b = 0; b < 7; b++) {
-          ctx.globalAlpha = 0.5 * fade; ctx.strokeStyle = uHue(s, b); ctx.lineWidth = 7;
-          ctx.beginPath(); ctx.arc(hx, hy, R * (1.0 - b * 0.035), -Math.PI / 2 - 0.5 + Math.max(0, sp - 0.6) * 6.2832, an); ctx.stroke();
+      // the great rainbow scythe: rises over the hero, winds back, then whirls a full circle blade-first (clockwise)
+      const pb = t - UREAP_BIG;
+      if (pb >= 0 && pb <= 1.35) {
+        const R = D * 0.66, rise = Math.min(1, pb / UREAP_RISE), spin = pb < UREAP_RISE ? 0 : Math.min(1, (pb - UREAP_RISE) / UREAP_SPIN), sp = 1 - Math.pow(1 - spin, 3);
+        const an = -Math.PI / 2 - 0.5 * rise + sp * 6.2832, fade = Math.max(0, 1 - Math.max(0, pb - UREAP_RISE - UREAP_SPIN) * 1.5);
+        uGlow(ctx, hx, hy, R * 1.15, s.c, 0.4 * fade);
+        if (spin > 0) for (let b = 0; b < 8; b++) {
+          ctx.globalAlpha = (b === 7 ? 0.45 : 0.6) * fade; ctx.strokeStyle = b === 7 ? "#b0001a" : b === 0 ? "#ffffff" : uHue(s, b); ctx.lineWidth = b === 0 ? 5 : 9;
+          ctx.beginPath(); ctx.arc(hx, hy, R * (1.02 - b * 0.035), -Math.PI / 2 - 0.5 + Math.max(0, sp - 0.55) * 6.2832, an); ctx.stroke();
         }
-        if (pb <= 1.0) {
-          const bx = hx + Math.cos(an) * R * 0.55, by = hy + Math.sin(an) * R * 0.55;
+        if (pb <= UREAP_RISE + UREAP_SPIN + 0.05) {
+          const bR = R * 0.4, bx = hx + Math.cos(an) * bR, by = hy + Math.sin(an) * bR;
           const gr = ctx.createLinearGradient(bx - R * 0.5, by - R * 0.5, bx + R * 0.5, by + R * 0.5);
           for (let c = 0; c < 7; c++) gr.addColorStop(c / 6, uHue(s, c));
-          for (let gh = 4; gh >= 0; gh--) uScythe(ctx, hx + Math.cos(an - gh * 0.09) * R * 0.5, hy + Math.sin(an - gh * 0.09) * R * 0.5, an - gh * 0.09, R * 0.95, gr, "#ffffff", (gh === 0 ? 1 : 0.22) * fade);
+          // wind-up moves counter-clockwise for a beat; the cut itself is clockwise, so the blade leads clockwise (+1)
+          for (let gh = 5; gh >= 0; gh--) { const ag = an - gh * 0.09 * (spin > 0 ? 1 : 0); uScythe(ctx, hx + Math.cos(ag) * bR, hy + Math.sin(ag) * bR, ag, R * 0.62, gr, "#ffffff", (gh === 0 ? 1 : 0.2) * fade, 1); }
+          if (spin > 0 && spin < 1) { REAP_LOG.push({ k: 4, lead: 1, vel: 1 }); if (REAP_LOG.length > 400) REAP_LOG.splice(0, 200); }
         }
-        if (pb > 0.8) { const q = (pb - 0.8) / 0.7; uImpact(ctx, s, hx, hy, Math.min(1, q), 3, R * 0.9); }
+        if (pb > UREAP_RISE + UREAP_SPIN - 0.05) { const q = (pb - UREAP_RISE - UREAP_SPIN + 0.05) / 0.7; uImpact(ctx, s, hx, hy, Math.min(1, q), 3, R * 1.0); }
       }
-      // slash marks and rising souls on every struck foe
+      // every struck foe: a cut along the blade's path, spraying blood and sparks the way the blade travelled
+      const rh = s.rh || [];
       s.tg.forEach((pt: number[], i: number) => {
-        for (const th of [UREAP_T0[i % 4] + 0.32, UREAP_BIG + 0.6]) {
-          const q = (t - th) / 0.7; if (q < 0 || q > 1) continue;
-          const x = pt[0] + ox, y = pt[1] + oy, dd = 16 + (1 - q) * 6;
-          ctx.globalAlpha = 1 - q; ctx.strokeStyle = uHue(s, i); ctx.lineWidth = 4 * (1 - q) + 1;
-          ctx.beginPath(); ctx.moveTo(x - dd, y - dd * 0.4); ctx.lineTo(x + dd, y + dd * 0.4); ctx.moveTo(x + dd * 0.4, y - dd); ctx.lineTo(x - dd * 0.4, y + dd); ctx.stroke();
-          uGlow(ctx, x, y, 22, s.c, 1 - q);
-          for (let j = 0; j < 3; j++) uMote(ctx, s, x + (j - 1) * 7 + Math.sin(q * 6 + j) * 3, y - q * 46 - j * 6, 1.2, q * 4 + j, 1 - q);
+        const h = rh[i]; if (!h) return;
+        for (const [th, dx, dy] of [[h[0], h[1], h[2]], [h[3], h[4], h[5]]]) {
+          const q = (t - th) / 0.6; if (q < 0 || q > 1) continue;
+          const x = pt[0] + ox, y = pt[1] + oy, L = 22 * Math.min(1, q * 5);
+          const nx = -dy, ny = dx; // perpendicular, to stagger the claw-like cut lines
+          ctx.lineCap = "round";
+          for (let c = -1; c <= 1; c++) {
+            ctx.globalAlpha = (1 - q) * (c === 0 ? 1 : 0.6); ctx.strokeStyle = c === 0 ? "#ffffff" : uHue(s, i + c); ctx.lineWidth = (c === 0 ? 3.5 : 2) * (1 - q) + 0.6;
+            ctx.beginPath(); ctx.moveTo(x - dx * L + nx * c * 5, y - dy * L + ny * c * 5); ctx.lineTo(x + dx * L + nx * c * 5, y + dy * L + ny * c * 5); ctx.stroke();
+          }
+          ctx.globalCompositeOperation = "source-over";
+          for (let j = 0; j < 7; j++) { // blood droplets flung forward along the cut
+            const rr = R0[(i * 17 + j * 5) % R0.length], d = (8 + rr * 26) * Math.min(1, q * 2.2), sd = (R0[(i * 7 + j * 3 + 1) % R0.length] - 0.5) * 14;
+            ctx.globalAlpha = (1 - q) * 0.9; ctx.fillStyle = j % 3 === 0 ? "#ff2030" : "#8a0010";
+            const sz = 2 + (j % 3); ctx.fillRect(x + dx * d + nx * sd - sz / 2, y + dy * d + ny * sd + q * q * 10 - sz / 2, sz, sz);
+          }
+          ctx.globalCompositeOperation = "lighter";
+          for (let j = 0; j < 5; j++) { const an = Math.atan2(dy, dx) + (R0[(i * 13 + j) % R0.length] - 0.5) * 1.6, d = 6 + q * 30;
+            ctx.globalAlpha = (1 - q); ctx.fillStyle = "#fff2a0"; ctx.fillRect(x + Math.cos(an) * d - 1, y + Math.sin(an) * d - 1, 2.5, 2.5); }
+          uGlow(ctx, x, y, 20, s.c, (1 - q) * 0.8);
         }
       });
       break;
@@ -13595,9 +13952,9 @@ function ultFxFused(g: Game, pieces: { slot: EqKey; it: Item }[], hx: number, hy
   }
 }
 // ---------- Paramount Ultimate ----------
-// Unlocks when all six gear slots (head, chest, arms, legs, right hand, left hand; not the pet) hold a Prismatic
-// item with an ultimate. Fires all six at once for 2x their combined damage, then locks all six individual
-// ultimates and the Paramount button for a shared 3 minutes.
+// Unlocks with any six Prismatic ultimates among head, chest, arms, legs, right hand, left hand and the pet (pet counts since
+// 2026-11-18; the six gear slots are used first). Fires those six at once for 2x their combined damage, then locks all
+// those six individual ultimates and the Paramount button for a shared 3 minutes (a seventh, unused ultimate stays free).
 interface ParaFx {
   t: number; cols: string[]; names: string[]; golden: boolean;
   fired: boolean; total: number; hit: number; slain: number;
@@ -13613,8 +13970,11 @@ let PARA_CAM = { x: 0, y: 0 };
 function paraPieces(g: Game): { slot: EqKey; it: Item }[] | null {
   const all = ultsOf(g.eq);
   const out: { slot: EqKey; it: Item }[] = [];
-  for (const k of PARA_GEAR) { const u = all.find((x: { slot: EqKey }) => x.slot === k); if (!u) return null; out.push(u); }
-  return out;
+  // Any six Prismatic ultimates among head, chest, arms, legs, rh, lh and pet. With all six gear slots ready it uses
+  // exactly those six (same as before); the pet's ultimate fills in when one gear slot has none. Never seven.
+  for (const k of PARA_GEAR) { const u = all.find((x: { slot: EqKey }) => x.slot === k); if (u) out.push(u); }
+  if (out.length < 6) { const p = all.find((x: { slot: EqKey }) => x.slot === "pet"); if (p) out.push(p); }
+  return out.length >= 6 ? out.slice(0, 6) : null;
 }
 function paraReadyAt(g: Game): number {
   const ps = paraPieces(g);
@@ -16144,11 +16504,11 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-ults .dc-param { display: block; font-size: 9px; font-weight: 800; opacity: 0.9; }
 .dc-ults.n1, .dc-ults.n2 { width: 96px; grid-template-columns: 1fr; }
 .dc-ults.n3, .dc-ults.n4 { width: 88px; grid-template-columns: 1fr; }
-.dc-ults.n5, .dc-ults.n6 { width: 148px; grid-template-columns: 1fr 1fr; }
+.dc-ults.n5, .dc-ults.n6, .dc-ults.n7 { width: 148px; grid-template-columns: 1fr 1fr; }
 @media (max-width: 360px), (max-height: 500px) {
   .dc-ults.n1, .dc-ults.n2 { width: 80px; }
   .dc-ults.n3, .dc-ults.n4 { width: 80px; }
-  .dc-ults.n5, .dc-ults.n6 { width: 144px; }
+  .dc-ults.n5, .dc-ults.n6, .dc-ults.n7 { width: 144px; }
   .dc-ults .dc-ultn { font-size: 10px; }
   .dc-ults .dc-ultm { font-size: 9px; }
 }
@@ -17084,6 +17444,20 @@ try {
       IP.camOk = false; computeVis(g);
       return { ok: i === want.length, placed: i, chests: g.chests.map((c: Chest) => [c.x, c.y, c.rar, c.bur ? 1 : 0, c.fit]) };
     },
+    chestShowAll: (): Record<string, unknown> => { // one 2x2 chest of every rarity (Normal..Mythic) around the hero, for screenshots
+      const g = LIVE; if (!g) return { ok: false };
+      g.en = []; g.chests = []; g.drops = [];
+      const want = [0, 1, 2, 3, 4];
+      let i = 0;
+      for (let r = 2; r <= 7 && i < want.length; r++) for (const [ox, oy] of [[-r - 1, -r], [r, -r], [-r - 1, r - 1], [r, r - 1], [-1, -r - 1], [-1, r], [-r - 1, -1], [r, -1]]) {
+        if (i >= want.length) break; const x = g.hero.x + ox, y = g.hero.y + oy;
+        if (!inb(x, y) || g.map[y * MW + x] !== 1) continue;
+        const c: Chest = { x, y, open: false, rar: want[i] };
+        g.chests.push(c); fitBigObjects(g); if (c.fit === 1) i++; else g.chests.pop();
+      }
+      IP.camOk = false; computeVis(g);
+      return { ok: i === want.length, placed: i };
+    },
     shrineView: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; const s = g.shrine; for (const [ox, oy] of [[0, 4], [3, 3], [-3, 3], [0, -3], [4, 0], [-3, 0], [0, 3], [2, 2]]) { const x = s.x + ox, y = s.y + oy; if (walkable(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; break; } } g.en = g.en.filter((e: En) => !!e.sw); IP.camOk = false; computeVis(g); return { ok: true }; },
     torchView: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (const tc of g.torches || []) { const fx = tc.x + (tc.dir === 1 ? 1 : tc.dir === 2 ? -1 : 0), fy = tc.y + (tc.dir === 0 ? 1 : tc.dir === 3 ? -1 : 0); for (const [x, y] of [[fx, fy + 2], [fx + 2, fy], [fx - 2, fy], [fx, fy - 2], [fx, fy + 1], [fx + 1, fy]]) if (walkable(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.en = []; IP.camOk = false; computeVis(g); return { ok: true, torch: [tc.x, tc.y] }; } } return { ok: false }; },
     mvTable: (n: number): Record<string, unknown> => { // Movement Speed roll ranges by item level and rarity (sampled with the real roll)
@@ -17105,8 +17479,22 @@ try {
       return { ok: true, armor200: a.bonus.mv, weapon150: w.bonus.mv, legs20r4at90: lo.bonus.mv, clampedHead1500: [mvOldClampMax(1500, 7), cl.bonus.mv], clampedChest215: [mvOldClampMax(215, 7), cl2.bonus.mv], newItemAtOldMax: nw.bonus.mv, pet40: pet.bonus.mv, reloadKeeps: again.bonus.mv, restored: MV_RESTORED.n - r0 };
     },
     bwSim: (depth: number, stars: number, on: boolean, nPris?: number): Record<string, unknown> => simBwFight(depth, stars, on, nPris ?? 6),
+    o6Sim: (depth: number, stars: number, full: boolean, on: boolean, maxSec?: number): Record<string, unknown> => simO6Fight(depth, stars, full, on, maxSec ?? 1800),
+    o6Log: (): Record<string, unknown> => ({ ...O6_LOG }),
+    o6Para: (): Record<string, unknown> => { // Paramount ignores the cap and the phase clamp; a normal hit of the same size is capped
+      const mk = (): { g: Game; e: En } => { const g = newGame(null); g.mode = "play"; g.depth = 1000; g.lvl = 1000; g.area = "dungeon"; g.eq = fullPrisEq(1001, 5); g.petAbiT = 10; g.sfx = () => undefined; g.notify = () => undefined; const e = mkActBoss(g, g.hero.x + 1, g.hero.y); e.ovn = 0; e.shd = 0; e.mshd = 0; g.en = [e]; return { g, e }; };
+      const oldG = STAT_G;
+      try {
+        const a = mk(); STAT_G = a.g; hurtEn(a.g, a.e, 1, { n: "x", t: "", c: "" }); const m0 = a.e.mhp, h0 = a.e.hp; const big = Math.round(m0 * 0.6); const dp = hurtEn(a.g, a.e, big, { n: "Paramount Ultimate", t: "", c: "", p: 1 });
+        const b = mk(); STAT_G = b.g; hurtEn(b.g, b.e, 1, { n: "x", t: "", c: "" }); const dn = hurtEn(b.g, b.e, big, { n: "y", t: "", c: "" });
+        return { ok: true, mhp: m0, paramountDealt: dp, paramountExpected: Math.min(h0, safeRound(big * (bulwarkOf(a.g.eq, 1000) ? 1 : 1))), hpAfterPara: a.e.hp / m0, normalDealt: dn, normalFrac: dn / m0, phaseAfterNormal: b.e.o6ph, invAfterNormal: (b.e.o6inv ?? 0) > 10 };
+      } finally { STAT_G = oldG; }
+    },
     bwTier: (stars: number, depth: number, nPris?: number): Record<string, unknown> => { const eq = fullPrisEq(Math.max(1, depth), stars); if ((nPris ?? 6) < 7) eq.pet = null; const b = bulwarkOf(eq, depth); return { ok: true, b }; },
     bwGear: (stars: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const il = Math.max(1, g.depth + 1); const full = fullPrisEq(il, stars); g.eq.head = full.head; g.eq.chest = full.chest; g.eq.arms = full.arms; g.eq.legs = full.legs; g.eq.rh = full.rh; g.eq.lh = full.lh; STAT_G = g; const st = calc(g.lvl, g.eq); g.hero.hp = st.maxHp; g.notify(); return { ok: true, maxHp: st.maxHp, bw: st.bw }; },
+    ultLive: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const all = [...g.bag, ...((g as unknown as { stash?: Item[] }).stash || [])].filter((it: Item | null) => !!it && it.kind === "pet" && it.rar >= 7) as Item[];
+      return { ok: true, ults: ultsOf(g.eq).map((u: { slot: EqKey; it: Item }) => [u.slot, u.it.ult, (ULTS[u.it.ult ?? 0] ?? ULTS[0]).n]), para: paraPieces(g) ? paraPieces(g)!.map((u: { slot: EqKey }) => u.slot) : null,
+        pet: g.eq.pet ? { rar: g.eq.pet.rar, pt: g.eq.pet.pt, ult: g.eq.pet.ult ?? null } : null, prisPetsInBagStash: all.map((it: Item) => it.ult ?? null), given: PET_ULT_GIVEN.n }; },
     bwLive: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); const items: Record<string, unknown> = {}; for (const k of EQK) { const it = g.eq[k]; if (it) items[k] = { kind: it.kind, ilvl: it.ilvl, rar: it.rar, stars: it.st ? it.st.length : 0, mv: it.bonus.mv ?? 0, mvv: it.mvv ?? 0 }; } return { ok: true, depth: g.depth, maxHp: st.maxHp, hp: g.hero.hp, bw: st.bw, mv: st.mv, mvRaw: st.mvRaw, items, restored: MV_RESTORED.n, log: { ...BW_LOG } }; },
     bwHit: (frac: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); const h0 = g.hero.hp; applyHeroDmg(g, Math.round(st.maxHp * frac), 3); return { ok: true, h0, h1: g.hero.hp, maxHp: st.maxHp, took: (h0 - g.hero.hp) / st.maxHp, mode: g.mode, log: { ...BW_LOG } }; },
     mvGear: (each: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; for (const k of ["head", "chest", "arms", "legs"] as EqKey[]) if (!g.eq[k]) g.eq[k] = makeItem(3000, 6, k as Kind, 3000); if (!g.eq.rh) g.eq.rh = makeItem(3000, 6, "sword", 3000); let n = 0; for (const k of EQK) { const it = g.eq[k]; if (it && mvCanRoll(it.kind)) { it.bonus.mv = each; n++; } } const st = calc(g.lvl, g.eq); return { ok: true, items: n, mv: st.mv, mvRaw: st.mvRaw, step: heroStepDur(g) }; },
@@ -17285,6 +17673,47 @@ try {
       res.staleHit = trophyHit(g, g.hero.x + 1, g.hero.y);
       g.trophyOpen = false; act(g, 1, 0); res.staleOpened = !!g.trophyOpen; g.trophyOpen = false;
       return res;
+    },
+    reapFreeze: (t: number | null): void => { REAP_FREEZE = t; },
+    // orientation diagram: each sweep's scythe drawn by the real uScythe at mid-swing, with the travel direction arrowed
+    reapSheet: (): string => {
+      const PW = 240, PH = 240, cv = document.createElement("canvas"); cv.width = PW * 5; cv.height = PH + 30;
+      const c = cv.getContext("2d"); if (!c) return "";
+      c.fillStyle = "#120c1c"; c.fillRect(0, 0, cv.width, cv.height);
+      const arrow = (x: number, y: number, dx: number, dy: number, col: string): void => {
+        const L = 46, ex = x + dx * L, ey = y + dy * L, an = Math.atan2(dy, dx);
+        c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 4; c.beginPath(); c.moveTo(x, y); c.lineTo(ex, ey); c.stroke();
+        c.beginPath(); c.moveTo(ex + Math.cos(an) * 10, ey + Math.sin(an) * 10); c.lineTo(ex + Math.cos(an + 2.4) * 12, ey + Math.sin(an + 2.4) * 12); c.lineTo(ex + Math.cos(an - 2.4) * 12, ey + Math.sin(an - 2.4) * 12); c.fill();
+      };
+      for (let k = 0; k < 5; k++) {
+        const ox = k * PW; c.save(); c.beginPath(); c.rect(ox, 0, PW, PH); c.clip();
+        let px: number, py: number, ang: number, lead: number, sz: number, cxp: number, cyp: number, rad: number, a0: number, a1: number;
+        if (k < 4) {
+          const sw = reapSweep(ox, 0, PW, PH, k), an = sw.a0 + sw.span * 0.5; lead = sw.dirn; rad = sw.R * 0.6; sz = PW * 0.42;
+          cxp = sw.cx; cyp = sw.cy; ang = an; a0 = sw.a0 + sw.span * 0.2; a1 = an;
+        } else { cxp = ox + PW / 2; cyp = PH / 2; rad = PW * 0.22; sz = PW * 0.38; ang = 0.6; lead = 1; a0 = ang - 1.6; a1 = ang; }
+        px = cxp + Math.cos(ang) * rad; py = cyp + Math.sin(ang) * rad;
+        c.globalAlpha = 0.5; c.strokeStyle = "#8060c0"; c.lineWidth = 10; c.beginPath(); c.arc(cxp, cyp, rad + sz * 0.7, Math.min(a0, a1), Math.max(a0, a1)); c.stroke(); c.globalAlpha = 1;
+        c.fillStyle = "#ffd040"; c.beginPath(); c.arc(cxp, cyp, 5, 0, 6.2832); c.fill();
+        uScythe(c, px, py, ang, sz, "#b8a8ff", "#ffffff", 1, lead);
+        const tx = -Math.sin(ang) * lead, ty = Math.cos(ang) * lead;
+        const hx = px + Math.cos(ang) * sz * 0.75, hy = py + Math.sin(ang) * sz * 0.75;
+        arrow(hx + tx * 30, hy + ty * 30, tx, ty, "#40ff80");
+        c.restore();
+        c.fillStyle = "#ffffff"; c.font = "13px monospace";
+        c.fillText(k < 4 ? "sweep " + (k + 1) + (lead > 0 ? " (clockwise)" : " (counter-cw)") : "rainbow finale (cw)", ox + 8, PH + 20);
+      }
+      return cv.toDataURL("image/png");
+    },
+    reapLog: (clear?: boolean): unknown => { const r = REAP_LOG.slice(); if (clear) REAP_LOG.length = 0; return r; },
+    mmBoss: (op?: string): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const b = g.en.find((e: En) => e.act && e.cls === 2 && e.hp > 0);
+      if (op === "big") g.mmBig = true; if (op === "small") g.mmBig = false;
+      if (op === "kill" && b) { b.hp = 0; g.en = g.en.filter((e: En) => e !== b); }
+      if (op === "move" && b) { const c = pickWalk(g, new Set<number>(), b.x, b.y, 6, 3); if (c) { b.x = c[0]; b.y = c[1]; b.ax = c[0]; b.ay = c[1]; } }
+      const seen = g.seen.reduce((n: number, v: number) => n + (v ? 1 : 0), 0);
+      return { ok: true, act: isActFloor(g.depth), boss: b ? { x: b.x, y: b.y, seen: !!g.seen[b.y * MW + b.x], vis: !!g.vis[b.y * MW + b.x] } : null, seen, total: MW * MH, skulls: MM_SKULL_LOG.n, hero: { x: g.hero.x, y: g.hero.y } };
     },
     ultCast: (id: number, crowd = 8): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
@@ -18579,7 +19008,7 @@ function prisMake(kind: "pet" | "wep" | "armor", opts?: { slot?: EqKey; wep?: Ki
   }
   if (opts && opts.stars !== undefined) forceStars(it, Math.max(0, Math.min(10, opts.stars)));
   if (opts && opts.golden) it.golden = true;
-  if (opts && opts.ult !== undefined && kind !== "pet") it.ult = opts.ult;
+  if (opts && opts.ult !== undefined) it.ult = opts.ult;
   return it;
 }
 function prisGive(kind: "pet" | "wep" | "armor", opts?: { slot?: EqKey; wep?: Kind; armor?: AK; stars?: number; golden?: boolean; pab?: number; prt?: number; ult?: number }): Record<string, unknown> {
@@ -18814,6 +19243,47 @@ function prisUi(): Record<string, unknown> {
 try {
   (window as unknown as { __ED16_PRIS?: object }).__ED16_PRIS = {
     begin: prisBegin,
+    // 2026-11-18 combine rules self-test: N combines per case, report types/abilities/ults vs inputs
+    combineRules: (n = 40): Record<string, unknown> => {
+      const mk = (kind: string, pt?: number, base?: number, ult?: number): Item => {
+        const it = kind === "pet" ? makePet(500, 7, 500) : makeItem(500, 7, kind as never, 500);
+        if (pt !== undefined) { it.pt = pt; } if (base !== undefined) it.d[0] = base; if (ult !== undefined) it.ult = ult;
+        forceStars(it, 3); return it;
+      };
+      const res: Record<string, Record<string, number>> = {};
+      const bump = (c: string, k: string): void => { (res[c] = res[c] || {})[k] = ((res[c] || {})[k] || 0) + 1; };
+      for (let i = 0; i < n; i++) {
+        // mixed pets
+        { const ins = [mk("pet", 3), mk("pet", 17), mk("pet", 42)]; ins.forEach((x: Item, j: number) => { x.pab = j % PET_ABI_N_MAX; x.prt = 1; x.ult = 5; });
+          const o = makeCombined(ins, 500, ins[0])!; bump("petMixed", "n");
+          if (![3, 17, 42].includes(o.pt ?? -1)) bump("petMixed", "newType"); if (o.ult !== undefined) bump("petMixed", "hasUlt"); if (o.ult !== 5) bump("petMixed", "ultChanged");
+          if (o.pab !== ins[0].pab || o.prt !== 1) bump("petMixed", "abiOrRareDiffers"); }
+        // same-type pets
+        { const ins = [mk("pet", 9), mk("pet", 9), mk("pet", 9)]; ins.forEach((x: Item) => { x.ult = 11 + (x === ins[0] ? 0 : 1); });
+          const o = makeCombined(ins, 500, ins[0])!; bump("petSame", "n"); if (o.pt === 9) bump("petSame", "keptType"); if (o.ult === 11) bump("petSame", "keptPrimaryUlt"); }
+        // mixed weapons (1H) and same-kind weapons
+        { const ins = [mk("sword", undefined, undefined, 2), mk("dagger", undefined, undefined, 2), mk("mace", undefined, undefined, 2)];
+          const o = makeCombined(ins, 500, ins[0])!; bump("wepMixed", "n"); if (o.ult !== undefined) bump("wepMixed", "hasUlt"); if (o.ult !== 2) bump("wepMixed", "ultChanged"); }
+        { const ins = [mk("sword", undefined, undefined, 7), mk("sword", undefined, undefined, 8), mk("sword", undefined, undefined, 9)];
+          const o = makeCombined(ins, 500, ins[1])!; bump("wepSame", "n"); if (o.ult === 8) bump("wepSame", "keptPrimaryUlt"); }
+        // armor: same kind, mixed base vs same base
+        { const ins = [mk("chest", undefined, 0, 4), mk("chest", undefined, 1, 4), mk("chest", undefined, 2, 4)];
+          const o = makeCombined(ins, 500, ins[0])!; bump("armorMixed", "n"); if (o.ult !== undefined) bump("armorMixed", "hasUlt"); if (o.ult !== 4) bump("armorMixed", "ultChanged"); }
+        { const ins = [mk("chest", undefined, 1, 30), mk("chest", undefined, 1, 31), mk("chest", undefined, 1, 32)];
+          const o = makeCombined(ins, 500, ins[0])!; bump("armorSame", "n"); if (o.ult === 30) bump("armorSame", "keptPrimaryUlt"); }
+      }
+      // retro: an old Prismatic pet with no ult gets one on load, stable across loads; a non-Prismatic pet gets none
+      const old = mk("pet", 5); old.ult = undefined; const raw = JSON.parse(JSON.stringify(old)); const v1 = validItem(JSON.parse(JSON.stringify(raw))); const v2 = validItem(JSON.parse(JSON.stringify(raw)));
+      const low = makePet(50, 5, 50); (low as Item).ult = 3; const vl = validItem(JSON.parse(JSON.stringify(low)));
+      const packed = v1 ? unpackItem(packItem(v1)) : null;
+      // ults + Paramount with a Prismatic pet
+      const fe = fullPrisEq(500, 3); const eq6: Eq = { ...fe, lh: makeStarredPris(500, "sword", 3), pet: null }; const eq7: Eq = { ...eq6, pet: mk("pet", 1, undefined, 26) };
+      const eq5p: Eq = { ...eq7, lh: makeItem(500, 7, "shield", 500) };
+      const gx = newGame(null); gx.eq = eq7; const p7 = paraPieces(gx); gx.eq = eq5p; const p5p = paraPieces(gx); gx.eq = { ...eq5p, pet: null }; const p5 = paraPieces(gx);
+      return { res, retro: { v1: v1?.ult ?? null, v2: v2?.ult ?? null, lowPet: vl ? (vl.ult ?? null) : "invalid", packed: packed ? (packed.ult ?? null) : null },
+        ults: { eq6: ultsOf(eq6).map((u: { slot: EqKey }) => u.slot), eq7: ultsOf(eq7).map((u: { slot: EqKey }) => u.slot), withShield: ultsOf(eq5p).map((u: { slot: EqKey }) => u.slot) },
+        para: { seven: p7 ? p7.map((u: { slot: EqKey }) => u.slot) : null, fivePlusPet: p5p ? p5p.map((u: { slot: EqKey }) => u.slot) : null, fiveNoPet: p5 ? p5.map((u: { slot: EqKey }) => u.slot) : null } };
+    },
     end: prisEnd,
     give: prisGive,
     inspect: prisInspect,
@@ -19779,6 +20249,14 @@ export default function App() {
           else nz(0.06, 0.05, "lowpass", 900, 200);
           break;
         case "ehit": nz(0.08, 0.05, "bandpass", 900, 300); tone(200, 110, 0.06, "square", 0.02); break;
+        case "reapHit": { // Eternal Reapers per-hit: a wet slash, a meaty thud, a tick of steel (throttled by the caller)
+          const pr = 0.85 + Math.random() * 0.3, big = (v ?? 0) > 0 ? 1.4 : 1;
+          nz(0.11, 0.07 * big, "bandpass", 3200 * pr, 900 * pr);              // slash
+          nz(0.14, 0.06 * big, "lowpass", 700 * pr, 120, 0.01);               // flesh / wet impact
+          tone(140 * pr, 55, 0.12, "sine", 0.06 * big, 0.005);                // body thud
+          tone(4200 * pr, 3900 * pr, 0.09, "triangle", 0.008, 0);            // blade tick
+          break;
+        }
         case "roar": tone(110, 45, 1.1, "sawtooth", 0.08); tone(116, 48, 1.1, "sawtooth", 0.06); nz(1.0, 0.12, "lowpass", 900, 80); break;
         case "pulse": tone(300, 620, 0.12, "sine", 0.03); break;
         case "mx": playMagic(v); break;
@@ -19819,18 +20297,24 @@ export default function App() {
               sw(200, 3000, 0.65, 0.12, 0.05); tone(b * 4, b * 4.02, 0.9, "triangle", 0.03, 0.15); tone(b * 6, b * 6.03, 0.7, "sine", 0.02, 0.17);
               for (let i = 0; i < 3; i++) tone(b * 2.5, b * 1.6, 0.8, "sine", 0.02, 0.5 + i * 0.25);
               break;
-            case 10: // Eternal Reapers: four singing blade whooshes with metallic rings and slash impacts, then the great scythe
-              for (let i = 0; i < 4; i++) {
-                const t0 = [0.12, 0.42, 0.72, 1.02][i];
-                sw(300, 5200, 0.42, 0.13, t0); sw(5200, 900, 0.2, 0.06, t0 + 0.4);           // air cut
-                tone(b * 9 + i * 40, b * 9.05 + i * 40, 0.7, "triangle", 0.02, t0 + 0.1);      // blade singing
-                tone(b * 13.5 + i * 60, b * 13.4 + i * 60, 0.55, "sine", 0.012, t0 + 0.12);
-                nz(0.09, 0.16, "highpass", 3500, 2200, t0 + 0.32); tone(b * 1.5, b * 0.7, 0.18, "square", 0.03, t0 + 0.32); // slash impact
-              }
-              sw(150, 4000, 0.9, 0.16, 1.55); tone(b * 2, b * 2.02, 1.4, "sawtooth", 0.02, 1.6);
-              [6, 7.5, 9, 12].forEach((m: number, j: number) => tone(b * m, b * m * 1.01, 1.1, "sine", 0.014, 1.65 + j * 0.03));
-              nz(0.9, 0.24, "lowpass", 2600, 60, 1.9); tone(b * 0.5, b * 0.15, 1.0, "sine", 0.1, 1.9);
+            case 10: { // Eternal Reapers (rewrite): per sweep an unsheathing steel whoosh and a reverberating ring/shing; then the great scythe
+              const ring = (f: number, d: number, vol: number, t0: number): void => { // struck-metal ring: inharmonic partials, slow decay
+                [1, 2.76, 5.4, 8.93].forEach((m: number, j: number) => tone(f * m, f * m * 0.998, d * (1 - j * 0.18), "sine", vol / (1 + j * 0.8), t0));
+              };
+              UREAP_T0.forEach((t0: number, i: number) => {
+                nz(0.16, 0.06, "highpass", 2400, 7800, t0);                                   // scrape of steel leaving the sheath
+                tone(1900 + i * 90, 3400 + i * 120, 0.16, "sawtooth", 0.006, t0);
+                sw(500, 6400, UREAP_SW * 0.7, 0.16, t0 + 0.03); sw(6400, 1200, 0.18, 0.07, t0 + UREAP_SW * 0.7); // blade tearing through air
+                ring(b * 6 + i * 37, 1.1, 0.03, t0 + 0.05);                                     // shiiing
+              });
+              const tb = UREAP_BIG;
+              nz(0.26, 0.07, "highpass", 2000, 8000, tb); ring(b * 3, 1.8, 0.04, tb + 0.08);   // great scythe drawn
+              sw(150, 5200, UREAP_SPIN + 0.1, 0.2, tb + UREAP_RISE); tone(b * 2, b * 2.02, 1.0, "sawtooth", 0.018, tb + UREAP_RISE);
+              ring(b * 4.5, 2.2, 0.035, tb + UREAP_RISE + 0.1);
+              const tf = tb + UREAP_RISE + UREAP_SPIN;
+              nz(0.9, 0.26, "lowpass", 2600, 60, tf); tone(b * 0.5, b * 0.15, 1.0, "sine", 0.1, tf); ring(b * 2.25, 2.4, 0.03, tf);
               break;
+            }
             case 7: // Judgement: a choir-like chord, then bell-struck pillars slamming down
               [1, 1.25, 1.5, 2].forEach((m: number, i: number) => tone(b * 2 * m, b * 2 * m, 1.6, "sine", 0.018, i * 0.04));
               for (let i = 0; i < 6; i++) { const t0 = 0.5 + i * 0.1; tone(b * 8, b * 7.8, 0.5, "triangle", 0.025, t0); nz(0.15, 0.08, "lowpass", 1500, 80, t0); }
@@ -20346,13 +20830,15 @@ export default function App() {
         const big = c.fit === 1;
         if (!chestCells(c).some((k: number) => g.vis[k])) continue;
         const csx = c.x * TS - camX, csy = c.y * TS - camY;
-        if (big) { // same pixel art at double scale over 2x2 tiles (Resplendent trim and glow included)
-          ctx.save(); ctx.translate(csx, csy); ctx.scale(2, 2); chestGlow(ctx, 0, 0, c.rar ?? 0, t, c.open); ctx.restore();
-          drawLootChest(painter(ctx, csx, csy, 4, false, 0), c.open, c.rar ?? 0);
+        if (big) { // 2x2 footprint; the chest itself is ~1.25 tiles, centred, with a rarity aura and rising sparks
+          const ccx = csx + TS, ccy = csy + TS + 2;
+          if (!c.open) chestAuraFx(ctx, ccx, ccy, CHEST_BIG_W, c.rar ?? 0, t, (c.x * 7 + c.y * 13) % 17);
+          drawChestSized(ctx, ccx, ccy, CHEST_BIG_W, c.rar ?? 0, c.open, t);
           const near = !c.open && h.x >= c.x - 1 && h.x <= c.x + 2 && h.y >= c.y - 1 && h.y <= c.y + 2;
-          if (near) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], csx + TS, csy - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
+          if (near) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], ccx, ccy - CHEST_BIG_W / 2 - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
           continue;
         }
+        if (!c.open) chestAuraFx(ctx, csx + 12, csy + 13, 20, c.rar ?? 0, t, (c.x * 7 + c.y * 13) % 17);
         chestGlow(ctx, csx, csy, c.rar ?? 0, t, c.open);
         drawLootChest(painter(ctx, csx, csy, 2, false, 0), c.open, c.rar ?? 0);
         if (!c.open && Math.abs(c.x - h.x) + Math.abs(c.y - h.y) <= 1) text(CHN[Math.max(0, Math.min(4, c.rar ?? 0))], csx + 12, csy - 4, RC[Math.max(0, Math.min(4, c.rar ?? 0))], "center", 6);
@@ -20653,9 +21139,12 @@ export default function App() {
         if (big) for (const e of g.en) if (e.hp > 0 && g.vis[e.y * MW + e.x]) dot(e.x, e.y, e.cls ? "#ff4040" : "#c04848", 3);
         for (const e of g.en) if (e.cls === 2 && !e.gob && e.hp > 0 && (g.vis[e.y * MW + e.x] || e.awake)) { const fast = e.hunt ? 6 : 3; const gc = e.act && e.abt !== undefined ? actBossDef(e.abt).glow : (e.hunt ? "#e040ff" : BOSS_GLOW); dot(e.x, e.y, Math.floor(t * fast) % 2 ? "#ffffff" : gc, ds + (e.hunt ? 4 : 3)); dot(e.x, e.y, gc, ds + 1); }
         for (const s of stairsL) dot(s[0], s[1], Math.floor(t * 3) % 2 ? "#40ffff" : "#ffffff", ds + 1);
+        // act-boss floor (the floor before camp): ALWAYS mark the act boss's live position with a pulsing red skull, even
+        // through unexplored fog; only the marker is drawn, no fog is revealed. Gone the moment the boss dies.
+        if (isActFloor(g.depth) && g.area !== "camp" && !g.vault) for (const e of g.en) if (e.act && e.cls === 2 && e.hp > 0) { const u = big ? 2 : 1, pad = 3.5 * u; mmBossSkull(ctx, Math.max(mx0 + pad, Math.min(mx0 + mw - pad, mx0 + (e.x + 0.5) * ms2)), Math.max(my0 + pad, Math.min(my0 + mh - pad, my0 + (e.y + 0.5) * ms2)), u, t); }
         dot(h.x, h.y, Math.floor(t * 4) % 2 ? "#ffffff" : "#ff60ff", ds + 1);
         if (big) text("Tap to close \u00b7 cyan stairs \u00b7 green trader \u00b7 gold chest \u00b7 violet portal", VW / 2, my0 + mh + 7, "#c8c0ff", "center", 6);
-        if (big) text("purple ring = boss / Hunter", VW / 2, my0 + mh + 15, "#d8a0ff", "center", 6);
+        if (big) text("purple ring = boss / Hunter \u00b7 red skull = act boss", VW / 2, my0 + mh + 15, "#d8a0ff", "center", 6);
         if (!big && stairsL.length) {
           let bs: number[] | null = null, bd = 1e9;
           for (const s of stairsL) { const dd = Math.abs(s[0] - h.x) + Math.abs(s[1] - h.y); if (dd < bd) { bd = dd; bs = s; } }
@@ -20873,7 +21362,7 @@ export default function App() {
       }
       const dd = keyDir(ev);
       const tok = keyTok(ev);
-      const isUltDigit = kl >= "1" && kl <= "6";
+      const isUltDigit = kl >= "1" && kl <= "7";
       const handled = !!dd || kl === " " || kl === "." || kl === "enter" || kl === "i" || kl === "b" || kl === "tab" || kl === ">" || kl === "m" || kl === "r" || kl === "n" || kl === "k" || kl === "0" || isUltDigit;
       if (!handled) return;
       ev.preventDefault();
@@ -21611,7 +22100,7 @@ export default function App() {
             const cdLen = ultCdLen(g);
             const now = Date.now();
             return (
-            <div className={"dc-ults n" + Math.min(6, list.length)} style={{ gap: sz.gap }}>
+            <div className={"dc-ults n" + Math.min(7, list.length)} style={{ gap: sz.gap }}>
               {(() => {
                 if (!paraPieces(g)) return null;
                 const pLeft = Math.max(0, paraReadyAt(g) - now);

@@ -144,9 +144,9 @@ async function main() {
     await api(page, "give", "pet", { slot: "pet", pab: 7, prt: 0 });
     const fuse1 = await api(page, "fuse");
     const mul1 = fuse1 && fuse1.mul;
-    record("pris pet does not add an ult button or fuse piece", !!(fuse1 && fuse1.count === 1 && fuse1.ults === 1 && fuse1.pet === 0), JSON.stringify(fuse1));
+    record("pris pet adds its own ult button (2026-11-18 rule), no fuse multiplier", !!(fuse1 && fuse1.count === 2 && fuse1.ults === 2 && fuse1.pet === 0 && (fuse1.slots || []).includes("pet")), JSON.stringify(fuse1));
     record("pris pet does not multiply ultimate damage", !!(mul0 > 0 && mul1 > 0 && Math.abs(mul1 / mul0 - 1) < 0.05), `mul ${mul0} -> ${mul1} ratio=${mul1 && mul0 ? (mul1 / mul0).toFixed(3) : "?"}`);
-    record("pet is not an ult button source", !!(fuse1 && fuse1.hasUlt && fuse1.btn && fuse1.btn !== "ULTIMATE" && (fuse1.buttons === undefined || fuse1.buttons === 1)), String(fuse1 && fuse1.btn));
+    record("weapon + pet: one button each", !!(fuse1 && fuse1.hasUlt && fuse1.btn && fuse1.btn !== "ULTIMATE" && (fuse1.buttons === undefined || fuse1.buttons === 2)), String(fuse1 && fuse1.btn));
 
     // Crystal Bastion / Gale Stride impact
     await api(page, "begin");

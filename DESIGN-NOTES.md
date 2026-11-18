@@ -374,3 +374,60 @@ Approved by Metal Complex (voice, 11:45 / 11:50 CT). Source: BOSS-OPTIONS-2026-1
 - Test hooks: bwSim / bwTier / bwGear / bwLive / bwHit; `simBwFight` (real calc + heroAttack on mkActBoss + enemyAttack). Test: tests/bulwark.mjs (screenshots-bulwark/, not published).
 
 **Run speed v2.** Every slot incl. pets can roll it (`mvCanRoll` = not gem); ceiling `8 + 92·(min(ilvl,1000)/1000)^0.5` ×rarity (0.4 + 0.6·rar/7) → +100% at Prismatic ilvl 1000+; total cap 400% (`MV_CAP`). Load no longer clamps to the ilvl range: `mvFixItem` only limits 0..100, and once per item (marker `it.mvv = MVV = 2`, packed at index 25) restores to +100% any value exactly equal to the 11:11–11:28 builds' clamp ceiling (`mvOldClampMax`), undoing that clamp.
+
+## 2026-11-18 (13:19 CT): boss scaling from depth 500 (option O6) + smaller chest sprite with rarity aura
+Approved O6 of BOSS-SCALING-D500-OPTIONS.md (not O6b). Bosses only (`isBossFoe`), depth >= 500 only (`O6_D0`). No player-side change; A1/C1, run speed and Paramount unchanged.
+- **O2 raise-only gear-matched HP** (`o6Apply` / `o6TargetMul`, run lazily on a boss's first hit, in `hurtEn` and `applyHpDmg`): T = 150 − 80k s (k = Bulwark star power / 78), N = T / RT_ATK, Pn = expected swing damage × C1 boss bonus, pct = C1 %-strike, sh = (max HP + shield) / max HP; HP = max(HP_now, Pn / (1/N − pct) / sh). If pct ≥ 1/N the factor is `O6_MAXMUL` (1e6). Max HP, current HP, shield and overshield pools are scaled together (`scaleBossPools`). Flags on the enemy: `o6`, `o6m`.
+- **O3 star-tiered per-second cap** (`o6Gate`): a boss loses at most (2% + 1.5%·k) of max HP per second, measured before shields absorb, token bucket with one second of budget (`o6t`, `o6b`), clock `g.petAbiT`; includes DoTs/effect damage via `applyHpDmg`, the C1 %-strike and ults. Paramount (`src.p`) is exempt. Excess shows "RESIST".
+- **O5 light phases** (`o6PhaseClamp`, `o6PhaseAfter`): at 75/50/25% HP a non-Paramount hit stops at the threshold and the boss is invulnerable for 4 s (`o6ph`, `o6inv`); it still acts; no extra shield. Paramount passes thresholds without triggering transitions. Clock-reset guard after reload.
+- Test hooks: o6Sim (real fight to the end on a 0.33 s clock, basic or full combat, on/off), o6Log, o6Para. Test: tests/o6.mjs (screenshots-o6/, not published).
+- **Chests:** 2x2 footprint unchanged; sprite drawn at `CHEST_BIG_W` = 30 px (1.25 tiles), centred, crisp (cached 24 px sprite, nearest-neighbour), small shadow, rarity outline. New `chestAuraFx`: cached radial aura per rarity (`CHEST_AURA_R`, `CHEST_AURA_A`, pulsing) + rising sparks (`CHEST_SPARKS` = 1/2/3/4/6 by rarity); reduced motion → static aura, no sparks. Legacy 1x1 chests get the aura too. Hook chestShowAll; screenshots-chests/ (not published).
+
+## 2026-11-18 (13:31 / 13:34 CT): Eternal Reapers rewrite (ult id 26) + act-boss skull on the minimap
+**Eternal Reapers** (id 26 only; name unchanged; damage, targets, cooldown untouched; purely the show + sound):
+- Timing: 4 corner sweeps start at `UREAP_T0` = 0.06/0.27/0.48/0.69 s, each `UREAP_SW` = 0.32 s (was 0.55, ease-in-out cubic `reapEase` so it accelerates through the middle); great rainbow scythe at `UREAP_BIG` = 0.98 s, 0.2 s rise/wind-up, one full clockwise revolution in 0.46 s, shockwave; show length `UREAP_DUR` = 2.35 s.
+- Size: sweep radius = max(0.95·min(W,H), 0.55·screen diagonal) from a corner pivot (`reapSweep`), blade 0.5·min(W,H); finale radius 0.66·min(W,H), blade 0.62 of that. Scales with the view, so it fits phones.
+- **Blade-first fix:** `uScythe(..., lead)` now draws in a frame where +y is the direction of travel; the blade leaves the snath head and hooks FORWARD, concave white cutting edge on the leading side, dark spine trailing. `lead` = sweep direction (+1 clockwise sweeps 1 & 3 and the finale, −1 counter-clockwise sweeps 2 & 4). The old shape put the blade on the trailing side (and the CCW sweeps were rotated 180°), so it hit spine-first. Blades draw with source-over so they read as solid steel. Motion-blur ghosts trail behind.
+- Trails: white core + rainbow halo + blood-red underlayer arc that lingers; sparks shed from the edge.
+- Hits (`reapHitInfo` precomputes when each target is cut and the blade's travel direction there; `reapStrike` on each hit event): flinch flash (`e.hit`), knockback nudge along the blade's path (`bump`/`bdx`/`bdy`, visual only, no position change), `spawnBlood` toward the travel direction, red/gold burst, shake 4 (5 on the finale); drawn cut = 3 claw lines along the path, blood droplets flung forward, sparks, glow.
+- SFX (`sfx("ult")` case 10): per sweep a steel-leaving-sheath scrape + rising bandpass whoosh + struck-metal ring (inharmonic partials 1/2.76/5.4/8.93, ~1.1 s decay); finale: drawn-blade ring, long whoosh, ring, low boom. Per hit: new `sfx("reapHit")` = wet slash + flesh thud + steel tick, throttled to >= 50 ms apart and at most 14 per cast (`UREAP_HIT_GAP`, `UREAP_HIT_MAX`).
+- Test hooks: reapLog, reapFreeze, reapSheet. Test: tests/reapmm.mjs; screenshots-reaper/ (contact-sheet.png, not published).
+
+**Act-boss minimap marker:** on an act floor (`isActFloor`, the floor before camp; not camp/vault) every live act boss (`e.act`, cls 2) gets a pulsing 5x5 red pixel skull with dark outline and halo (`mmBossSkull`) at its live position on the minimap and the enlarged map, even in unexplored fog. Only the marker is drawn; `g.seen` is untouched. It is clamped inside the map frame and disappears when the boss dies. Reduced motion → no pulse. Drawn per frame from live state, so existing saves get it immediately. Hook mmBoss; screenshots-mmboss/ (not published).
+
+## Prismatic combine rules — confirmed design (Metal Complex voice, 2026-11-18 1:49 PM CT) — IMPLEMENTED (2026-11-18, approved 1:51 PM CT)
+Originally design rules only; implemented in the same deploy as the Eternal Reapers rewrite (see "Implementation" below). Sits alongside the existing Prismatic combine and Dual Titan (PRT_DUAL) notes.
+
+Current code for reference (lookup 2026-11-18): weapons — 3 identical types keep the type, mixed 1H/2H rolls a random weapon of that handedness (may repeat an input type); pets — result keeps the first input's pet type (`it.pt = a.pt` in makeCombined) and inherits ability/rare power (e.g. Dual Titan) from the highest-star input (petAbiFromInputs / petRareFromInputs); pets never grant an ultimate (ultsOf skips pets) and do not count toward Paramount (PARA_GEAR = head, chest, arms, legs, rh, lh).
+
+Confirmed rules (target behavior):
+1. Combining Prismatic pets always produces a totally new pet with new abilities — never the same pet as the inputs.
+2. Every combined Prismatic pet must offer an ultimate ability.
+3. That ultimate can change depending on the pet and the combination.
+4. Same for any Prismatic item combination: when Prismatic items combine into an upgraded Prismatic item, the ultimate it grants can change with the combination.
+5. Only exception: combining three of the exact same Prismatic type — the "always becomes something different" rule does not apply in that case.
+
+Open question (asked 2026-11-18, awaiting answer): should a Prismatic pet's ultimate get its own button/cooldown and count toward the six pieces Paramount needs?
+
+## Eternum necklaces — design rules (Metal Complex voice, 2026-11-18 1:54 PM CT) — NOT YET IMPLEMENTED
+Design only; no Eternum necklaces exist in the code or earlier notes as of this entry. Sits alongside the Prismatic pet / combine rules above.
+1. Eternum necklaces are the only item in the game that never auto-equips. Each of their unique affixes can be as powerful as the next, so the player decides which one to wear.
+2. When the player obtains their first Eternum necklace, a new dedicated bag section appears with exactly seven slots that hold only the seven Eternum necklaces and nothing else.
+3. That section does not exist until the first Eternum necklace is obtained; once it appears, the player can pick and choose which of the seven to equip at any time.
+4. Pickup alert (added 1:58 PM CT): picking up an Aeternum/Eternum necklace triggers a notification completely unlike every other notifier in the game — highly attention-grabbing, with its own unique rapid chime/tune (a quick 'da-da-da-da-da-da-da-da-da-da-da' run of notes) used for nothing else, so any player stops and wonders what just happened.
+(Spelling: the user has said both 'Eternum' and 'Aeternum'; confirm the final in-game name before implementing.)
+5. Drop presentation (added 1:59 PM CT): the pet never auto-picks up an Eternum necklace; it falls to the ground. A unique, unmistakable beam of golden energy shines from the ceiling straight down onto the necklace and stays on it until it is picked up. The necklace lies on the ground giving off a heavenly, sparkling golden light. A golden bar across the top of the beam reads "Eternum Necklace" (or similar). The drop plays the rapid da-da-da-da chime and sound effect from rule 4. Rules 1-4 are unchanged.
+
+### Implementation (2026-11-18, approved 1:51 PM CT)
+- "Exact same type" (`combineSameType`): pets = same pet type `pt`; weapons = same weapon kind; armor = same slot kind AND same base design `d[0]` (armor always shares its slot, so the base is what makes it the "same" piece).
+- **Pets** (`makeCombined`): three Prismatic pets that are not all the same type -> a pet type none of the inputs had (re-rolled until it differs; 100 types), fresh `petAbiRoll` ability and `petRareRoll` rare power, no inheritance. Three of the same type keep the type and the old highest-star ability/rare inheritance. Mythic -> Prismatic pet combines keep the first input's type as before (rule 1 is about Prismatic pets).
+- **Ultimates on combine:** every Prismatic result (armor, weapon, pet; never shield) rolls a new ultimate (`ri(50)`, may match an input by chance); three of the exact same type keep the primary (equipped) input's ultimate.
+- **Pet ultimates:** `makePet` rolls `ult` for Prismatic pets; `validItem` keeps pet ults and gives every existing Prismatic pet without one a stable ult derived from its seed (`petUltOf`), on every profile, equipped, bag and stash; non-Prismatic pets carry none. `ultsOf` includes the pet (shields still excluded) -> own button (7th button fits the 2-column grid; key 7 on keyboard), own independent cooldown, same damage formula (`ultDamage`) as armor/weapon ults.
+- **Paramount** (`paraPieces`): unlocks with any six Prismatic ultimates among head, chest, arms, legs, rh, lh, pet. Chosen rule: the six gear slots are used first (an existing full set behaves exactly as before); the pet fills in only when a gear slot has no ultimate (e.g. a shield in the left hand). Never seven. Only the six used are locked for the 3 minutes. Beam/visuals/shake/damage formula unchanged.
+- Bulwark already counts all 7 slots incl. pet; fuse multiplier is per-item (unchanged). Test: tests/combine.mjs (17 checks), hook `__ED16_PRIS.combineRules`, `__ED16_HZ.ultLive`.
+
+## Water, ice and lava — design rules (Metal Complex voice, 2026-11-18 1:57 PM CT) — NOT YET IMPLEMENTED
+Design only; game code unchanged as of this note. Sits alongside the Prismatic pet combine rules and Eternum necklace rules above.
+- Water: no longer blocks the player's path. The player can walk through water, with splashing sound effects while moving through it. All other existing water rules still apply, including that certain abilities can completely evaporate water.
+- Ice: a regular (non-Paramount) ultimate that hits ice melts it into water. A Paramount attack evaporates both ice and water.
+- Lava: unchanged. It still blocks the path completely. The only way past it is a Paramount attack, which turns lava into obsidian the player can walk across.
