@@ -2611,25 +2611,81 @@ let DRAW_T = 0;
 let PRIS_T_FREEZE: number | null = null;
 const PRIS_ARC_N = 3;
 const PRIS_ARC_FLASH = 0.065;
-const PRIS_ARC_PERIOD = 1.5;
-const PRIS_SPARK_SLOTS = 4;
-const PRIS_SPARK_LIFE = 0.55;
-const PRIS_SPARK_PERIOD = 2.4;
+const PRIS_ARC_GAP_MIN = 1.5;
+const PRIS_ARC_GAP_MAX = 5;
+const PRIS_GLINT_MIN = 1.5;
+const PRIS_GLINT_MAX = 3;
+const PRIS_GLINT_MARGIN = 20;
+const PRIS_GLINT_TWINKLE = 0.16;
+const PRIS_GLINT_PERIOD: Record<EqKey, number> = { head: 2.15, chest: 3.05, arms: 1.72, legs: 4.35, rh: 2.68, lh: 3.82, pet: 1.95 };
+const PRIS_GLINT_ANG: Record<EqKey, number> = { head: -1.85, chest: 0.55, arms: 2.75, legs: 1.75, rh: -0.4, lh: 3.55, pet: -0.95 };
+type PrisArcWalk = { seed: number; i: number; id: number; start: number };
+const PRIS_ARC_WALK: PrisArcWalk[] = [];
 function prisHash01(n: number): number { return ((Math.imul((n | 0) ^ 0x9e3779b9, 2654435761) >>> 0) % 10000) / 10000; }
-function prisArcOn(t: number, seed: number, i: number): { on: boolean; age: number; id: number; flash: number } {
-  const flash = PRIS_ARC_FLASH + 0.008 * (((seed + i * 5) & 3) - 1.5) / 1.5; // 53–77ms
-  const off = ((seed * 0.19 + i * (PRIS_ARC_PERIOD / PRIS_ARC_N)) % PRIS_ARC_PERIOD + PRIS_ARC_PERIOD) % PRIS_ARC_PERIOD;
-  const u = ((t + off) % PRIS_ARC_PERIOD + PRIS_ARC_PERIOD) % PRIS_ARC_PERIOD;
-  return { on: u < flash, age: u, id: Math.floor((t + off) / PRIS_ARC_PERIOD), flash };
+function prisArcFlashLen(seed: number, i: number): number {
+  return PRIS_ARC_FLASH + 0.008 * (((seed + i * 5) & 3) - 1.5) / 1.5; // 53–77ms
 }
-function prisArcMidTimes(seed: number, thru = 3): number[] {
+function prisArcGap(seed: number, i: number, id: number): number {
+  const r = (prisHash01(seed + i * 131 + id * 2654435761) * 0.61 + prisHash01(seed * 7 + i * 17 + id * 2246822519) * 0.39) % 1;
+  return PRIS_ARC_GAP_MIN + r * (PRIS_ARC_GAP_MAX - PRIS_ARC_GAP_MIN);
+}
+function prisArcT0(seed: number, i: number): number {
+  const r = prisHash01(Math.imul(seed + 1, 0x9e3779b1) ^ (i * 0x85ebca6b + 0xc2b2ae35));
+  const lo = [0.2, 1.15, 0.55][i] ?? 0.4;
+  const hi = [3.5, 5, 4.4][i] ?? 5;
+  return lo + r * (hi - lo);
+}
+function prisArcGaps(seed: number, i: number, n: number): number[] {
+  const out: number[] = [];
+  for (let id = 0; id < n; id++) out.push(prisArcGap(seed, i, id));
+  return out;
+}
+function prisArcLocate(t: number, seed: number, i: number): { id: number; start: number; gap: number; flash: number } {
+  const flash = prisArcFlashLen(seed, i);
+  const t0 = prisArcT0(seed, i);
+  if (t < t0) return { id: -1, start: t0, gap: 0, flash };
+  let id = 0, start = t0;
+  const c = PRIS_ARC_WALK[i];
+  if (c && c.seed === seed && t >= c.start) { id = c.id; start = c.start; }
+  else if (t > t0 + 24) {
+    let acc = t0, b = 0;
+    while (b < 200000) {
+      let block = 0;
+      for (let k = 0; k < 32; k++) block += prisArcGap(seed, i, b * 32 + k);
+      if (acc + block > t) break;
+      acc += block;
+      b++;
+    }
+    id = b * 32;
+    start = acc;
+  }
+  let guard = 0;
+  while (guard++ < 20000) {
+    const gap = prisArcGap(seed, i, id);
+    if (t < start + gap) {
+      PRIS_ARC_WALK[i] = { seed, i, id, start };
+      return { id, start, gap, flash };
+    }
+    start += gap;
+    id++;
+  }
+  return { id, start, gap: PRIS_ARC_GAP_MIN, flash };
+}
+function prisArcOn(t: number, seed: number, i: number): { on: boolean; age: number; id: number; flash: number; gap: number } {
+  const loc = prisArcLocate(t, seed, i);
+  if (loc.id < 0) return { on: false, age: 0, id: 0, flash: loc.flash, gap: 0 };
+  const age = t - loc.start;
+  return { on: age >= 0 && age < loc.flash, age, id: loc.id, flash: loc.flash, gap: loc.gap };
+}
+function prisArcMidTimes(seed: number, thru = 24): number[] {
   const out: number[] = [];
   for (let i = 0; i < PRIS_ARC_N; i++) {
-    const off = ((seed * 0.19 + i * (PRIS_ARC_PERIOD / PRIS_ARC_N)) % PRIS_ARC_PERIOD + PRIS_ARC_PERIOD) % PRIS_ARC_PERIOD;
-    const mid = (PRIS_ARC_FLASH * 0.5 - off + PRIS_ARC_PERIOD * 4) % PRIS_ARC_PERIOD;
-    for (let k = 0; k < 3; k++) {
-      const t = mid + k * PRIS_ARC_PERIOD;
-      if (t >= 0 && t <= thru) out.push(t);
+    let start = prisArcT0(seed, i), id = 0;
+    while (start <= thru && id < 400) {
+      const mid = start + prisArcFlashLen(seed, i) * 0.5;
+      if (mid >= 0 && mid <= thru) out.push(mid);
+      start += prisArcGap(seed, i, id);
+      id++;
     }
   }
   return out.sort((a, b) => a - b);
@@ -2671,7 +2727,7 @@ function plotPrisLine(p: Pt, x0: number, y0: number, x1: number, y1: number, c: 
   }
 }
 function drawPrisWeaponArcs(p: Pt, x: number, y: number, w: number, h: number, t: number, seed: number): void {
-  // Brief, violent lightning: a jagged flash for ~65ms, then gone. Rare (~2 strikes/s across 3 lanes).
+  // Brief, violent lightning: a jagged ~65ms flash, then gone. Irregular 1.5–5s gaps, no shared beat.
   const cx = x + w / 2, cy = y + h * 0.3;
   for (let i = 0; i < PRIS_ARC_N; i++) {
     const st = prisArcOn(t, seed, i);
@@ -2691,23 +2747,6 @@ function drawPrisWeaponArcs(p: Pt, x: number, y: number, w: number, h: number, t
       plotPrisLine(p, px, py, nx, ny, col);
       px = nx; py = ny;
     }
-  }
-}
-function drawPrisBladeSparks(p: Pt, x: number, y: number, w: number, h: number, t: number, seed: number): void {
-  // 1px rainbow drips falling off the blade, 1–4 at a time, sparse.
-  for (let i = 0; i < PRIS_SPARK_SLOTS; i++) {
-    const off = (i * (PRIS_SPARK_PERIOD / PRIS_SPARK_SLOTS) + (seed % 17) * 0.04) % PRIS_SPARK_PERIOD;
-    const u = ((t + off) % PRIS_SPARK_PERIOD + PRIS_SPARK_PERIOD) % PRIS_SPARK_PERIOD;
-    if (u >= PRIS_SPARK_LIFE) continue;
-    const age = u / PRIS_SPARK_LIFE;
-    if (age > 0.9) continue;
-    const id = (Math.floor((t + off) / PRIS_SPARK_PERIOD) * 31 + seed + i * 11) | 0;
-    const sx = x + 0.5 + prisHash01(id) * Math.max(1, w - 1);
-    const sy0 = y + h * (0.12 + prisHash01(id + 3) * 0.35);
-    const fall = age * (h * 0.85 + 10);
-    const wob = Math.sin(age * 7 + i * 1.3) * 1.1;
-    const L = age < 0.15 ? 95 : Math.max(40, 88 - age * 50);
-    p(Math.round(sx + wob), Math.round(sy0 + fall), 1, 1, hsl(Math.floor(prisHue(t, seed, i * 90 + age * 70)), 100, L));
   }
 }
 function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
@@ -2732,10 +2771,79 @@ function drawPrisPiece(p: Pt, it: Item, draw: (pp: Pt) => void): void {
     const sy = Math.round(y + (Math.cos(ph * 1.31 + i) * 0.5 + 0.5) * Math.max(0, h - 1));
     p(sx, sy, 1, 1, i % 2 ? "#ffffff" : hsl(Math.floor(prisHue(t, seed, i * 80)), 100, 90));
   }
-  if (isPrisWep(it)) {
-    drawPrisWeaponArcs(p, x, y, w, h, t, seed);
-    drawPrisBladeSparks(p, x, y, w, h, t, seed);
+  if (isPrisWep(it)) drawPrisWeaponArcs(p, x, y, w, h, t, seed);
+}
+function prisPieces(eq: Eq): { slot: EqKey; it: Item }[] {
+  const out: { slot: EqKey; it: Item }[] = [];
+  for (const k of EQK) { const it = eq[k]; if (it && it.rar >= 7) out.push({ slot: k, it }); }
+  return out;
+}
+function prisClampGlint(x: number, y: number, cx: number, cy: number, minR: number, x0: number, y0: number, x1: number, y1: number): { x: number; y: number } {
+  const cl = (vx: number, vy: number): { x: number; y: number } => ({
+    x: Math.min(x1, Math.max(x0, vx)),
+    y: Math.min(y1, Math.max(y0, vy)),
+  });
+  let p = cl(x, y);
+  let dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy);
+  if (d < minR) {
+    if (d < 0.01) {
+      const vx = (x0 + x1) * 0.5 - cx, vy = (y0 + y1) * 0.5 - cy;
+      const vn = Math.hypot(vx, vy) || 1;
+      dx = vx / vn; dy = vy / vn; d = 1;
+    }
+    p = cl(cx + dx / d * minR, cy + dy / d * minR);
   }
+  return p;
+}
+type PrisGlint = { slot: EqKey; seed: number; x: number; y: number; r: number; period: number; phase: number; twinkle: boolean; dist: number };
+function prisGlintLayout(eq: Eq, t: number, cx: number, cy: number, minR: number, maxR: number, x0: number, y0: number, x1: number, y1: number): { n: number; glints: PrisGlint[] } {
+  const pieces = prisPieces(eq);
+  const glints: PrisGlint[] = [];
+  for (const p of pieces) {
+    const seed = (p.it.seed || p.it.id) | 0;
+    const period = PRIS_GLINT_PERIOD[p.slot];
+    const ph0 = PRIS_GLINT_ANG[p.slot] + (prisHash01(seed + 11) - 0.5) * 0.7;
+    const wOrb = 0.22 + prisHash01(seed + 5) * 0.18;
+    const wRad = 0.33 + prisHash01(seed + 7) * 0.28;
+    const wBob = 1.05 + prisHash01(seed + 3) * 0.8;
+    const baseR = minR + prisHash01(seed + 19) * (maxR - minR);
+    const rad = baseR + Math.sin(t * wRad + seed * 0.05) * (maxR - minR) * 0.22;
+    const r = Math.max(minR, Math.min(maxR, rad));
+    const ang = ph0 + t * wOrb + Math.sin(t * (wOrb * 1.7) + seed * 0.1) * 0.32;
+    const bob = Math.sin(t * wBob + seed * 0.07) * Math.max(2, r * 0.08);
+    const rawX = cx + Math.cos(ang) * r;
+    const rawY = cy + Math.sin(ang) * r + bob;
+    const pos = prisClampGlint(rawX, rawY, cx, cy, minR, x0, y0, x1, y1);
+    const phase = ((t + prisHash01(seed + 23) * period) % period + period) % period;
+    glints.push({ slot: p.slot, seed, x: pos.x, y: pos.y, r, period, phase, twinkle: phase < PRIS_GLINT_TWINKLE, dist: Math.hypot(pos.x - cx, pos.y - cy) });
+  }
+  return { n: glints.length, glints };
+}
+function drawPrisGlintMark(ctx: CanvasRenderingContext2D, g: PrisGlint, size: number): void {
+  const ix = Math.round(g.x), iy = Math.round(g.y);
+  const u = g.twinkle ? g.phase / PRIS_GLINT_TWINKLE : 0;
+  const env = g.twinkle ? (u < 0.25 ? u / 0.25 : Math.max(0, 1 - (u - 0.25) / 0.75)) : 0;
+  const hue = Math.floor(prisHue(DRAW_T, g.seed));
+  const col = hsl(hue, 100, g.twinkle ? 88 : 68);
+  const arm = Math.max(1, Math.round(size * (g.twinkle ? 1.5 + 1.7 * env : 0.7)));
+  ctx.fillStyle = col;
+  ctx.fillRect(ix - arm, iy, arm * 2 + 1, 1);
+  ctx.fillRect(ix, iy - arm, 1, arm * 2 + 1);
+  if (g.twinkle && env > 0.25) {
+    const d = Math.max(1, Math.round(arm * 0.7));
+    for (let k = 1; k <= d; k++) {
+      ctx.fillRect(ix + k, iy + k, 1, 1);
+      ctx.fillRect(ix - k, iy + k, 1, 1);
+      ctx.fillRect(ix + k, iy - k, 1, 1);
+      ctx.fillRect(ix - k, iy - k, 1, 1);
+    }
+  }
+  ctx.fillStyle = g.twinkle ? "#ffffff" : hsl(hue, 100, 90);
+  ctx.fillRect(ix, iy, 1, 1);
+}
+function drawPrisGlints(ctx: CanvasRenderingContext2D, eq: Eq, t: number, cx: number, cy: number, minR: number, maxR: number, x0: number, y0: number, x1: number, y1: number, size: number): void {
+  const lay = prisGlintLayout(eq, t, cx, cy, minR, maxR, x0, y0, x1, y1);
+  for (const g of lay.glints) drawPrisGlintMark(ctx, g, size);
 }
 function painter(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, flip: boolean, fw: number): Pt {
   return (x: number, y: number, w: number, h: number, c: string): void => {
@@ -10743,6 +10851,9 @@ function drawBagPortrait(ctx: CanvasRenderingContext2D, eq: Eq): { scale: number
   const q: Pose = { ...P0, glow: (rh && (rh.kind === "beamsword" || rh.rar >= 3)) ? 0.7 : 0 };
   drawHero(ctx, BAG_PORT.ox * s, BAG_PORT.oy * s, s, 1, eq, 0, q, 0);
   if (eq.pet) drawPrisPiece(painter(ctx, (BAG_PORT.ox + BAG_PORT.hero + BAG_PORT.gap) * s, (BAG_PORT.oy + 8) * s, s, false, 0), eq.pet, (q: Pt) => drawPetSprite(q, eq.pet!.pt ?? 0));
+  const gcx = (BAG_PORT.ox + 8) * s, gcy = (BAG_PORT.oy + 12) * s;
+  const pad = 8;
+  drawPrisGlints(ctx, eq, DRAW_T, gcx, gcy, 48, 72, pad, pad, m.w - pad, m.h - pad, 2);
   return m;
 }
 function bagPortraitDataUrl(eq: Eq): string {
@@ -11922,10 +12033,24 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-pris-arcs { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
 .dc-pris-arcs svg { width: 100%; height: 100%; display: block; }
 .dc-pris-arcs .bolt { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.15; mix-blend-mode: screen; }
-.dc-pris-arcs .bolt.a { stroke: #fff; opacity: 0; animation: prisFlashA 1.5s step-end infinite, prisHue 1.4s linear infinite; }
-.dc-pris-arcs .bolt.b { stroke: #e8f0ff; opacity: 0; animation: prisFlashB 1.8s step-end infinite, prisHue 1.8s linear infinite reverse; animation-delay: 0.55s, 0s; }
-@keyframes prisFlashA { 0%, 4.3% { opacity: 1; stroke-width: 1.55; } 4.4%, 100% { opacity: 0; stroke-width: 1.15; } }
-@keyframes prisFlashB { 0%, 3.6% { opacity: 1; stroke-width: 1.45; } 3.7%, 100% { opacity: 0; stroke-width: 1.1; } }
+.dc-pris-arcs .bolt.a { stroke: #fff; opacity: 0; animation: prisFlashA 21.2s step-end infinite, prisHue 1.4s linear infinite; }
+.dc-pris-arcs .bolt.b { stroke: #e8f0ff; opacity: 0; animation: prisFlashB 18.6s step-end infinite, prisHue 1.8s linear infinite reverse; animation-delay: 1.1s, 0s; }
+@keyframes prisFlashA {
+  0%, 0.307% { opacity: 1; stroke-width: 1.55; } 0.31%, 11.32% { opacity: 0; stroke-width: 1.15; }
+  11.321%, 11.628% { opacity: 1; stroke-width: 1.55; } 11.63%, 33.49% { opacity: 0; stroke-width: 1.15; }
+  33.491%, 33.798% { opacity: 1; stroke-width: 1.55; } 33.80%, 41.03% { opacity: 0; stroke-width: 1.15; }
+  41.038%, 41.345% { opacity: 1; stroke-width: 1.55; } 41.35%, 59.43% { opacity: 0; stroke-width: 1.15; }
+  59.434%, 59.741% { opacity: 1; stroke-width: 1.55; } 59.75%, 83.01% { opacity: 0; stroke-width: 1.15; }
+  83.019%, 83.326% { opacity: 1; stroke-width: 1.55; } 83.33%, 100% { opacity: 0; stroke-width: 1.15; }
+}
+@keyframes prisFlashB {
+  0%, 0.350% { opacity: 1; stroke-width: 1.45; } 0.36%, 22.58% { opacity: 0; stroke-width: 1.1; }
+  22.581%, 22.931% { opacity: 1; stroke-width: 1.45; } 22.94%, 32.25% { opacity: 0; stroke-width: 1.1; }
+  32.258%, 32.608% { opacity: 1; stroke-width: 1.45; } 32.62%, 50.00% { opacity: 0; stroke-width: 1.1; }
+  50.000%, 50.350% { opacity: 1; stroke-width: 1.45; } 50.36%, 76.88% { opacity: 0; stroke-width: 1.1; }
+  76.882%, 77.232% { opacity: 1; stroke-width: 1.45; } 77.24%, 91.39% { opacity: 0; stroke-width: 1.1; }
+  91.398%, 91.748% { opacity: 1; stroke-width: 1.45; } 91.75%, 100% { opacity: 0; stroke-width: 1.1; }
+}
 @keyframes prisHue { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(360deg); } }
 .dc-prisbox { display: inline-block; width: 96px; height: 96px; border: 3px solid #ff60a0; border-radius: 8px; margin: 4px auto; position: relative; overflow: hidden; }
 .dc-prisbox .dc-reveal-ico { margin: 0; width: 100%; height: 100%; }
@@ -13313,7 +13438,7 @@ function prisInspect(kind: "pet" | "wep" | "armor"): Record<string, unknown> {
   const it = prisMake(kind, { stars: 5 });
   const seed = (it.seed || it.id) | 0;
   const times = [0.15, 0.37, 0.62, 0.88, 1.19, 1.44, 1.73, 2.05];
-  if (kind === "wep") for (const t of prisArcMidTimes(seed, 3.2)) times.push(t);
+  if (kind === "wep") for (const t of prisArcMidTimes(seed, 24)) times.push(t);
   let anyRect = false, maxOutside = 0, shimmer = 0;
   const frames: Record<string, unknown>[] = [];
   let firstData: Uint8ClampedArray | null = null;
@@ -13473,9 +13598,24 @@ try {
     inspect: prisInspect,
     portrait: prisPortrait,
     openInv: prisOpenInv,
-    arc: { N: PRIS_ARC_N, FLASH: PRIS_ARC_FLASH, PERIOD: PRIS_ARC_PERIOD, SPARK_SLOTS: PRIS_SPARK_SLOTS, SPARK_LIFE: PRIS_SPARK_LIFE, SPARK_PERIOD: PRIS_SPARK_PERIOD },
+    arc: { N: PRIS_ARC_N, FLASH: PRIS_ARC_FLASH, GAP_MIN: PRIS_ARC_GAP_MIN, GAP_MAX: PRIS_ARC_GAP_MAX },
     arcOn: (t: number, seed: number, i: number) => prisArcOn(t, seed, i),
     arcMids: (seed: number, thru?: number) => prisArcMidTimes(seed, thru),
+    arcGaps: (seed: number, i: number, n: number) => prisArcGaps(seed, i, n),
+    arcT0: (seed: number, i: number) => prisArcT0(seed, i),
+    glint: { MIN: PRIS_GLINT_MIN, MAX: PRIS_GLINT_MAX, MARGIN: PRIS_GLINT_MARGIN, TWINKLE: PRIS_GLINT_TWINKLE, PERIOD: PRIS_GLINT_PERIOD },
+    pieces: (): Record<string, unknown> => {
+      const g = PRIS_TEST_G || LIVE;
+      if (!g) return { ok: false, error: "not begun" };
+      const list = prisPieces(g.eq).map((p) => ({ slot: p.slot, rar: p.it.rar, seed: (p.it.seed || p.it.id) | 0 }));
+      return { ok: true, n: list.length, list };
+    },
+    glints: (t: number, cx: number, cy: number, minR: number, maxR: number, x0: number, y0: number, x1: number, y1: number): Record<string, unknown> => {
+      const g = PRIS_TEST_G || LIVE;
+      if (!g) return { ok: false, error: "not begun" };
+      const lay = prisGlintLayout(g.eq, t, cx, cy, minR, maxR, x0, y0, x1, y1);
+      return { ok: true, n: lay.n, glints: lay.glints };
+    },
     setTime: prisSetTime,
     frame: prisFrame,
     wepSeed: (): number => {
@@ -14904,6 +15044,7 @@ export default function App() {
         drawPassives(ctx, g, hsx, hsy, t, 1, wardMax);
         drawAllies(ctx, g, hsx, hsy, t);
         drawPet(ctx, g, camX, camY, t);
+        drawPrisGlints(ctx, g.eq, t, hsx + 12, hsy + 13, PRIS_GLINT_MIN * TS, PRIS_GLINT_MAX * TS, PRIS_GLINT_MARGIN, HUD + PRIS_GLINT_MARGIN, VW - PRIS_GLINT_MARGIN, HUD + VIEWH - PRIS_GLINT_MARGIN, 1.4);
       }
       for (const f of g.fx) drawFx(ctx, f, camX, camY, t);
       drawPetShots(ctx, g, camX, camY, t);
