@@ -1,0 +1,82 @@
+[
+  {
+    "step": "A: picker lists Richard, Jax, Piper",
+    "pass": true,
+    "d": "1. Richard Lv 40 · Depth 60 saved Nov 18, 2:21 PM | 2. Jax Lv 5 · Depth 3 saved Nov 18, 3:21 PM | 3. Piper Lv 37 · Depth 52 saved Nov 18, 1:21 PM"
+  },
+  {
+    "step": "A: Piper auto-recovered from IndexedDB (Lv 37 · Depth 52)",
+    "pass": true,
+    "d": "3. Piper Lv 37 · Depth 52 saved Nov 18, 1:21 PM"
+  },
+  {
+    "step": "A: Richard still Lv 40 · Depth 60",
+    "pass": true,
+    "d": "1. Richard Lv 40 · Depth 60 saved Nov 18, 2:21 PM"
+  },
+  {
+    "step": "A: tapping Piper loads her old-format run into play",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "A: Recover lost profiles lists the orphan Piper export",
+    "pass": true,
+    "d": "Lv 12 · Depth 14 · Nov 17, 3:21 PM localStorage · ed16_piper_export_old To Richard To Jax To Piper"
+  },
+  {
+    "step": "A: no localStorage key was deleted",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "A: Richard's save bytes unchanged",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "A: after reload all three profiles still have saves",
+    "pass": true,
+    "d": "1. Richard Lv 40 · Depth 60 saved Nov 18, 2:21 PM | 2. Jax Lv 5 · Depth 3 saved Nov 18, 3:21 PM | 3. Piper Lv 37 · Depth 52 saved Nov 18, 1:21 PM"
+  },
+  {
+    "step": "A: backup-before-migrate snapshot exists for Piper",
+    "pass": true,
+    "d": "ed16_premig_p3"
+  },
+  {
+    "step": "B: Piper listed as 'save found but not readable' (not silently empty)",
+    "pass": true,
+    "d": "3. Piper Save found but not readable — tap Recover below"
+  },
+  {
+    "step": "B: tapping damaged Piper warns not to start New Game",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "B: Recover → To Piper restores her (Lv 37 · Depth 52)",
+    "pass": true,
+    "d": "3. Piper Lv 37 · Depth 52 saved Nov 18, 1:21 PM"
+  },
+  {
+    "step": "B: the corrupt blob was kept (not deleted) as ed16_recover_prev_p3_1795036889948",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "B: no key deleted, Richard unchanged",
+    "pass": true,
+    "d": ""
+  },
+  {
+    "step": "B: after reload Piper and Richard still listed with saves",
+    "pass": true,
+    "d": "1. Richard Lv 40 · Depth 60 saved Nov 18, 2:21 PM | 2. Jax Lv 5 · Depth 3 saved Nov 18, 3:21 PM | 3. Piper Lv 37 · Depth 52 saved Nov 18, 1:21 PM"
+  },
+  {
+    "step": "B: restored Piper loads into play",
+    "pass": true,
+    "d": ""
+  }
+]

@@ -8909,6 +8909,10 @@ async function syncFromIdb(): Promise<boolean> {
     void idbPutDone(profSaveKey(p.id), r);
     ROLL_RESTORED.push(p.id);
   }
+  try {
+    const rec = await autoRecoverEmptyProfiles();
+    if (rec.indexOf(activeProf) >= 0) { saveFlag = true; pulled = true; }
+  } catch { /* recovery is best-effort */ }
   migrateProfiles();
   return pulled;
 }
@@ -8925,11 +8929,11 @@ function profBlob(id: ProfId): string | null {
   for (const r of [lsGet(profSaveKey(id)), hookGet(profSaveKey(id)), curMem, lsGet(profBakKey(id)), hookGet(profBakKey(id)), bakMem, ssGet(profSaveKey(id)), ssGet(profBakKey(id))]) if (r && savedT(r) > savedT(best)) best = r;
   return best;
 }
-function profSummary(id: ProfId): { id: ProfId; name: string; empty: boolean; depth: number; lvl: number; t: number } {
+function profSummary(id: ProfId): { id: ProfId; name: string; empty: boolean; damaged?: boolean; depth: number; lvl: number; t: number } {
   migrateProfiles();
   const name = (PROFILES.find((p: { id: ProfId; name: string }) => p.id === id) || PROFILES[0]).name;
   const s = parseSaveRaw(profBlob(id));
-  if (!s) return { id, name, empty: true, depth: 0, lvl: 0, t: 0 };
+  if (!s) return { id, name, empty: true, damaged: profHasAnyBlob(id), depth: 0, lvl: 0, t: 0 };
   const t = typeof s.t === "number" && isFinite(s.t) ? s.t : 0;
   return { id, name, empty: false, depth: Math.floor(Number(s.depth) || 1), lvl: Math.floor(Number(s.lvl) || 1), t };
 }
@@ -8938,6 +8942,115 @@ function fmtProfTime(t: number): string {
   try {
     return new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   } catch { return "no timestamp"; }
+}
+// ---------- lost-profile recovery (2026-11-18, Piper fix) ----------
+// Strictly additive: scans every ed16 key in localStorage, sessionStorage and IndexedDB for a save blob that a
+// profile is not currently showing, and can copy one into a profile. Nothing is ever deleted; a slot that already
+// has a save gets that save copied to ed16_recover_prev_p<N>_<time> first.
+type RecoverCand = { src: string; key: string; raw: string; lvl: number; depth: number; t: number; prof: ProfId | 0 };
+function profOfKey(k: string): ProfId | 0 {
+  const m = /_p([123])(?:_|$)/.exec(k);
+  return m ? (Number(m[1]) as ProfId) : 0;
+}
+function isSaveishKey(k: string): boolean {
+  return /ed16/i.test(k) && !/stash|_best$|_lvl$|_lock$|_probe$|_mig_v1$|_roll_p[123]_i$/i.test(k);
+}
+function premigBlob(v: string | null): string | null {
+  if (!v) return null;
+  try { const o = JSON.parse(v) as { raw?: unknown }; if (o && typeof o.raw === "string") return o.raw; } catch { /* plain blob */ }
+  return v;
+}
+function idbAllKeys(): Promise<string[]> {
+  if (IDB_SIM_DOWN) return Promise.resolve([]);
+  if (testIdb) return Promise.resolve(Object.keys(testIdb));
+  return idb().then((db: IDBDatabase | null) => new Promise<string[]>((res) => {
+    if (!db) { res([]); return; }
+    try {
+      const rq = db.transaction("kv", "readonly").objectStore("kv").getAllKeys();
+      rq.onsuccess = () => res((rq.result || []).map((k: IDBValidKey) => String(k)));
+      rq.onerror = () => res([]);
+    } catch { res([]); }
+  }), () => []);
+}
+function ssAllKeys(): string[] {
+  const out: string[] = [];
+  try { probeStores(); if (ssHandle) for (let i = 0; i < ssHandle.length; i++) { const k = ssHandle.key(i); if (k) out.push(k); } } catch { /* ignore */ }
+  return out;
+}
+async function scanRecoverable(includeCurrent = false): Promise<RecoverCand[]> {
+  const seen: Record<string, number> = {};
+  const out: RecoverCand[] = [];
+  const cur: Record<string, number> = {};
+  if (!includeCurrent) for (const p of PROFILES) { const b = profBlob(p.id); if (b) cur[b] = 1; }
+  const add = (src: string, key: string, vIn: string | null): void => {
+    const v = premigBlob(vIn);
+    if (!v || seen[v] || cur[v]) return;
+    const s = parseSaveRaw(v);
+    if (!s) return;
+    seen[v] = 1;
+    out.push({ src, key, raw: v, lvl: Math.floor(Number(s.lvl) || 1), depth: Math.floor(Number(s.depth) || 1), t: typeof s.t === "number" && isFinite(s.t) ? s.t : 0, prof: profOfKey(key) });
+  };
+  for (const k of lsKeys()) if (isSaveishKey(k)) add("localStorage", k, lsGet(k));
+  for (const k of ssAllKeys()) if (isSaveishKey(k)) add("sessionStorage", k, ssGet(k));
+  let ik: string[] = [];
+  try { ik = await idbAllKeys(); } catch { ik = []; }
+  for (const k of ik) if (isSaveishKey(k)) { let v: string | null = null; try { v = await idbGet(k); } catch { v = null; } add("IndexedDB", k, v); }
+  out.sort((a: RecoverCand, b: RecoverCand) => (b.t - a.t) || (runProgressRank(b.lvl, b.depth, 0) - runProgressRank(a.lvl, a.depth, 0)));
+  return out;
+}
+function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
+  if (!parseSaveRaw(c.raw)) return false;
+  const existing = profBlob(id);
+  if (existing === c.raw) return true;
+  // Keep whatever sits in the slot now - even an unreadable blob - under a new key before it is replaced.
+  const keep: string[] = [];
+  for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== c.raw && keep.indexOf(r) < 0) keep.push(r);
+  keep.forEach((r: string, i: number) => {
+    const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : "");
+    void idbPutDone(k, r);
+    lsSet(k, r);
+  });
+  if (id === activeProf) memSave = c.raw; else memSaveBy[id] = c.raw;
+  const ok = writeDurable(profSaveKey(id), c.raw);
+  RECOVERED.push(id);
+  return ok || lsGet(profSaveKey(id)) === c.raw || hookGet(profSaveKey(id)) === c.raw;
+}
+const RECOVERED: ProfId[] = [];
+// Automatic part: a profile that shows Empty but has a recoverable blob under one of ITS OWN keys
+// (pre-load snapshot, earlier recover copy, any other p<N> key) gets the newest one back. Never touches a non-empty slot.
+async function autoRecoverEmptyProfiles(): Promise<ProfId[]> {
+  const done: ProfId[] = [];
+  let cands: RecoverCand[] = [];
+  try { cands = await scanRecoverable(); } catch { return done; }
+  for (const p of PROFILES) {
+    if (parseSaveRaw(profBlob(p.id))) continue;
+    const mine = cands.filter((c: RecoverCand) => c.prof === p.id);
+    if (!mine.length) continue;
+    if (restoreCandidate(mine[0], p.id)) done.push(p.id);
+  }
+  return done;
+}
+// Backup-before-migrate: the first time a profile is loaded under a new build, keep the untouched blob
+// (ed16_premig_p<N>, previous generation in ed16_premig_p<N>_prev). IndexedDB only, never deleted.
+function buildIdNow(): string { try { return String((window as unknown as { __ED16_BUILD?: string }).__ED16_BUILD || ""); } catch { return ""; } }
+function snapshotBeforeMigrate(id: ProfId, raw: string): void {
+  try {
+    const b = buildIdNow();
+    const k = "ed16_premig_p" + id;
+    void idbGet(k).then((prev: string | null) => {
+      let pb = "";
+      try { pb = prev ? String((JSON.parse(prev) as { b?: unknown }).b || "") : ""; } catch { pb = ""; }
+      if (prev && pb === b) return;
+      const put = (): void => { void idbPutDone(k, JSON.stringify({ b, t: Date.now(), raw })); };
+      if (prev) void idbPutDone(k + "_prev", prev).then(put, put); else put();
+    }, () => { /* best effort */ });
+  } catch { /* best effort */ }
+}
+function profHasAnyBlob(id: ProfId): boolean {
+  try {
+    const curMem = id === activeProf ? memSave : (memSaveBy[id] ?? null);
+    return !!(lsGet(profSaveKey(id)) || lsGet(profBakKey(id)) || ssGet(profSaveKey(id)) || ssGet(profBakKey(id)) || hookGet(profSaveKey(id)) || curMem);
+  } catch { return false; }
 }
 // Copy an existing main-save blob into the backup before it is overwritten or cleared.
 // Unparseable blobs are kept if there is no backup yet, so a failed load / New Game cannot destroy the only copy.
@@ -9650,6 +9763,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
         if (!parseSaveRaw(raw)) return null;
         fromBak = true;
       }
+      if (raw) snapshotBeforeMigrate(activeProf, raw);
     }
     if (!raw) return null;
     const s = JSON.parse(raw) as Record<string, unknown>;
@@ -19653,6 +19767,9 @@ export default function App() {
   const [bankAmt, setBankAmt] = useState<string>("");
   const [ioOpen, setIoOpen] = useState<boolean>(false);
   const [profOpen, setProfOpen] = useState<boolean>(true);
+  const [recList, setRecList] = useState<RecoverCand[] | null>(null);
+  const [recBusy, setRecBusy] = useState<boolean>(false);
+  const [recNote, setRecNote] = useState<string>("");
   const [ioCode, setIoCode] = useState<string>("");
   const [ioNote, setIoNote] = useState<string>("");
   const [ioMode, setIoMode] = useState<"save" | "load">("save");
@@ -19784,8 +19901,9 @@ export default function App() {
     setProfOpen(false);
     setConfirmNew(false);
     setTitleNote("");
-    if (hasSave()) {
-      const n = loadGame(gRef.current);
+    if (hasSave() || hasSaveBlob()) {
+      let n = loadGame(gRef.current);
+      if (!n) { try { const b = currentBak(); if (b && parseSaveRaw(b)) n = loadGame(gRef.current, b); } catch { n = null; } }
       if (n) {
         n.mode = "play"; n.notify = bump;
         if (g && g.sfx) n.sfx = g.sfx;
@@ -19804,7 +19922,20 @@ export default function App() {
     t.mode = "title"; t.notify = bump;
     if (g && g.sfx) t.sfx = g.sfx;
     gRef.current = t; LIVE = t;
-    setTitleNote("No save on " + nm + " yet. Paste a Save Code with LOAD, or start a New Game.");
+    setTitleNote(hasSaveBlob() ? (nm + "'s save is still here but could not be opened. It was kept safe - do NOT start a New Game. Open Profiles and tap Recover lost profiles.") : ("No save on " + nm + " yet. Paste a Save Code with LOAD, or start a New Game."));
+    bump();
+  };
+  const openRecover = (): void => {
+    setRecBusy(true); setRecNote("");
+    void scanRecoverable().then((list: RecoverCand[]) => { setRecList(list); setRecBusy(false); bump(); }, () => { setRecList([]); setRecBusy(false); });
+  };
+  const doRecover = (c: RecoverCand, id: ProfId): void => {
+    const nm = PROFILES[id - 1] ? PROFILES[id - 1].name : "profile";
+    const had = !profSummary(id).empty;
+    if (had && typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm("Put this Lv " + c.lvl + " / Depth " + c.depth + " save into " + nm + "? " + nm + "'s current save is kept as a backup, not deleted.")) return;
+    const ok = restoreCandidate(c, id);
+    setRecNote(ok ? ("Restored to " + nm + " (Lv " + c.lvl + ", Depth " + c.depth + "). Tap " + nm + " to play.") : "Could not write that save here. Nothing was changed.");
+    void scanRecoverable().then((list: RecoverCand[]) => { setRecList(list); bump(); }, () => { /* keep list */ });
     bump();
   };
   const openProfiles = (): void => {
@@ -21635,7 +21766,7 @@ export default function App() {
                 <div className="dc-profs-list">
                   {PROFILES.map((p: { id: ProfId; name: string }) => {
                     const s = profSummary(p.id);
-                    const line = s.empty ? "Empty — new game or LOAD a code" : ("Lv " + s.lvl + "  ·  Depth " + s.depth);
+                    const line = s.empty ? (s.damaged ? "Save found but not readable — tap Recover below" : "Empty — new game or LOAD a code") : ("Lv " + s.lvl + "  ·  Depth " + s.depth);
                     const when = s.empty ? "" : ("saved " + fmtProfTime(s.t));
                     return (
                       <button key={p.id} className="dc-b dc-prof" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => pickProf(p.id)}>
@@ -21646,6 +21777,23 @@ export default function App() {
                     );
                   })}
                 </div>
+                <button className="dc-b dc-recover" style={{ ...btn, marginTop: 8, width: "100%" }} disabled={stor === "checking" || !storageReady || recBusy} onClick={openRecover}>{recBusy ? "Searching saves…" : "\ud83d\udd0d Recover lost profiles"}</button>
+                {recList !== null && (
+                  <div className="dc-rec" style={{ width: "100%", marginTop: 8, maxHeight: 260, overflowY: "auto", fontSize: 12, lineHeight: 1.35 }}>
+                    {recNote ? <div className="dc-sm" style={{ textAlign: "center", marginBottom: 6 }}>{recNote}</div> : null}
+                    {recList.length === 0 ? <div className="dc-sm" style={{ textAlign: "center" }}>No other saves found in this browser. If a profile is missing, it was played on a different device, browser, private tab or home-screen app - open the game there, tap Save Code and LOAD it here.</div> : recList.slice(0, 15).map((c: RecoverCand, i: number) => (
+                      <div key={c.src + c.key + i} className="dc-rec-row" style={{ borderTop: "1px solid rgba(255,255,255,0.15)", padding: "6px 0" }}>
+                        <div><b>{"Lv " + c.lvl + " · Depth " + c.depth}</b>{" · " + (c.t ? fmtProfTime(c.t) : "no time") + (c.prof ? " · was " + PROFILES[c.prof - 1].name + "'s" : "")}</div>
+                        <div style={{ opacity: 0.7, fontSize: 10 }}>{c.src + " · " + c.key}</div>
+                        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                          {PROFILES.map((p: { id: ProfId; name: string }) => (
+                            <button key={p.id} className="dc-b" style={{ ...btn, flex: 1, padding: "4px 2px", fontSize: 11 }} onClick={() => doRecover(c, p.id)}>{"To " + p.name}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="dc-stor-rpt" style={{ width: "100%", marginTop: 8, fontSize: 11, opacity: 0.85, textAlign: "center", lineHeight: 1.35 }}>{storageReportLine()}</div>
                 {g && g.mode === "play" && <button className="dc-b" style={{ ...btn, marginTop: 10, width: "100%" }} onClick={() => setProfOpen(false)}>Cancel</button>}
               </div>
