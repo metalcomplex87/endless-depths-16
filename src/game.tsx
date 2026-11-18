@@ -13706,7 +13706,7 @@ function bpTest(): Record<string, unknown> {
     // distribution
     const g = bpGame(5, 55);
     const hist = new Array(11).fill(0);
-    for (let i = 0; i < 20000; i++) { const e = mkEnemy(g, 5, 5, 2); rollBossPower(g, [e]); hist[e.pm ?? 0]++; }
+    for (let i = 0; i < 20000; i++) { const e = mkEnemy(g, 5, 5, 2); rollBossPower(g, [e], true); hist[e.pm ?? 0]++; }
     res.hist = hist;
     // HP / shield / overshield / damage scaling
     const scal: Record<string, unknown>[] = [];
