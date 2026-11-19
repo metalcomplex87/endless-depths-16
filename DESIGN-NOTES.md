@@ -625,3 +625,71 @@ Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
   arpeggios, or the descending stairs tones. The game mute setting silences it; music-off does not.
 - Fires once per floor arrival, including the first play load after a continue. A packed `al` flag stops
   it from repeating on save-reloads of the same floor. ART_CH stays 0.02; loot is unchanged.
+
+## Eternum icons, worn aura, and trigger FX (Metal Complex, 2026-11-18 ~9:54–9:56 PM CT) — IMPLEMENTED
+
+Status: **implemented** in `src/game.tsx`. Proc rules and damage numbers are unchanged. Drop rates were halved 2026-11-18 10:38 PM CT (see the section below). `ART_CH` stays 0.02.
+
+### Icons
+Every Eternum inventory and ground icon was re-embedded as a brighter 64×64 PNG (source still in unpublished `necklace-icons/`). Gems, frames and metal are lifted and saturated in each necklace's intended color; the dark velvet stays a backdrop so the emblem reads at inventory size. Shared rendering (`NkIconView` in the bag, `drawNkIcon` on the ground) adds a colored glow and animated sparkles around the outer edge, unique per color. Prismatic Eternum is above the others: a stronger iridescent aura, hue-shifting glow, and 12 multi-color sparkles.
+
+### Worn look
+While a necklace is worn, a subtle additive aura and a few orbiting motes tint the hero in that necklace's color (two stacks if Prismatic Eternum lets you wear two). Prismatic Eternum itself adds a stronger rainbow ring.
+
+### Trigger visuals and sounds (mechanics unchanged)
+Each of the seven effect necklaces keeps its existing trigger rules and damage. The visuals and SFX are new, unique, and silent when the game is muted.
+
+- **Storm Crown** — Every 3rd attack still chains to up to 6 foes for 100% weapon damage (applied immediately). Visual: jagged forked lightning with a bright white core and electric-blue glow, a brief flicker and mid-bolt re-strike, impact sparks on each target, a light screen flash and short shake. Sound `nkStorm`: a noise-burst crackle, a sharp snap, and a short thunder tail, one per hop (staggered), distinct from weather `thunder` and `spell`.
+- **Grave Toll** — Ghosts still rise on a kill (15 s, 40% damage, max 5). Visual: a violent violet rift burst and rising motes at the corpse. Sound `nkGrave`: a hollow descending whoosh, a bony click, and a ghostly sine cluster.
+- **Phalanx of the Dead** — Skeleton rules unchanged. A broken skeleton gets a lime impact and a short dry clack (`nkBone`). When all six break, Bone Storm is a lime shockwave, flying shards, a flash and shake. Sound `nkPhalanx`: a cascade of dry rattles and a heavy crunch (not generic `boom`).
+- **Echo Self** — The delayed 50% repeat is unchanged. Visual: a pale afterimage burst at the hero and a glassy impact on the target. Sound `nkEcho`: a reverse swell and a doubled, phasey muted strike.
+- **Neon Skyfall** — Still two 25% ceiling lasers per second while moving, plus scorch. Lasers now have a brighter white core, a bloom, and a ground impact flash. Sound `nkSkyfall`: a piercing neon zap (digital click + short down-sweep), rate-limited for a phone.
+- **Second Heartbeat** — Split / swap / 3-minute cooldown unchanged. Visual: a red shockwave, twin impact, heavy flash. Sound `nkHeart`: two wet kicks like a doubled heartbeat and a red crackle (a softer variant plays on "whole again").
+- **Prism Guard** — Block every 6 s and the 200% rainbow beam are unchanged. Visual: a crystal shatter burst around the hero, a bright impact on the attacker, a light green flash. Sound `nkPrism`: a glass shatter then a rising rainbow whoosh (not `block` + `sparkle`).
+
+Trigger FX are capped by the existing 70-effect budget, use cheap deterministic paths (no per-frame random bolts), and prefer additive short-lived strokes so they stay performant on Android Chrome.
+
+## Eternum drop rates halved (Metal Complex, 2026-11-18 10:38 PM CT) — IMPLEMENTED
+
+Cut every Eternum necklace drop, including Prismatic Eternum, to half of the live spec D rates. The player had found 3 necklaces in under 100 layers with some boss farming.
+
+How: `NK_BASE` 1.2e-5 → 6e-6 and `NK_BASE_E` 8.9e-7 → 4.45e-7. Spec D per-source weights are unchanged, so every source (kills, chests, vault chests, every act-boss power/overshield combo, and Prismatic Eternum on the same weights) is exactly half. The act boss x3 + 3 overshields case goes from 20% to 10%. The depth gate stays 101. The 0.5x-vs-Prismatic-item rule now holds on every source, including that act-boss case (10% vs ~29.9%).
+
+Chance is still `min(0.9, NK_BASE × weight)` for any of the seven (picked evenly) and `min(0.5, NK_BASE_E × weight)` for Prismatic Eternum (only once all seven are owned, and only one on the ground at a time).
+
+| Source | Weight | Necklace before | Necklace after | Prismatic Eternum before | Prismatic Eternum after |
+|---|---:|---:|---:|---:|---:|
+| normal | 1.28 | 0.001536% | 0.000768% | 0.0001139% | 0.0000570% |
+| rare pack | 3.78 | 0.004536% | 0.002268% | 0.0003364% | 0.0001682% |
+| elite | 7.75 | 0.009300% | 0.004650% | 0.0006898% | 0.0003449% |
+| super elite | 66.84 | 0.08021% | 0.04010% | 0.005949% | 0.002974% |
+| ultra elite | 111.4 | 0.1337% | 0.06684% | 0.009915% | 0.004957% |
+| royal goblin | 44.56 | 0.05347% | 0.02674% | 0.003966% | 0.001983% |
+| goblin (loot/gem/gold) | 139.3 | 0.1672% | 0.08358% | 0.01240% | 0.006199% |
+| hunter | 195 | 0.2340% | 0.1170% | 0.01736% | 0.008678% |
+| goblin king | 334.2 | 0.4010% | 0.2005% | 0.02974% | 0.01487% |
+| mini-boss x1 | 37 | 0.04440% | 0.02220% | 0.003293% | 0.001647% |
+| mini-boss x3 +3 overshield | 244.2 | 0.2930% | 0.1465% | 0.02173% | 0.01087% |
+| act boss x1 | 2500 | 3.00% | 1.50% | 0.2225% | 0.1113% |
+| act boss x1 +1 overshield | 3125 | 3.75% | 1.875% | 0.2781% | 0.1391% |
+| act boss x1 +2 overshield | 3750 | 4.50% | 2.25% | 0.3338% | 0.1669% |
+| act boss x1 +3 overshield | 4375 | 5.25% | 2.625% | 0.3894% | 0.1947% |
+| act boss x2 | 4375 | 5.25% | 2.625% | 0.3894% | 0.1947% |
+| act boss x2 +1 overshield | 5468.75 | 6.5625% | 3.2813% | 0.4867% | 0.2434% |
+| act boss x2 +2 overshield | 6562.5 | 7.875% | 3.9375% | 0.5841% | 0.2920% |
+| act boss x2 +3 overshield | 7656.25 | 9.1875% | 4.5938% | 0.6814% | 0.3407% |
+| act boss x3 | 6250 | 7.50% | 3.75% | 0.5563% | 0.2781% |
+| act boss x3 +1 overshield | 7812.5 | 9.375% | 4.6875% | 0.6953% | 0.3477% |
+| act boss x3 +2 overshield | 9375 | 11.25% | 5.625% | 0.8344% | 0.4172% |
+| act boss x3 +3 overshield | 16668.75 | 20.00% | 10.00% | 1.484% | 0.7418% |
+| chest r0 | 11.14 | 0.01337% | 0.006684% | 0.0009915% | 0.0004957% |
+| chest r1 | 16.71 | 0.02005% | 0.01003% | 0.001487% | 0.0007436% |
+| chest r2 | 26.06 | 0.03127% | 0.01564% | 0.002319% | 0.001160% |
+| chest r3 | 34.2 | 0.04104% | 0.02052% | 0.003044% | 0.001522% |
+| chest r4 | 89.12 | 0.1069% | 0.05347% | 0.007932% | 0.003966% |
+| vault chest r0 | 10.65 | 0.01278% | 0.006390% | 0.0009479% | 0.0004739% |
+| vault chest r1 | 19.15 | 0.02298% | 0.01149% | 0.001704% | 0.0008522% |
+| vault chest r2 | 37.83 | 0.04540% | 0.02270% | 0.003367% | 0.001683% |
+| vault chest r3 | 67.32 | 0.08078% | 0.04039% | 0.005991% | 0.002996% |
+| vault chest r4 | 133.71 | 0.1605% | 0.08023% | 0.01190% | 0.005950% |
+

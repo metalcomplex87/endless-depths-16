@@ -27,13 +27,13 @@ const out = { consts: C, sources: {}, prismatic: {}, killPath: {}, chestPath: {}
 {
   const EW = { NK_W_NORM: 1.28, NK_W_RARE: 3.78, NK_W_ELITE: 7.75, NK_W_ROYAL: 44.56, NK_W_SE: 66.84, NK_W_UE: 111.4, NK_W_GOB: 139.3, NK_W_HUNT: 195, NK_W_KING: 334.2, NK_W_MINI: 37, NK_W_MINI_PM: 1, NK_W_MINI_OV: 0.4, NK_W_ACT: 2500, NK_W_ACT_PM: 0.75, NK_W_OVSH: 0.25, NK_W_ACT_J: 1.524, NK_W_CHEST: [11.14, 16.71, 26.06, 34.2, 89.12], NK_W_VCHEST: [10.65, 19.15, 37.83, 67.32, 133.71] };
   const bad = Object.entries(EW).filter(([k, v]) => JSON.stringify(C.NK_W[k]) !== JSON.stringify(v));
-  rec("reworked weights are in the build (NK_BASE 1.2e-5, NK_BASE_E 8.9e-7)", bad.length === 0 && C.NK_BASE === 0.000012 && C.NK_BASE_E === 0.00000089, bad.length ? JSON.stringify(bad) : JSON.stringify({ NK_BASE: C.NK_BASE, NK_BASE_E: C.NK_BASE_E }));
+  rec("reworked weights are in the build (NK_BASE 6e-6, NK_BASE_E 4.45e-7; half of spec D)", bad.length === 0 && C.NK_BASE === 6e-6 && C.NK_BASE_E === 4.45e-7, bad.length ? JSON.stringify(bad) : JSON.stringify({ NK_BASE: C.NK_BASE, NK_BASE_E: C.NK_BASE_E }));
   const actP = []; for (let pm = 1; pm <= 3; pm++) for (let ov = 0; ov <= 3; ov++) actP.push({ pm, ov, p: Math.min(0.9, C.NK_BASE * C.NK_W.NK_W_ACT * (1 + C.NK_W.NK_W_ACT_PM * (pm - 1)) * (1 + C.NK_W.NK_W_OVSH * ov) * (pm === 3 && ov === 3 ? C.NK_W.NK_W_ACT_J : 1)) });
   const mono = actP.every((a) => actP.every((b) => !(b.pm >= a.pm && b.ov >= a.ov && (b.pm > a.pm || b.ov > a.ov)) || b.p > a.p));
   const top = actP.find((a) => a.pm === 3 && a.ov === 3).p, maxOther = Math.max(...actP.filter((a) => !(a.pm === 3 && a.ov === 3)).map((a) => a.p));
   const nonBossMax = Math.max(C.NK_W.NK_W_KING, C.NK_W.NK_W_HUNT, C.NK_W.NK_W_MINI * (1 + 2 * C.NK_W.NK_W_MINI_PM) * (1 + 3 * C.NK_W.NK_W_MINI_OV), ...C.NK_W.NK_W_VCHEST, ...C.NK_W.NK_W_CHEST) * C.NK_BASE;
-  rec("every non-boss source sits well below the basic act boss (3%)", nonBossMax < actP[0].p / 2, "best non-boss " + (nonBossMax * 100).toFixed(2) + "%");
-  rec("act boss chance rises with boss power and with overshields; x3 + 3 overshields is the only one at 20% (all others < 15%), x1 at 3%", mono && top > maxOther && Math.abs(top - 0.2) < 0.001 && maxOther < 0.15 && Math.abs(actP[0].p - 0.03) < 0.0005, "x1 " + (actP[0].p * 100).toFixed(2) + "% ... x3+3 " + (top * 100).toFixed(2) + "%");
+  rec("every non-boss source sits well below the basic act boss (1.5%)", nonBossMax < actP[0].p / 2, "best non-boss " + (nonBossMax * 100).toFixed(2) + "%");
+  rec("act boss chance rises with boss power and with overshields; x3 + 3 overshields is the only one at 10% (all others < 7.5%), x1 at 1.5%", mono && top > maxOther && Math.abs(top - 0.1) < 0.001 && maxOther < 0.075 && Math.abs(actP[0].p - 0.015) < 0.0005, "x1 " + (actP[0].p * 100).toFixed(2) + "% ... x3+3 " + (top * 100).toFixed(2) + "%");
 }
 
 // 1) depth gate: boosted to the 90% cap, depth 100 -> nothing; depth 101 -> drops
