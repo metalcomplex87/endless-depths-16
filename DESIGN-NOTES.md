@@ -181,21 +181,24 @@ General rules for this update:
     0.4% (depth 26-51), 0.7% (depth 101), 1.1% (depth 201-501).
   - Raised from 0.1% (1 in 1000) on 2026-11-18. A cave is now several times more common than a Prismatic drop
     on those floors; it had been 4-11x rarer.
-- **Shape:** a fixed pocket cut into solid rock: a 3x3 lava moat, a landing tile, a hidden door, a 3x3 chamber and a pedestal.
+- **Shape:** a U-shaped fortress of indestructible metal. The open side is a 3x3 lava moat — the only entry.
+  Immediately behind the lava, inside the U, is a small open space (3x2) with the prize (artifact or Resplendent
+  Chest) on the first tile after the moat. There is no hidden door and no extra wall between the lava and the prize.
+  The arms and a thick back of the 5x9 block stay solid, so you cannot go around or dig in from behind.
 - **Look:** the pocket's indestructible walls are a dark exotic alloy — plated steel with gold rivets, a brass
   bevel around the vault, and a faint iridescent shimmer — so the structure stands out from ordinary rock in
   the main view. On the minimap those tiles are a pulsing gold-brass, distinct from normal wall purple.
 - **The sealing rule:** pocket walls cannot be destroyed. Wall Breaker, cracks, ultimates and Paramount wall-ripping
   all skip them (`artLocked`).
   - Hazards, pools, melting and teleports never touch the pocket.
-  - There are exactly two ways across:
+  - There are exactly two ways in, both across the lava:
     1. a Lavastrider item (water is now always walkable, but the moat is lava);
     2. a Paramount, which turns the moat into obsidian.
-  - The connectivity test proves this every time:
-    - not reachable without the affix, even after wall attacks and a single ult;
+  - Once you cross, the prize is directly reachable. The connectivity test proves this every time:
+    - the prize is not reachable without the affix, even after wall attacks and a single ult;
     - reachable with the affix;
     - reachable after a Paramount;
-    - 0 locked walls broken.
+    - 0 locked walls broken; no entry through the outer metal.
 - **Either-or rule:** every cave holds exactly ONE prize. It is an ancient artifact OR a Resplendent Chest, never both
   and never empty.
   - The split is 50/50 per cave, decided when the cave is generated. The cave spawn rate is unchanged.
@@ -594,3 +597,13 @@ Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
 - Tiers are now 25 / 40 / 60 / 80 / 100 / 130 (was 25 / 60 / 110 / 170 / 240 / 300). Gold and Prismatic
   chance interpolate between tiers. The HUD shows kills against the 25 threshold, then against the next tier,
   plus the tier reached. Necklace rates were not changed.
+
+### Artifact cave is a U-shaped metal fortress (2026-11-18 ~8:50 PM CT)
+- Cause of the dead end: the hidden door tile sat inside `artLocked`, so it rendered as the same
+  indestructible alloy as the rest of the vault. After crossing the lava (Lavastrider or Paramount
+  obsidian) the hero met that wall; pickaxe and Paramount could not open it. A bump-to-open path
+  existed in code, but the door was easy to miss and the prize stayed walled off.
+- Fix: dropped the hidden door and the separate sealed chamber. The vault is a U of alloy walls
+  (same plated look, gold rivets and brass trim). Lava fills the open side and is the only entry.
+  The prize sits in the open space immediately behind the lava and is reachable as soon as you cross.
+  The back and sides stay indestructible. Spawn odds and loot are unchanged.

@@ -15513,14 +15513,13 @@ function unpackArts(raw: unknown): number[] {
   if (typeof raw !== "string" || !raw) return [];
   return [...new Set(raw.split(".").map((p: string) => parseInt(p, 36)).filter((n: number) => isFinite(n) && n >= 0 && n < ART_N))];
 }
-// Layout (s = depth into the rock from the room, q = sideways), all carved out of a solid 5x9 block of rock:
-//   s=0..2, q=-1..1  lava moat (3x3) opening onto the room at s=-1
-//   s=3,    q=-1..1  landing
-//   s=4,    q=0      hidden door (wall with a faint glowing crack)
-//   s=5..7, q=-1..1  sealed chamber, pedestal at s=6, q=0
-// Every wall tile of the block (s=0..8, q=-2..2) is indestructible, so the only ways in are the lava-walking affix or
-// a Paramount turning the moat into obsidian.
+// Layout (s = depth into the rock from the room, q = sideways): a U-shaped 5x9 indestructible metal fortress.
+//   s=0..2, q=-1..1  lava moat (3x3) filling the open side of the U — the only entry
+//   s=3..4, q=-1..1  open space inside the U; the prize sits at s=3, q=0, immediately behind the lava
+//   all other tiles in s=0..8, q=-2..2 stay solid metal (the arms and a thick back), so you cannot
+//   go around or dig in from behind. No door, no separate sealed chamber.
 const ART_POCKET_S = 8, ART_POCKET_Q = 2;
+const ART_ROOM_S0 = 3, ART_ROOM_S1 = 4, ART_PRIZE_S = 3;
 function packArtCave(a: ArtCave | null | undefined): ArtCave | null {
   if (!a || !inb(a.dx, a.dy) || !inb(a.cx, a.cy)) return null;
   const o: ArtCave = { dx: a.dx | 0, dy: a.dy | 0, cx: a.cx | 0, cy: a.cy | 0 };
@@ -15593,8 +15592,8 @@ function drawArtMetalWall(ctx: CanvasRenderingContext2D, g: Game, x: number, y: 
   ctx.fillRect(sx + 1, sy + 1, TS - 2, 1);
 }
 
-// The landing/chamber behind the moat (used so a player who got in can always walk back out over the moat).
-function artInside(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= 3 && p.s <= 7 && Math.abs(p.q) <= 1; }
+// Floor inside the U (and the old deeper chamber, so a mid-run save with the previous layout can still walk out).
+function artInside(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= ART_ROOM_S0 && p.s <= 7 && Math.abs(p.q) <= 1 && g.map[y * MW + x] !== 0; }
 function artSpotOk(g: Game, ox: number, oy: number, sx: number, sy: number): boolean {
   const at = (s0: number, q0: number): number[] => [ox + s0 * sx - q0 * sy, oy + s0 * sy + q0 * sx];
   for (let s0 = 0; s0 <= ART_POCKET_S; s0++) for (let q0 = -ART_POCKET_Q; q0 <= ART_POCKET_Q; q0++) {
@@ -15631,10 +15630,10 @@ function maybeSpawnArtifactCave(g: Game): boolean {
       const at = (s0: number, q0: number): number => (oy + s0 * sy + q0 * sx) * MW + (ox + s0 * sx - q0 * sy);
       if (!g.hz || g.hz.length !== MW * MH) g.hz = new Uint8Array(MW * MH);
       for (let s0 = 0; s0 <= 2; s0++) for (let q0 = -1; q0 <= 1; q0++) { const t = at(s0, q0); g.map[t] = 1; g.hz[t] = HZ_LAVA; g.seen[t] = 0; }
-      for (let q0 = -1; q0 <= 1; q0++) { const t = at(3, q0); g.map[t] = 1; g.hz[t] = 0; g.seen[t] = 0; }
-      for (let s0 = 5; s0 <= 7; s0++) for (let q0 = -1; q0 <= 1; q0++) { const t = at(s0, q0); g.map[t] = 1; g.hz[t] = 0; g.seen[t] = 0; }
-      const d = at(4, 0), c = at(6, 0);
-      g.artCave = { dx: d % MW, dy: (d / MW) | 0, cx: c % MW, cy: (c / MW) | 0, ox, oy, sx, sy };
+      for (let s0 = ART_ROOM_S0; s0 <= ART_ROOM_S1; s0++) for (let q0 = -1; q0 <= 1; q0++) { const t = at(s0, q0); g.map[t] = 1; g.hz[t] = 0; g.seen[t] = 0; }
+      const c = at(ART_PRIZE_S, 0);
+      // open=1 and dx/dy on the prize: there is no hidden door. packArtCave still requires dx,dy to be in bounds.
+      g.artCave = { dx: c % MW, dy: (c / MW) | 0, cx: c % MW, cy: (c / MW) | 0, ox, oy, sx, sy, open: 1 };
       if (rc) g.artCave.rc = 1;
       g.en = g.en.filter((e: En) => !artInBlock(g, e.x, e.y));
       return true;
@@ -18404,12 +18403,13 @@ function hzRequiredOk(g: Game): { ok: boolean; bad: string[] } {
 function artAccessTest(g: Game): Record<string, unknown> {
   const a = g.artCave; if (!a || a.ox === undefined) return { ok: false, error: "no cave" };
   const at = (s0: number, q0: number): number[] => [a.ox! + s0 * a.sx! - q0 * a.sy!, a.oy! + s0 * a.sy! + q0 * a.sx!];
-  const [lx, ly] = at(3, 0), [fx, fy] = at(-1, 0);
+  const [lx, ly] = at(ART_PRIZE_S, 0), [fx, fy] = at(-1, 0), [bx, by] = at(ART_PRIZE_S, 1);
+  const pk = a.cy * MW + a.cx;
   const hz0 = g.hz ? g.hz.slice() : new Uint8Array(MW * MH), map0 = g.map.slice(), cr0 = g.cracks ? g.cracks.slice() : null, hx = g.hero.x, hy = g.hero.y, ch0 = g.chests.slice();
   const restore = (): void => { g.hz = hz0.slice(); g.map = map0.slice(); g.cracks = cr0 ? cr0.slice() : undefined; g.hero.x = g.hero.ax = hx; g.hero.y = g.hero.ay = hy; g.chests = ch0.slice(); };
-  const reachNo = (): boolean => !!hzBfs(g, g.hz || new Uint8Array(MW * MH), g.hero.x, g.hero.y)[ly * MW + lx];
-  const reachWW = (): boolean => { const hz = (g.hz || new Uint8Array(MW * MH)).map((v: number) => (v === HZ_LAVA || v === HZ_WATER ? 0 : v)); return !!hzBfs(g, hz, g.hero.x, g.hero.y)[ly * MW + lx]; };
-  const out: Record<string, unknown> = { ok: true, front: [fx, fy], landing: [lx, ly], door: [a.dx, a.dy], pedestal: [a.cx, a.cy], prize: a.rc ? "chest" : "artifact" };
+  const reachNo = (): boolean => !!hzBfs(g, g.hz || new Uint8Array(MW * MH), g.hero.x, g.hero.y)[pk];
+  const reachWW = (): boolean => { const hz = (g.hz || new Uint8Array(MW * MH)).map((v: number) => (v === HZ_LAVA || v === HZ_WATER ? 0 : v)); return !!hzBfs(g, hz, g.hero.x, g.hero.y)[pk]; };
+  const out: Record<string, unknown> = { ok: true, front: [fx, fy], landing: [lx, ly], beside: [bx, by], door: null, pedestal: [a.cx, a.cy], prize: a.rc ? "chest" : "artifact", prizeAt: [a.cx, a.cy] };
   out.noAffix = reachNo();
   out.withAffix = reachWW();
   // hero-move check: step by step without the affix from the front tile into the moat must be refused

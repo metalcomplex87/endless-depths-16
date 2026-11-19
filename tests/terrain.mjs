@@ -92,30 +92,26 @@ async function main() {
       record("artifact pocket: unreachable without affix/Paramount; reachable with affix; reachable after Paramount; no wall route", acc.noAffix === false && acc.withAffix === true && acc.moveBlockedNoAffix === true && acc.wallsBroken === 0 && acc.noAffixAfterWallAttacks === false && acc.noAffixAfterUlt === false && acc.reachAfterParamount === true, acc);
       await H(page, "force", {});
       await H(page, "gotoFront", 1);
-      await H(page, "cam", acc.landing[0], acc.landing[1]);
+      await H(page, "cam", acc.prizeAt[0], acc.prizeAt[1]);
       await shot(page, "screenshots-caves", "artifact-lava-moat-sealed-closed", 900);
-      await H(page, "openDoor");
       await H(page, "revealArt");
       await shot(page, "screenshots-caves", "artifact-lava-moat-sealed", 900);
       await H(page, "cam", null); await H(page, "revealArt", false);
       await page.evaluate(() => { const g = document.querySelector(".dc-root"); });
-      // minimap view
-      // walk in with the affix
+      // walk in with the affix: three steps over the lava, then bump the prize immediately behind it
       await H(page, "ww", true);
       const steps = [];
       const a = acc;
-      const dir = [a.landing[0] - a.front[0], a.landing[1] - a.front[1]].map((v) => Math.sign(v));
+      const dir = [a.prizeAt[0] - a.front[0], a.prizeAt[1] - a.front[1]].map((v) => Math.sign(v));
       await H(page, "goto", a.front[0], a.front[1]);
-      for (let i = 0; i < 4; i++) steps.push(await H(page, "step", dir[0], dir[1]));
-      const st = await H(page, "state");
-      record("with the affix the hero walks over the lava moat to the landing", st.hero[0] === a.landing[0] && st.hero[1] === a.landing[1], { steps, hero: st.hero });
-      steps.push(await H(page, "step", dir[0], dir[1])); // bump the door
-      const st2 = await H(page, "state");
-      await shot(page, "screenshots-caves", "artifact-chamber-open", 900, "banner");
-      // inside chamber: step through door then bump pedestal
       for (let i = 0; i < 3; i++) steps.push(await H(page, "step", dir[0], dir[1]));
+      const st = await H(page, "state");
+      const nearPrize = Math.abs(st.hero[0] - a.prizeAt[0]) + Math.abs(st.hero[1] - a.prizeAt[1]) === 1;
+      record("with the affix the hero walks over the lava moat to the prize", nearPrize, { steps, hero: st.hero, prize: a.prizeAt });
+      steps.push(await H(page, "step", dir[0], dir[1])); // bump the prize
       const st3 = await H(page, "state");
-      record("door opens; pedestal grants an artifact (1/50)", st3.arts === 1 && st3.art && st3.art.taken === 1, { st2: st2.art, st3: { arts: st3.arts, art: st3.art, hero: st3.hero } });
+      await shot(page, "screenshots-caves", "artifact-chamber-open", 900, "banner");
+      record("crossing the lava lets the hero bump the prize (artifact 1/50)", st3.arts === 1 && st3.art && st3.art.taken === 1, { arts: st3.arts, art: st3.art, hero: st3.hero });
       await sleep(300);
       await shot(page, "screenshots-caves", "artifact-discovery", 400, "reveal");
       // walk back out without the affix (escape rule)
@@ -135,13 +131,14 @@ async function main() {
       await H(page, "force", {});
       const acc2 = await H(page, "artAccess");
       record("chest pocket sealed the same way", acc2.noAffix === false && acc2.withAffix === true && acc2.reachAfterParamount === true && acc2.wallsBroken === 0, acc2);
-      await H(page, "openDoor");
       await H(page, "gotoFront", 1);
-      await H(page, "cam", acc2.landing[0], acc2.landing[1]);
+      await H(page, "cam", acc2.prizeAt[0], acc2.prizeAt[1]);
       await H(page, "revealArt");
       await shot(page, "screenshots-caves", "resplendent-lava-moat-sealed", 900);
       await H(page, "cam", null); await H(page, "revealArt", false);
-      await H(page, "goto", acc2.landing[0], acc2.landing[1]);
+      const beside = acc2.beside || acc2.landing;
+      await H(page, "ww", true);
+      await H(page, "goto", beside[0], beside[1]);
       await shot(page, "screenshots-caves", "resplendent-chest", 900);
       const op = await H(page, "openPedestal");
       record("Resplendent Chest = triple act-boss (3 overshields) hoard, no artifact", op.chestItems > 0 && op.artsGained === 0, op);
