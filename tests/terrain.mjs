@@ -245,8 +245,8 @@ async function main() {
       const b = await H(page, "buried", 20);
       await H(page, "force", {});
       record("buried chests capped at 2 per floor", b.buried === 2, b);
-      const pc = await H(page, "petChestTarget");
-      record("pet never targets a chest", pc.kind !== "chest", pc);
+      const pl = await H(page, "petLootChest");
+      record("pet auto-opens a nearby chest and collects the loot without the hero moving", !!(pl.collected && pl.targeted && pl.heroStill && pl.opened), pl);
     }
     if (want("sock")) {
       const t = await H(page, "sockTest");

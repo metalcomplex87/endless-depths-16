@@ -14715,7 +14715,12 @@ function petLootTarget(g: Game): { kind: "drop" | "chest"; x: number; y: number;
     const d = Math.abs(dr.x - h.x) + Math.abs(dr.y - h.y);
     if (d < bd && d <= PET_LOOT_RANGE) { bd = d; best = { kind: "drop", x: dr.x, y: dr.y, drop: dr }; }
   }
-  // Item 21: pets no longer open chests (any kind) - only the hero does; the pet still collects what spills out.
+  // Pets auto-open unopened chests in range (restored 2026-11-19; Item 21 had disabled this).
+  for (const c of g.chests) {
+    if (c.open) continue;
+    const d = Math.abs(c.x - h.x) + Math.abs(c.y - h.y);
+    if (d < bd && d <= PET_LOOT_RANGE) { bd = d; best = { kind: "chest", x: c.x, y: c.y, chest: c }; }
+  }
   return best;
 }
 
@@ -20490,7 +20495,50 @@ try {
     setArts: (n: number): void => { const g = LIVE; if (g) g.arts = Array.from({ length: Math.max(0, Math.min(ART_N, n)) }, (_: unknown, i: number) => i); },
     trophy: (open: boolean): void => { const g = LIVE; if (g) { g.trophyOpen = open; g.notify(); } },
     buried: (n: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; let broken = 0, made = 0; for (let k = 0; k < MW * MH && broken < n; k++) { const x = k % MW, y = (k / MW) | 0; if (g.map[k] === 0 && canBreakWall(g, x, y) && Math.abs(x - g.hero.x) + Math.abs(y - g.hero.y) < 12) { const c0 = g.chests.length; breakWallTile(g, x, y); if (g.map[k] === 1) broken++; if (g.chests.length > c0) made++; } } return { ok: true, broken, made, buried: g.chests.filter((c: Chest) => c.bur).length }; },
-    petChestTarget: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const t = petLootTarget(g); return { ok: true, kind: t ? t.kind : null }; },
+    petChestTarget: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const t = petLootTarget(g); return { ok: true, kind: t ? t.kind : null, x: t ? t.x : null, y: t ? t.y : null }; },
+    // Headless check: a pet opens a nearby chest and the loot is collected with no hero movement.
+    petLootChest: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false, error: "no game" };
+      const area0 = g.area, mode0 = g.mode;
+      g.area = "dungeon"; g.mode = "play";
+      if (!g.eq.pet || g.eq.pet.kind !== "pet") g.eq.pet = makePet(Math.max(1, g.lvl), 3, g.depth);
+      const hx = g.hero.x, hy = g.hero.y;
+      let cx = hx + 2, cy = hy;
+      if (!inb(cx, cy)) { cx = hx - 2; cy = hy; }
+      if (!inb(cx, cy)) { cx = hx; cy = hy + 2; }
+      if (!inb(cx, cy)) { cx = hx; cy = hy - 2; }
+      if (!inb(cx, cy)) { g.area = area0; g.mode = mode0; return { ok: false, error: "no tile" }; }
+      const c: Chest = { x: cx, y: cy, open: false, rar: 1 };
+      g.drops = [];
+      g.chests = [c];
+      const gold0 = g.gold, bag0 = g.bag.length, gem0 = ensureGemBag(g).length;
+      PETP.ok = true; PETP.x = hx * TS + 12; PETP.y = hy * TS + 12;
+      const tgt = petLootTarget(g);
+      let openedAt = -1;
+      for (let i = 0; i < 120; i++) {
+        petFollow(g, 0.05);
+        if (c.open && openedAt < 0) openedAt = i;
+        if (c.open && g.drops.length === 0 && i > openedAt) break;
+      }
+      const leftover = g.drops.filter((d: Drop) => Math.abs((d.x | 0) - cx) + Math.abs((d.y | 0) - cy) <= 2).length;
+      const goldGain = g.gold - gold0;
+      const bagGain = g.bag.length - bag0;
+      const gemGain = ensureGemBag(g).length - gem0;
+      const out = {
+        ok: true,
+        targeted: !!(tgt && tgt.kind === "chest" && tgt.chest === c),
+        opened: !!c.open,
+        openedAt,
+        heroStill: g.hero.x === hx && g.hero.y === hy,
+        goldGain,
+        bagGain,
+        gemGain,
+        leftover,
+        collected: !!c.open && goldGain > 0 && leftover === 0,
+      };
+      g.area = area0; g.mode = mode0;
+      return out;
+    },
     sockTest: (): Record<string, unknown> => {
       const rows: Record<string, unknown>[] = [];
       for (let n = 0; n <= 8; n++) for (const pat of ["none", "alt", "all", "first"]) {

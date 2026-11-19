@@ -256,7 +256,7 @@ General rules for this update:
 - Both results are saved with the floor. Legacy dry-pit tiles from older saves stay walkable but are no longer created.
 
 ### Item 21 — Pets and chests; buried chests
-- **Pets:** they no longer open any chest (dungeon, Resplendent or camp pet chest), but still pick up what drops out.
+- **Pets:** they auto-open unopened chests in range and pick up what drops out (Item 21 briefly disabled chest opening; restored 2026-11-19). Camp is unchanged: pet auto-loot does not run in camp.
 - **Buried chests:** each wall tile destroyed by Wall Breaker or Paramount has a 4% chance to reveal a buried chest.
   - Cap: 2 per floor. They appear only where wall destruction is allowed.
   - The chest has normal rarity for the depth, comes with a dust burst and the message "Buried chest uncovered!",
