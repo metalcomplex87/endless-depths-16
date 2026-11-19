@@ -1,0 +1,261 @@
+{
+ "normal": {
+  "n": 305879,
+  "p1": 0.000030802193430020476,
+  "expPerKill": 0.00003080219343001947,
+  "sampled": 10,
+  "expected": 9.4
+ },
+ "elite": {
+  "n": 93756,
+  "p1": 0.00018610170680856988,
+  "expPerKill": 0.0001861017068085583,
+  "sampled": 17,
+  "expected": 17.4
+ },
+ "rare pack": {
+  "n": 72420,
+  "p1": 0.00009087018891146716,
+  "expPerKill": 0.00009087018891147287,
+  "sampled": 4,
+  "expected": 6.6
+ },
+ "super elite": {
+  "n": 17647,
+  "p1": 0.006231335818064059,
+  "expPerKill": 0.0062396735983196935,
+  "sampled": 131,
+  "expected": 110.1
+ },
+ "chest r2": {
+  "n": 7524,
+  "p1": 0.000625520138769243,
+  "expPerKill": 0.0006256328849775679,
+  "sampled": 4,
+  "expected": 4.7
+ },
+ "chest r0": {
+  "n": 20232,
+  "p1": 0.0003041101441624797,
+  "expPerKill": 0.00030412247235781187,
+  "sampled": 9,
+  "expected": 6.2
+ },
+ "chest r1": {
+  "n": 11498,
+  "p1": 0.00042958108932068703,
+  "expPerKill": 0.00042962933194126853,
+  "sampled": 3,
+  "expected": 4.9
+ },
+ "goblin (loot/gem/gold)": {
+  "n": 5917,
+  "p1": 0.015112676231706963,
+  "expPerKill": 0.015256530697454848,
+  "sampled": 103,
+  "expected": 90.3
+ },
+ "chest r3": {
+  "n": 3230,
+  "p1": 0.0008208021095434544,
+  "expPerKill": 0.0008210324924008034,
+  "sampled": 0,
+  "expected": 2.7
+ },
+ "vault chest r0": {
+  "n": 1912,
+  "p1": 0.00025570198922757024,
+  "expPerKill": 0.0002557019892275829,
+  "sampled": 0,
+  "expected": 0.5
+ },
+ "vault chest r4": {
+  "n": 847,
+  "p1": 0.0032092508773049473,
+  "expPerKill": 0.0032139394507375734,
+  "sampled": 3,
+  "expected": 2.7
+ },
+ "vault chest r1": {
+  "n": 2917,
+  "p1": 0.00045966213150144667,
+  "expPerKill": 0.0004597719696573916,
+  "sampled": 2,
+  "expected": 1.3
+ },
+ "vault chest r2": {
+  "n": 2552,
+  "p1": 0.0009079938279490938,
+  "expPerKill": 0.0009085335368306962,
+  "sampled": 1,
+  "expected": 2.3
+ },
+ "mini-boss x1 +1 overshield": {
+  "n": 126,
+  "p1": 0.0013124224590279339,
+  "expPerKill": 0.0013131610258370846,
+  "sampled": 1,
+  "expected": 0.2
+ },
+ "mini-boss x1": {
+  "n": 164,
+  "p1": 0.000906086829915376,
+  "expPerKill": 0.0009064381930228893,
+  "sampled": 0,
+  "expected": 0.1
+ },
+ "hunter": {
+  "n": 291,
+  "p1": 0.02607885686608893,
+  "expPerKill": 0.0263515096994815,
+  "sampled": 9,
+  "expected": 7.7
+ },
+ "chest r4": {
+  "n": 1159,
+  "p1": 0.002309225985534413,
+  "expPerKill": 0.0023112436781146644,
+  "sampled": 3,
+  "expected": 2.7
+ },
+ "mini-boss x2 +3 overshield": {
+  "n": 628,
+  "p1": 0.004569390590304477,
+  "expPerKill": 0.004579186808120336,
+  "sampled": 3,
+  "expected": 2.9
+ },
+ "mini-boss x1 +3 overshield": {
+  "n": 671,
+  "p1": 0.0022423248513541148,
+  "expPerKill": 0.0022445220040364726,
+  "sampled": 3,
+  "expected": 1.5
+ },
+ "ultra elite": {
+  "n": 1759,
+  "p1": 0.010689625088710604,
+  "expPerKill": 0.010726382764260247,
+  "sampled": 28,
+  "expected": 18.9
+ },
+ "vault chest r3": {
+  "n": 1619,
+  "p1": 0.0016157717255311115,
+  "expPerKill": 0.0016174860159932623,
+  "sampled": 2,
+  "expected": 2.6
+ },
+ "royal goblin": {
+  "n": 207,
+  "p1": 0.0017840105934985634,
+  "expPerKill": 0.0017847904932780595,
+  "sampled": 0,
+  "expected": 0.4
+ },
+ "goblin king": {
+  "n": 23,
+  "p1": 0.02606742991681945,
+  "expPerKill": 0.02632744046292711,
+  "sampled": 0,
+  "expected": 0.6
+ },
+ "mini-boss x1 +2 overshield": {
+  "n": 79,
+  "p1": 0.0016101195574278317,
+  "expPerKill": 0.0016112260555158284,
+  "sampled": 0,
+  "expected": 0.1
+ },
+ "mini-boss x3 +3 overshield": {
+  "n": 612,
+  "p1": 0.006831344540046345,
+  "expPerKill": 0.006853775162207579,
+  "sampled": 8,
+  "expected": 4.2
+ },
+ "act boss x3": {
+  "n": 1290,
+  "p1": 0.22472604985118474,
+  "expPerKill": 0.25375122176787035,
+  "sampled": 294,
+  "expected": 327.3
+ },
+ "act boss x3 +1 overshield": {
+  "n": 1008,
+  "p1": 0.2506994706870021,
+  "expPerKill": 0.2876700347754428,
+  "sampled": 293,
+  "expected": 290
+ },
+ "act boss x3 +2 overshield": {
+  "n": 609,
+  "p1": 0.27440442820185457,
+  "expPerKill": 0.31961408829907456,
+  "sampled": 187,
+  "expected": 194.6
+ },
+ "act boss x2": {
+  "n": 1284,
+  "p1": 0.15748078242689817,
+  "expPerKill": 0.17074592214622938,
+  "sampled": 223,
+  "expected": 219.2
+ },
+ "act boss x1 +2 overshield": {
+  "n": 648,
+  "p1": 0.10178244230623384,
+  "expPerKill": 0.1068604939555162,
+  "sampled": 66,
+  "expected": 69.2
+ },
+ "act boss x1": {
+  "n": 1192,
+  "p1": 0.08140870087858534,
+  "expPerKill": 0.08454853646488612,
+  "sampled": 94,
+  "expected": 100.8
+ },
+ "act boss x1 +1 overshield": {
+  "n": 927,
+  "p1": 0.09130937323312178,
+  "expPerKill": 0.0953263516153549,
+  "sampled": 79,
+  "expected": 88.4
+ },
+ "act boss x1 +3 overshield": {
+  "n": 307,
+  "p1": 0.10938008251968664,
+  "expPerKill": 0.1153019558312079,
+  "sampled": 43,
+  "expected": 35.4
+ },
+ "act boss x2 +2 overshield": {
+  "n": 611,
+  "p1": 0.19357228245024694,
+  "expPerKill": 0.21427717241115485,
+  "sampled": 124,
+  "expected": 130.9
+ },
+ "act boss x2 +1 overshield": {
+  "n": 929,
+  "p1": 0.175666483887054,
+  "expPerKill": 0.19245027403486506,
+  "sampled": 178,
+  "expected": 178.8
+ },
+ "act boss x3 +3 overshield": {
+  "n": 303,
+  "p1": 0.29898756084548267,
+  "expPerKill": 0.35392368881837055,
+  "sampled": 114,
+  "expected": 107.2
+ },
+ "act boss x2 +3 overshield": {
+  "n": 286,
+  "p1": 0.21143174045759555,
+  "expPerKill": 0.23658249420270755,
+  "sampled": 55,
+  "expected": 67.7
+ }
+}

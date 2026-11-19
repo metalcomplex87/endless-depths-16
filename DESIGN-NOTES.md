@@ -444,3 +444,115 @@ Only O6 levers changed; player side, A1/C1, Paramount and everything else untouc
 - Saves: bosses scaled by the 13:19 build (`o6` = 1) are un-scaled by their stored factor and re-matched once (`O6_VER` = 2), keeping the HP fraction.
 - Known gap (needs a decision): starred kits that are slow even without O6 (5* at d2000/d3000 ~5.3-5.6 min, 10* at d3000 ~3.5 min) are unchanged, so deep 0* gear now finishes faster than deep 5* gear. Letting the lowering apply to all kits would put 5* at ~2.7/2.0 min and 10* at ~2.2/1.7 min everywhere.
 - Test: tests/o6.mjs (8 checks), hooks o6Tune (test-only), o6Migrate.
+
+## Eternum necklace affixes — chosen so far (Metal Complex voice, 2026-11-18 2:41 PM CT) — NOT YET IMPLEMENTED
+Eight standard necklaces planned; six chosen, two slots open. Colors are suggestions.
+1. Storm Crown [offensive, electric blue]: every third attack calls lightning chaining between up to 6 enemies.
+2. Grave Toll [offensive, ghostly teal]: every enemy you kill rises as a ghost that fights for you for 20 s.
+3. Phalanx of the Dead, war version [offensive, sickly green]: six sword skeletons march around you and stab anything in reach (no blocking); each kill they get gives the group +5% damage, stacking to +50% until you leave the floor; a broken skeleton rebuilds after 4 s; if all six break at once they burst into a bone-shard storm.
+4. Second Heartbeat [protective, crimson]: when you'd die you split into two of you at half HP each; you only die if both fall; the survivor is whole again after 10 s.
+5. Echo Self [offensive, silver]: a ghostly copy of you repeats every attack and spell you used 1 s earlier at full damage.
+6. Snow Globe [protective, frosty ice white]: below 40% HP a glass globe seals you for 3 s (immune) and nearby enemies slide as if on ice; 30 s cooldown.
+Dropped: Titan's Grip, Wound Return (earlier keepers, later replaced), Puppeteer, Bone March.
+
+### Necklace affixes — balance pass (2026-11-18 2:45 PM CT, proposed to user; supersedes numbers above)
+Seven chosen, one slot open. Offensive target ≈ +50% effective damage; protective target ≈ one save per 30–60 s.
+- Storm Crown: every 3rd attack, lightning hits up to 6 enemies at 100% weapon damage each.
+- Grave Toll: killed enemies rise as ghosts for 15 s at 40% of your damage, max 5 at once.
+- Phalanx of the Dead (war): 6 sword skeletons, 8% of your damage each, +5% per kill up to +50% for the floor; rebuild 4 s; all-six-break bone-shard storm.
+- Echo Self: copy repeats attacks/spells 1 s later at 50% damage.
+- Second Heartbeat: on lethal hit split into two at half HP each, both at FULL damage (damage doubles while split); survivor whole after 10 s; 3-minute cooldown.
+- Snow Globe: below 40% HP, 3 s immune globe + enemies slide on ice; 45 s cooldown.
+- Prism Guard [protective, diamond rainbow shimmer, very visible sparkle on character]: diamond shell blocks one full hit every 6 s, then fires a rainbow beam at the attacker for 200% weapon damage.
+
+### Necklace affixes — update 2026-11-18 2:47 PM CT
+- Snow Globe REMOVED (user wants exactly two protective: Second Heartbeat, Prism Guard).
+- NEW Neon Skyfall [offensive, multicolor neon red/green/blue/violet]: while you move, ceiling laser beams strike random enemies within ~5 tiles twice per second for 25% weapon damage each; each leaves a glowing scorch mark burning enemies in it for 10% of your damage per second for 3 s (~+50% effective damage).
+Current seven: Storm Crown, Grave Toll, Phalanx of the Dead (war), Echo Self, Neon Skyfall (offensive); Second Heartbeat, Prism Guard (protective). One slot open.
+
+### Necklace icon gem colors (2026-11-18 2:50 PM CT) — visual/mnemonic only, NOT tied to socketable gems
+Storm Crown sapphire blue; Grave Toll amethyst purple; Phalanx of the Dead (war) peridot lime; Echo Self opal white; Neon Skyfall topaz yellow; Second Heartbeat ruby red; Prism Guard emerald green; 8th (unchosen) reserved citrine orange.
+
+## Eternum necklaces — DEPLOYED with spec D (2026-11-18 ~6:25 PM CT). First implemented locally ~4:45 PM CT.
+Supersedes the earlier drop-rule drafts (depth 201 / ~600 / ~470). Snow Globe removed. Locked rules (Metal Complex voice, 3:40 PM CT):
+- The seven standard necklaces drop only from depth 101 (after depth 100 is completed). Tuned so an average player has all seven around depth 500.
+- Source scaling: normal enemies least likely, rising through rare packs, chests by rarity, elites, vault chests, royal goblins, super/ultra elites, loot goblins, mini-bosses (more with boss power and overshields), hunters, the Goblin King, and act bosses. Act bosses with x2-x3 boss power and up to 3 overshields are by far the most likely.
+- Prismatic Eternum: cannot drop until all seven are owned. Same source scaling. Rarer than any single standard necklace (per roll about 2.8x rarer than one specific necklace). Tuned to about 500 more depths on average after the seventh.
+- Every source stays at least about 4x rarer than a Prismatic item from that same source. The lowest margins are vault chest r0 at about 3.8x (few samples) and act boss x3 +3 overshield at 4.3x.
+
+Code: chance per roll = NK_BASE (0.000012) x weight for any of the seven, picked evenly. Prismatic Eternum = NK_BASE_E (0.00000062) x weight, only once all seven are owned, and only one can be on the ground at a time.
+- Weights: normal 1, rare pack 1.25, chest r0-r4 2/3/6/10/16, vault chests x2, elite 4, royal goblin 8, super elite 12, ultra elite 20, loot/gem/gold goblin 25.
+- More weights: mini-boss 30 x(1 + 0.25 per extra boss-power step) x(1 + 0.25 per overshield), hunter 35, Goblin King 60.
+- Act boss: 4400 x boss power (x1-x3) x(1 + 0.5 per overshield). That ranges from 5.3% (x1) to 39.6% (x3 with 3 overshields) per kill.
+- Swarm and split children never roll. The full per-source table is in tests/nk-drop-table.md.
+
+Simulation (tests/_nkcollect.mjs + _nkmc.mjs): it replayed the game's own genFloor at every depth from 101 to 2500, 3 floors per depth (7,200 floors). Each floor was fully cleared through kill() and openChest(), and every cave/vault/arena portal it rolled was entered and cleared. Then 10,000 simulated players were run on top of that.
+- Gear "full" means a full Prismatic set equipped. That gear unlocks boss power and overshields, and it was used as the tuning baseline.
+- All seven: mean depth 507, median 475, p10 300, p90 760.
+- Prismatic Eternum: mean +497 depths after the seventh (median +338, p10 +55, p90 +1141). That is mean depth 1004, median 865.
+- Sensitivity: a player with NO Prismatic gear gets no boss power or overshields, so collecting is about 3x slower (all seven around depth 1530).
+- Assumes the player clears whole floors and enters the caves. Skipping content pushes these depths later.
+
+Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
+- tests/necklaces.mjs, tests/necklaces2.mjs: depth gating, every source, real kill()/openChest(), Prismatic gating, pet, pickup, duplicates, equip rules, bag section, alert and chime.
+- tests/necklaces3.mjs + _nkbeam.py: the beam screenshot check.
+- tests/nksave.mjs: save round trip on a copy of Richard's save.
+- smoke.mjs ran on a copy root: 14/14. recover.mjs had the same 2 pre-existing failures as the live build's committed results.
+- Icons come from necklace-icons/ (kept out of git and publish) and are embedded as 64 px data URLs.
+
+### Prismatic Eternum drop effect (deployed 2026-11-18 ~6:25 PM CT with spec D)
+- Beam about 2.5–3x wider than a standard necklace: a 200px rainbow glow, 9 rotating hue bands, hue stripes travelling upward, and a pulsing white core that stops just above the gem. The PE icon is redrawn on top so the light never hides it.
+- A 4-ring rainbow halo with a white heart, 64 swirling rising stars, a 40-star falling shower, and a rainbow name bar ("PRISMATIC ETERNUM / wear two necklaces at once").
+- A 2.6 s burst when it drops: a rainbow screen wash, 4 expanding shockwave rings, 24 rays and a 50-star burst. It also adds a white flash of 0.6 and a screen shake of 6.
+- A rainbow banner "PRISMATIC ETERNUM!" / "The rainbow necklace has fallen - follow the light!" that lasts 8 s.
+- A fanfare of about 3 s (nkChime v=7): a 16-note run, a held chord, sparkle pings and high final tones.
+- Standard necklaces are unchanged. Screenshots are in screenshots-necklaces/ (git-ignored).
+
+### Eternum drop rates - rework (local, not deployed — 2026-11-18 ~5:45 PM CT)
+- The act boss x3 + 3 overshields is still the single best source, but it now gives 11.9% for any of the seven (was 39.6%). Act bosses run from 10.0% (x1) to 11.9% and always rise with boss power and with overshields: weight 8300 × (1 + 0.05 per extra power step) × (1 + 0.03 per overshield).
+- Other sources were raised (normal ×3.5, elite ×6.6, chests ×6–12, mini-bosses ×3.7–6.3, goblins/hunters/King ×3–6.4) so the overall pace stays the same:
+  - all seven: mean 509, median 480, p10 314, p90 740
+  - Prismatic Eternum: +500 mean (median +353), reached at depth mean 1009 / median 885
+  - (10,000 players on 7,200 real floors)
+- NK_BASE stays 1.2e-5. NK_BASE_E is 5e-7, so the Prismatic Eternum is about 3.4x rarer per roll than one specific necklace.
+- Rule kept: every source is still rarer than a Prismatic item from the same source. The margin is now thin, about 1.25–1.3x, for normal, rare pack, elite and most chests.
+- Ladder: normal < rare < elite < royal < super < ultra < goblin < hunter < King < mini-bosses < act bosses. Hunters and the King now sit below all mini-bosses.
+- A uniform raise (×11 on every non-boss source) would also hit 500/+500. It breaks the Prismatic rule for 13 sources: normal 2.4x more common, rare pack 2.2x, vault r0 2.9x, mini-bosses up to 2.2x.
+- Full table: tests/nk-drop-table.md. Scripts: tests/_nkrework.mjs, _nkfinal2.mjs, _nkreport.mjs.
+
+### Eternum drop rates - FINAL (user's choice 5:25 PM CT; local, not deployed)
+- **Supersedes the "rework" section above.** The user picked the uniform alternative.
+- **Act bosses:** weight 4400 × (1 + 0.2 per extra power step) × (1 + 0.116 per overshield). That gives 5.3% (x1) up to 10.0% (x3 + 3 overshields, was 39.6%), always rising with power and with overshields.
+- **Every other source:** 11× its original weight. Normal 11, rare 13.75, elite 44, royal 88, super 132, ultra 220, goblin 275, hunter 385, King 660, mini 330 (with the same 0.25/0.25 scaling as before). Chests 22/33/66/110/176; vault chests 44/66/132/220/352.
+- **Base rates:** NK_BASE 1.2e-5, NK_BASE_E 4.6e-7.
+- **Simulation (10,000 players on 7,200 real floors):**
+  - all seven: mean 502, median 470, p10 311, p90 731
+  - Prismatic Eternum: +512 mean (median +375), reached at depth mean 1013 / median 896
+- **Rule the user accepted breaking:** 13 sources are now more common than a Prismatic item from the same source — normal, rare pack, elite, chest r3, vault r0–r3, and the mini-bosses (x1, x1+1, x1+2, x2+3, x3+3). The full numbers are in tests/nk-drop-table.md.
+
+### Eternum drop rates - SPEC C (user, 5:37 PM CT; replaces A and B; local, not deployed)
+- **Act bosses:** weight 2500 × (1 + 0.75 per extra power step) × (1 + 0.5555 per overshield).
+  - x1 is 3.0% for any of the seven; x3 alone is 7.5%.
+  - x3 + 3 overshields is 20.0%, the only case at 20%. The next highest is x3 + 2 at 15.8%.
+- **Every other source:** 5.57× its original weight. The best non-boss source, mini-boss x3 + 3 overshields, is 0.53%.
+- **Base rates:** NK_BASE 1.2e-5, NK_BASE_E 6.5e-7, so the Prismatic Eternum is about 2.6x rarer per roll than one specific necklace.
+- **Simulation (10,000 players on 7,200 real floors):**
+  - all seven: mean 603, median 560, p10 364, p90 890
+  - Prismatic Eternum: +497 mean (median +346), reached at depth mean 1100
+- **Prismatic-item rule (waived by the user):** broken for normal ×1.22, rare pack ×1.12, vault chest r0 ×1.47 and mini-boss x3+3 ×1.12.
+- B's weights are saved in tests/nk-rework-B.json and nk-rework-B-params.json; the table is in tests/nk-drop-table.md.
+
+### Eternum drop rates - SPEC D (user, 5:44/5:45 PM CT; replaces C; DEPLOYED 2026-11-18 ~6:25 PM CT)
+- **Rule:** from every source, a necklace (any of the seven) is at most 0.5x as likely as a Prismatic item from that same source. The one exception is act x3 + 3 overshields: 20%, which is 0.67x its 29.9% Prismatic chance.
+- **How the Prismatic chances were measured:** P(at least one Prismatic item) per kill or chest, at depth 101–110, where Prismatic odds are lowest. They come from the loot formulas: an `NK_PX` test hook adds up the exact Prismatic probability of every roll (rollRar / actLootPick / jackpotRar / seLootPick) during real kill() / openChest() calls. That covered about 590k kills/chests (tests/nk-pris-ref.json). Deeper floors only raise Prismatic odds, so the rule holds at every depth.
+- **Act bosses:** weight 2500 × (1 + 0.75 per extra power step) × (1 + 0.25 per overshield), with an extra ×1.524 only for x3 + 3.
+  - x1 is 3.0%. The next highest after x3 + 3 is x3 + 2 at 11.3%.
+- **Mini-bosses:** 37 × (1 + 1.0 per extra power step) × (1 + 0.4 per overshield).
+- **Other sources:** min(spec C weight, 0.5x the Prismatic cap).
+- **Base rates:** NK_BASE 1.2e-5, NK_BASE_E 8.9e-7.
+- **Simulation (10,000 players on 7,200 real floors):**
+  - all seven: mean 778, median 729, p10 452, p90 1172 — up from 603
+  - Prismatic Eternum: +499 mean (median +347), reached at depth mean 1278
+- **Saved earlier versions:** C in tests/nk-rework-C-final.json; the table is in tests/nk-drop-table.md.
+
+- **Deployed** to https://metalcomplex87.github.io/endless-depths-16/ on 2026-11-18 ~6:25 PM CT (America/Chicago), together with the Prismatic Eternum drop effect and the rest of the necklace system. The test-only `NK_PX` hook stays inert in production unless a test enables it. Necklace rate-tuning scratch (`tests/_nk*`, `tests/nk-rework-*.json`, `screenshots-necklaces/`, `necklace-icons/`) and the usual options/audit/screenshots material were kept out of the publish.

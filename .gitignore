@@ -23,3 +23,11 @@ screenshots-chests/
 screenshots-reaper/
 screenshots-mmboss/
 screenshots-combine/
+necklace-icons/
+tests/nk-floors-*.json
+screenshots-necklaces/
+# necklace rate-tuning scratch: stay on the box, never published
+tests/_nk*
+tests/nk-rework-*.json
+tests/nkfloorshots.mjs
+tests/nk-pris-rates.json
