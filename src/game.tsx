@@ -1938,6 +1938,33 @@ function scalePrisDrop(p: number[], prisIndex: number): number[] {
   }
   return out;
 }
+// ---------- no-Prismatic loot bonus (2026-11-19) ----------
+// A character who owns NO Prismatic gear (rarity 7, Golden included) anywhere (the 7 equipped slots, the bag, or any stash
+// items not yet moved into the bag) gets loot 50% better on kills:
+// item/gem drop chances and counts x1.5 (chances capped at 100%), kill gold x1.5, and every rarity above the base tier
+// x1.5 weight before normalising. Evaluated per kill, so equipping/unequipping applies at once. LOOT_Q is 1 outside kill(),
+// and with LOOT_Q === 1 every function below takes its exact old path (same odds, same RNG draws).
+const LOOT_BONUS = 1.5;
+let LOOT_Q = 1;
+function ownsPrismatic(g: Game): boolean {
+  if (prisGated(g)) return true;
+  for (const it of g.bag) if (it && it.kind !== "gem" && it.rar >= 7) return true;
+  if (Array.isArray(g.stash)) for (const it of g.stash) if (it && it.kind !== "gem" && it.rar >= 7) return true;
+  return false;
+}
+function lootBonusMult(g: Game): number { return ownsPrismatic(g) ? 1 : LOOT_BONUS; }
+function lootQW(w: number[]): number[] { return LOOT_Q === 1 ? w : w.map((v: number, i: number) => (i >= 1 ? v * LOOT_Q : v)); }
+function lootQCh(p: number): number { return LOOT_Q === 1 ? p : Math.min(1, p * LOOT_Q); }
+function lootQN(n: number): number { if (LOOT_Q === 1) return n; const x = n * LOOT_Q, f = Math.floor(x); return f + (R() < x - f ? 1 : 0); }
+function lootQPick9(p0: number[]): { rar: number; set: boolean } | null {
+  if (LOOT_Q === 1) return null;
+  const p = lootQW(p0);
+  let tot = 0; for (const v of p) tot += v;
+  if (NK_PX && tot > 0) nkPx(p[8] / tot);
+  let r = R() * tot;
+  for (let i = 0; i < 9; i++) { r -= p[i]; if (r <= 0) return { rar: i === 8 ? 7 : (i === 7 ? 6 : i), set: i === 7 }; }
+  return { rar: 3, set: false };
+}
 function rollRarWRaw(f: number, min: number, d: number = 1): number[] {
   const ff = rarF(f, d);
   const raw = RW.map((v: number, i: number) => {
@@ -1952,7 +1979,7 @@ function rollRarW(f: number, min: number, d: number = 1): number[] {
   return scalePrisDrop(rollRarWRaw(f, min, d), 7);
 }
 function rollRar(f: number, min: number, d: number = 1): number {
-  const w = rollRarW(f, min, d);
+  const w = lootQW(rollRarW(f, min, d));
   let tot = 0;
   for (const v of w) tot += v;
   if (NK_PX && tot > 0) nkPx(w[7] / tot);
@@ -1976,6 +2003,7 @@ function bossPlainOdds(d: number): number[] {
 }
 function actLootPick(d: number): { rar: number; set: boolean } {
   const p = bossRarOdds(d);
+  const q = lootQPick9(p); if (q) return q;
   if (NK_PX) nkPx(p[8]);
   let r = R();
   for (let i = 0; i < 9; i++) {
@@ -2000,7 +2028,7 @@ function jackpotRarW(d: number = 1): number[] {
   return scalePrisDrop(lootRarFloorW(w), 7);
 }
 function jackpotRar(d: number = 1): number {
-  const w = jackpotRarW(d);
+  const w = lootQW(jackpotRarW(d));
   let tot = 0; for (const v of w) tot += v;
   if (NK_PX && tot > 0) nkPx(w[7] / tot);
   let r = R() * tot;
@@ -2181,7 +2209,7 @@ function extraBossLootN(e: En): number {
   return extraBoss + ov;
 }
 function dropExtraBossLoot(g: Game, e: En, drop: (it: Item) => void): void {
-  const n = extraBossLootN(e);
+  const n = lootQN(extraBossLootN(e));
   for (let i = 0; i < n; i++) drop(makeItem(g.depth + 1, rollRar(1.28, 0, g.depth)));
 }
 
@@ -2972,6 +3000,7 @@ function superEliteOdds9(d: number): number[] {
 }
 function seLootPick(d: number): { rar: number; set: boolean } {
   const p = superEliteOdds9(d);
+  const q = lootQPick9(p); if (q) return q;
   if (NK_PX) nkPx(p[8]);
   let r = R();
   for (let i = 0; i < 9; i++) {
@@ -7944,6 +7973,7 @@ function fountainActLoot(g: Game, e: En, more = false, lootMul = 1): void {
   const lm = Math.max(1, Math.min(10, Math.floor(lootMul)));
   let n = 0;
   for (let i = 0; i < lm; i++) n += actLootCount(act, d) + extraBossLootN(e);
+  n = lootQN(n);
   const nPot = POT_ACT_N * lm;
   const tiles = spillTiles(g, e.x, e.y, n + 1 + nPot);
   const mf = efP(g, 54);
@@ -7959,6 +7989,7 @@ function fountainActLoot(g: Game, e: En, more = false, lootMul = 1): void {
   let gg = 0;
   for (let i = 0; i < lm; i++) gg += Math.max(800, safeRound((3000 + 900 * act + d * 160) * (0.85 + R() * 0.35) * gm * extra.goldMul));
   if (extra.gems > 0) g.gems = (g.gems ?? 0) + extra.gems * lm;
+  if (LOOT_Q !== 1) gg = safeRound(gg * LOOT_Q);
   g.gold += gg;
   floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
   const gp = tiles[n] ?? { x: e.x, y: e.y };
@@ -7966,6 +7997,7 @@ function fountainActLoot(g: Game, e: En, more = false, lootMul = 1): void {
   for (let i = 0; i < nPot; i++) { const p = tiles[n + 1 + i] ?? { x: e.x, y: e.y }; g.drops.push({ x: p.x, y: p.y, item: null, pot: true, gold: 0 }); }
   let nGems = 0;
   for (let i = 0; i < lm; i++) nGems += 1 + (R() < 0.5 ? 1 : 0);
+  nGems = lootQN(nGems);
   for (let i = 0; i < nGems; i++) giveDroppedGem(g, e.x, e.y, d);
   burst(g, e.ax * TS + 12, e.ay * TS + 12, 110, [GOLD, "#ffffff", "#fff0a0", "#ff60e0", "#ff8080"], 150, 40);
   g.sfx("sparkle"); g.sfx("coin");
@@ -10531,6 +10563,11 @@ function gainXp(g: Game, n: number): void {
 }
 
 function kill(g: Game, e: En): void {
+  const prevQ = LOOT_Q;
+  LOOT_Q = lootBonusMult(g);
+  try { killLoot(g, e); } finally { LOOT_Q = prevQ; }
+}
+function killLoot(g: Game, e: En): void {
   const d = g.depth;
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
   g.kills++;
@@ -10553,11 +10590,11 @@ function kill(g: Game, e: En): void {
   gainXp(g, Math.round(e.xp * (1 + 0.1 * efP(g, 72))));
   const mf = efP(g, 54);
   const drop = (it: Item): void => { it = maybeSet(it); const mfAll = mf + gemMagicFind(g); if (mfAll > 0 && it.rar < 5 && R() < efc(0.06, mfAll)) { it.rar++; floatTxt(g, e.x, e.y - 1.3, "MAGIC FIND!", RC[it.rar]); } announceDrop(g, it, e.x, e.y); g.drops.push({ x: e.x, y: e.y, item: it, pot: false, gold: 0 }); };
-  const gold = (mul: number): void => { const n = Math.max(1, Math.round((14 + d * 6.8) * (0.6 + R() * 0.8) * mul * gm * gemGoldMul(g))); g.gold += n; floatTxt(g, e.x, e.y - 0.9, "+" + n + "g", GOLD); g.sfx("coin"); };
+  const gold = (mul: number): void => { const n = Math.max(1, Math.round((14 + d * 6.8) * (0.6 + R() * 0.8) * mul * gm * gemGoldMul(g) * LOOT_Q)); g.gold += n; floatTxt(g, e.x, e.y - 0.9, "+" + n + "g", GOLD); g.sfx("coin"); };
   if (e.sw) { if (g.swarm) g.swarm.kills++; if (R() < 0.05) gold(0.4); } // shrine swarm: counted, almost no loot (the reward comes at the end)
   else if (e.child) { /* split spawn: no loot */ }
   else if (e.gob === 2) {
-    const n = Math.max(2, Math.min(6, Math.round(2 + d * 0.08 + R() * 2)));
+    const n = lootQN(Math.max(2, Math.min(6, Math.round(2 + d * 0.08 + R() * 2))));
     for (let i = 0; i < n; i++) giveDroppedGem(g, e.x, e.y, d, true);
     runAutoCombine(g);
     burstGib(g, cx, cy, 90, ["#40e0ff", "#ff60e0", "#ffffff", GOLD], 140, 50, gibDir.dx, gibDir.dy, okR);
@@ -10566,7 +10603,7 @@ function kill(g: Game, e: En): void {
     msg(g, "You caught the Gem Goblin! " + n + " gemstones", "#40e0ff");
     g.gobT = 0;
   } else if (e.gob === 3) {
-    const gg = goldGoblinPayout(d, g);
+    const gg = LOOT_Q === 1 ? goldGoblinPayout(d, g) : safeRound(goldGoblinPayout(d, g) * LOOT_Q);
     g.gold += gg; floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
     for (const [ox, oy] of dirs) {
@@ -10582,9 +10619,9 @@ function kill(g: Game, e: En): void {
     drop(makeItem(d + 1, jackpotRar(d)));
     g.gobT = 0;
   } else if (e.gob || e.hunt) {
-    const n = 3 + ri(3);
+    const n = lootQN(3 + ri(3));
     for (let i = 0; i < n; i++) { const r = jackpotRar(d); drop(makeItem(d + 1, r)); }
-    const gg = Math.round(Math.min(6000, Math.max(2000, (2000 + d * 80) * (0.9 + R() * 0.2))));
+    const gg = Math.round(Math.min(6000, Math.max(2000, (2000 + d * 80) * (0.9 + R() * 0.2))) * LOOT_Q);
     g.gold += gg; floatTxt(g, e.x, e.y - 0.9, "+" + gg + "g", GOLD);
     burstGib(g, cx, cy, 70, [GOLD, "#ffffff", "#fff0a0", "#40ff60"], 130, 50, gibDir.dx, gibDir.dy, okR);
     g.sfx("sparkle"); g.sfx("coin");
@@ -10598,10 +10635,10 @@ function kill(g: Game, e: En): void {
       g.gobT = 0;
     }
   }
-  else if (e.rare) { if (R() < 0.32) drop(makeItem(d, rollRar(1.12, 0, d))); if (R() < POT_CH_RARE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(1.7); }
-  else if (e.cls === 0) { if (R() < 0.12) drop(makeItem(d, rollRar(1, 0, d))); if (R() < POT_CH_NORM) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(e.name.startsWith("Brute ") ? 2.5 : 1); }
+  else if (e.rare) { if (R() < lootQCh(0.32)) drop(makeItem(d, rollRar(1.12, 0, d))); if (R() < POT_CH_RARE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(1.7); }
+  else if (e.cls === 0) { if (R() < lootQCh(0.12)) drop(makeItem(d, rollRar(1, 0, d))); if (R() < POT_CH_NORM) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(e.name.startsWith("Brute ") ? 2.5 : 1); }
   else if (e.se) {
-    const nSe = 1 + (R() < 0.45 ? 1 : 0);
+    const nSe = lootQN(1 + (R() < 0.45 ? 1 : 0));
     const dropSE = (it: Item): void => { const mfAll = mf + gemMagicFind(g); if (mfAll > 0 && it.rar < 5 && R() < efc(0.06, mfAll)) { it.rar++; floatTxt(g, e.x, e.y - 1.3, "MAGIC FIND!", RC[it.rar]); } announceDrop(g, it, e.x, e.y); g.drops.push({ x: e.x, y: e.y, item: it, pot: false, gold: 0 }); };
     for (let i = 0; i < nSe; i++) dropSE(seLootItem(d));
     if (R() < POT_CH_SE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 });
@@ -10609,13 +10646,13 @@ function kill(g: Game, e: En): void {
     msg(g, "Super Elite slain: " + e.name, SE_COL);
   }
   else if (e.ue) {
-    const nUe = 2 + (R() < 0.5 ? 1 : 0);
+    const nUe = lootQN(2 + (R() < 0.5 ? 1 : 0));
     for (let i = 0; i < nUe; i++) drop(seLootItem(d));
     if (R() < POT_CH_SE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 });
     gold(SE_GOLD * 1.35);
     msg(g, "Ultra Elite slain: " + e.name, UE_COL);
   }
-  else if (e.cls === 1) { if (R() < 0.6) drop(makeItem(d, rollRar(1.22, 0, d))); if (R() < 0.2 * efP(g, 89)) drop(makeItem(d, rollRar(1.22, 0, d))); if (R() < POT_CH_ELITE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(e.name.startsWith("Champion ") ? 8 : 5); msg(g, "Elite slain: " + e.name, GOLD); }
+  else if (e.cls === 1) { if (R() < lootQCh(0.6)) drop(makeItem(d, rollRar(1.22, 0, d))); if (R() < lootQCh(0.2 * efP(g, 89))) drop(makeItem(d, rollRar(1.22, 0, d))); if (R() < POT_CH_ELITE) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 }); gold(e.name.startsWith("Champion ") ? 8 : 5); msg(g, "Elite slain: " + e.name, GOLD); }
   else if (e.act) {
     e.hp = 0;
     const more = packRemain(g, e) > 0 || !!livingActBoss(g);
@@ -10630,7 +10667,7 @@ function kill(g: Game, e: En): void {
     const d0 = g.drops.length;
     let n = 0;
     for (let r = 0; r < lm; r++) {
-      const nr = 1 + ri(3); n += nr;
+      const nr = lootQN(1 + ri(3)); n += nr;
       for (let i = 0; i < nr; i++) drop(makeItem(d + 1, rollRar(1.35, 0, d)));
       dropExtraBossLoot(g, e, drop);
       for (let i = 0; i < POT_BOSS_N; i++) g.drops.push({ x: e.x, y: e.y, item: null, pot: true, gold: 0 });
@@ -10649,19 +10686,19 @@ function kill(g: Game, e: En): void {
   }
   if (!e.child && !e.gob && !e.act) {
     const ch = e.se ? GEM_CH_SE : e.cls === 2 ? GEM_CH_MINI : (e.cls === 1 || e.rare) ? GEM_CH_ELITE : GEM_CH_NORM;
-    if (R() < ch) giveDroppedGem(g, e.x, e.y, d);
+    if (R() < lootQCh(ch)) giveDroppedGem(g, e.x, e.y, d);
   }
   if (!e.child) petFortuneDrop(g, e, drop);
   if (!e.child && e.sgc) {
     // Royal Goblin Warren: every royal goblin drops boosted loot (min Rare, ilvl +5); the Goblin King drops a hoard.
     const king = e.sgc === 2;
-    const nI = king ? 4 : 1 + (R() < 0.5 ? 1 : 0);
+    const nI = lootQN(king ? 4 : 1 + (R() < 0.5 ? 1 : 0));
     for (let i = 0; i < nI; i++) drop(makeItem(d + (king ? 8 : 5), king ? Math.max(3, jackpotRar(d)) : rollRar(1.6, 2, d)));
     gold(king ? 40 : 6);
-    if (R() < (king ? 1 : 0.3)) giveDroppedGem(g, e.x, e.y, d + (king ? 10 : 4), true);
+    if (R() < lootQCh(king ? 1 : 0.3)) giveDroppedGem(g, e.x, e.y, d + (king ? 10 : 4), true);
     if (king) { setBanner(g, "GOBLIN KING SLAIN!", "The royal hoard spills out!", SUPER_GOB_C, 8, 3.2); msg(g, "You slew the Goblin King!", SUPER_GOB_C); }
   }
-  if (!e.child && setCounts(g.eq)[7] >= 4 && R() < 0.12) drop(makeItem(d, rollRar(1.1, 0, d)));
+  if (!e.child && setCounts(g.eq)[7] >= 4 && R() < lootQCh(0.12)) drop(makeItem(d, rollRar(1.1, 0, d)));
   if (e.tr.includes("split") && !e.child) {
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     let made = 0;
