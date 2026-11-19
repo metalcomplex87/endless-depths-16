@@ -68,11 +68,13 @@ Richard save COPY (lvl 197, depth 200, 23 socketed gems): gems now add **+2,168 
 
 Act-boss fights are paced by the O6 cap, so gems do not move them. In `o6Sim`, run with every socket holding Diamond+Ruby Prismatic 0/5/10★ gems, the typical times are unchanged. d500 is 2.0 min at 5★ and 1.7 min at 10★. d2000 5★ is about 4.3 min. d3000 is 5.6 min at 5★ and about 3.2 min at 10★. The occasional short runs (40–110 s) also appear with no gems, from random gear rolls.
 
-## Fits (unchanged)
+## Fits (updated 2026-11-19 PM)
 
 - A non-Prismatic gem fits only its own color socket.
-- A Prismatic gem fits any socket, including a Prismatic socket.
-- A Prismatic socket accepts **only** Prismatic gems. A migrated non-Prismatic gem can stay in that socket after the layout change, but it does not count toward the socket bonus and cannot be re-inserted.
+- A Prismatic gem fits **any** socket and gives its full effect there. Gem effects never depend on where a gem sits.
+- A Prismatic socket accepts **any** gem, of any color or tier, so Prismatic gear never has sockets it can't fill.
+- Prismatic gems in Prismatic sockets are still the best pairing: a Prismatic item's socket bonus turns on only when every socket holds a Prismatic gem.
+- Auto-socket fills empty Prismatic sockets with the strongest gem available, prefers Prismatic gems there, and swaps a non-Prismatic gem out when a Prismatic gem arrives. The swapped-out gem is re-socketed elsewhere if it fits, otherwise it goes to the gem bag. It is never destroyed. Existing saves are filled on the next load or auto-socket pass.
 
 ---
 

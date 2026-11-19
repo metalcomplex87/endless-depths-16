@@ -12848,7 +12848,7 @@ function starCount(it: Item | null | undefined): number { return !it ? 0 : it.ki
 const starBadge = (it: Item): string => (starCount(it) > 0 ? "\u2605" + starCount(it) : "");
 
 const SOCK_MAX = 4;
-const SOCK_PRIS = 7; // Prismatic socket color; only Prismatic gems complete it
+const SOCK_PRIS = 7; // Prismatic socket color; takes any gem, but only Prismatic gems complete its socket bonus
 const SOCK_COL_MAX = 7;
 const SOCK_W: number[][] = [
   [55, 35, 8, 1.5, 0.5],
@@ -12975,12 +12975,13 @@ function ensureSockets(it: Item): void {
   if (it.rar >= 7) { ensurePrisSocketLayout(it); if (it.sk === undefined) rollSockets(it); return; }
   if (it.sk === undefined) rollSockets(it);
 }
-// Prismatic gems are wild and fit every socket, including Prismatic. Prismatic sockets accept ONLY Prismatic gems.
-// A non-Prismatic gem already sitting in a migrated Prismatic socket is kept, but does not "fit" if re-inserted,
-// and does not count toward the socket bonus.
+// Prismatic gems are wild and fit every socket, including Prismatic. Prismatic sockets are wild too (2026-11-19) and
+// accept ANY gem, so Prismatic gear never sits with sockets it cannot fill. Every socketed gem gives its full effect
+// wherever it sits; only the socket BONUS still needs Prismatic gems in Prismatic sockets (sockGemFitsColor), so
+// Prismatic-in-Prismatic stays the best pairing.
 function gemFitsSocket(gem: Item, color: number): boolean {
   if (!isGem(gem) || gem.gt === undefined) return false;
-  if (color === SOCK_PRIS) return gem.rar >= 7;
+  if (color === SOCK_PRIS) return true;
   if (gem.rar >= 7) return true;
   return gem.gt === color;
 }
@@ -13442,25 +13443,39 @@ function unsocketGem(g: Game, it: Item, si: number): string {
   placeGem(g, gg, g.hero.x, g.hero.y);
   return "Removed " + gg.name + ".";
 }
+// Pick-up auto-socket. Best target first (ties keep the old EQK / socket order):
+//   Prismatic gem: empty Prismatic socket > Prismatic socket holding a non-Prismatic gem (swapped out) > empty colored socket.
+//   Other gem:     empty socket of its own color > empty Prismatic socket.
+// A swapped-out gem is re-socketed elsewhere if it fits an empty socket, otherwise it goes to the gem bag (never destroyed).
 function autoSocketGem(g: Game, gem: Item, x?: number, y?: number): boolean {
   if (!isGem(gem) || gem.gt === undefined) return false;
+  const pris = gem.rar >= 7;
+  let bIt: Item | null = null, bSi = -1, bSc = 0;
   for (const k of EQK) {
     const it = g.eq[k];
     if (!it) continue;
     ensureSockets(it);
     if (!it.sk) continue;
     for (let si = 0; si < it.sk.length; si++) {
-      if (it.sk[si].g) continue;
-      if (!gemFitsSocket(gem, it.sk[si].c)) continue;
-      socketGem(it, si, gem);
-      const col = GEMT[gem.gt].c;
-      const line = "Socketed " + gem.name + " into " + it.name;
-      msg(g, line, col);
-      floatTxt(g, x ?? g.hero.x, y ?? g.hero.y - 0.3, line, col);
-      return true;
+      const z = it.sk[si];
+      if (!gemFitsSocket(gem, z.c)) continue;
+      let sc = 0;
+      if (!z.g) sc = z.c === SOCK_PRIS ? (pris ? 4 : 1) : 2;
+      else if (pris && z.c === SOCK_PRIS && z.g.rar < 7) sc = 3;
+      if (sc > bSc) { bIt = it; bSi = si; bSc = sc; }
     }
   }
-  return false;
+  if (!bIt || !bIt.sk) return false;
+  const old = bIt.sk[bSi].g;
+  let lower: Item | null = null;
+  if (old) { lower = gemFromSock(old, bIt.ilvl); delete bIt.sk[bSi].g; }
+  socketGem(bIt, bSi, gem);
+  const col = GEMT[gem.gt].c;
+  const line = "Socketed " + gem.name + " into " + bIt.name;
+  msg(g, line, col);
+  floatTxt(g, x ?? g.hero.x, y ?? g.hero.y - 0.3, line, col);
+  if (lower && !autoSocketGem(g, lower, x, y)) placeGem(g, lower, g.hero.x, g.hero.y);
+  return true;
 }
 function itemIsEquipped(g: Game, it: Item): boolean {
   for (const k of EQK) if (g.eq[k] === it) return true;
@@ -13500,7 +13515,8 @@ function autoSocketItem(g: Game, it: Item): boolean {
     for (let i = 0; i < gb.length; i++) {
       const gem = gb[i];
       if (!gem || !gemFitsSocket(gem, c)) continue;
-      if (bestI < 0 || gem.rar > gb[bestI].rar) bestI = i;
+      if (c === SOCK_PRIS) { if (bestI < 0 || sockRank(gemSockOf(gem), c) > sockRank(gemSockOf(gb[bestI]), c)) bestI = i; }
+      else if (bestI < 0 || gem.rar > gb[bestI].rar) bestI = i;
     }
     if (bestI < 0) continue;
     const gem = gb.splice(bestI, 1)[0];
@@ -13515,7 +13531,9 @@ function autoSocketItem(g: Game, it: Item): boolean {
 function autoSocketUpgradeEquipped(g: Game): boolean {
   const gb = ensureGemBag(g);
   let changed = false;
-  for (const k of EQK) {
+  // Prismatic-socket gear first, so a Prismatic gem in the bag upgrades a Prismatic socket before a colored one.
+  const ks = EQK.filter((k: EqKey) => hasPrisSocket(g.eq[k])).concat(EQK.filter((k: EqKey) => !hasPrisSocket(g.eq[k])));
+  for (const k of ks) {
     const it = g.eq[k];
     if (!it || !it.sk) continue;
     for (let si = 0; si < it.sk.length; si++) {
@@ -13525,6 +13543,7 @@ function autoSocketUpgradeEquipped(g: Game): boolean {
       for (let i = 0; i < gb.length; i++) {
         const gem = gb[i];
         if (!gem || !gemFitsSocket(gem, s.c)) continue;
+        if (s.c === SOCK_PRIS) { if (sockRank(gemSockOf(gem), s.c) > sockRank(s.g, s.c) && (bestI < 0 || sockRank(gemSockOf(gem), s.c) > sockRank(gemSockOf(gb[bestI]), s.c))) bestI = i; continue; }
         if (gemSockPow(gemSockOf(gem)) > gemSockPow(s.g) && (bestI < 0 || gemSockPow(gemSockOf(gem)) > gemSockPow(gemSockOf(gb[bestI])))) bestI = i;
       }
       if (bestI < 0) continue;
@@ -13538,13 +13557,61 @@ function autoSocketUpgradeEquipped(g: Game): boolean {
   }
   return changed;
 }
+// Rank of a gem in a socket for the auto passes: in a Prismatic socket a Prismatic gem always outranks any other gem
+// (it is what completes the socket bonus); otherwise, and between equals, higher gem power wins.
+function sockRank(z: { typ: number; rar: number; s?: number }, c: number): number {
+  return (c === SOCK_PRIS && z.rar >= 7 ? 1000 : 0) + gemSockPow(z);
+}
+function hasPrisSocket(it: Item | null | undefined): boolean {
+  return !!(it && it.sk && it.sk.some((z: { c: number }) => z.c === SOCK_PRIS));
+}
+// A Prismatic gem sitting in a colored socket moves into an equipped Prismatic socket that is empty or holds a
+// non-Prismatic gem, when the displaced gem (if any) fits back into the colored socket (a pure swap; nothing is lost).
+function autoSocketPrisRelocate(g: Game): boolean {
+  let changed = false;
+  for (const k of EQK) {
+    const it = g.eq[k];
+    if (!it || !it.sk) continue;
+    for (let si = 0; si < it.sk.length; si++) {
+      const p = it.sk[si];
+      if (p.c !== SOCK_PRIS || (p.g && p.g.rar >= 7)) continue;
+      let src: { it: Item; si: number } | null = null;
+      for (const k2 of EQK) {
+        const it2 = g.eq[k2];
+        if (!it2 || !it2.sk) continue;
+        for (let sj = 0; sj < it2.sk.length; sj++) {
+          const a = it2.sk[sj];
+          if (a.c === SOCK_PRIS || !a.g || a.g.rar < 7) continue;
+          if (p.g && !(p.g.typ === a.c)) continue;
+          if (!src || gemSockPow(a.g) > gemSockPow(src.it.sk![src.si].g!)) src = { it: it2, si: sj };
+        }
+      }
+      if (!src) continue;
+      const a = src.it.sk![src.si];
+      const pg = a.g!;
+      const back = p.g;
+      a.g = back ? copySockGem(back) : undefined;
+      if (!a.g) delete a.g;
+      p.g = copySockGem(pg);
+      bustIcon(it); bustIcon(src.it);
+      changed = true;
+    }
+  }
+  return changed;
+}
+// Prismatic gear is served first so a Prismatic gem from the bag lands in a Prismatic socket before a colored one.
 function autoSocketEquippedPass(g: Game): boolean {
   let changed = false;
   for (const k of EQK) {
     const it = g.eq[k];
-    if (it && autoSocketItem(g, it)) changed = true;
+    if (it && hasPrisSocket(it) && autoSocketItem(g, it)) changed = true;
   }
   if (autoSocketUpgradeEquipped(g)) changed = true;
+  for (const k of EQK) {
+    const it = g.eq[k];
+    if (it && !hasPrisSocket(it) && autoSocketItem(g, it)) changed = true;
+  }
+  if (autoSocketPrisRelocate(g)) changed = true;
   return changed;
 }
 function takePickedItem(g: Game, it: Item, x: number, y: number): boolean {
@@ -25373,7 +25440,7 @@ export default function App() {
                   <div style={{ marginTop: 4 }}>{statLines(selItem).map(tipLine)}</div>
                   {(selItem.st ?? []).map((e: number[], i: number) => <div key={"st" + i} style={{ color: GOLD, marginTop: 2 }}>{"\u2605 " + starName(selItem, e) + " — " + starDesc(selItem, e)}</div>)}
                   {selItem.sk && selItem.sk.length > 0 && <div style={{ marginTop: 6 }}>
-                    <div className="dc-sm">Sockets (color must match; Prismatic gems fit any):</div>
+                    <div className="dc-sm">Sockets (color must match; Prismatic gems fit any socket and Prismatic sockets take any gem; Prismatic in Prismatic is best):</div>
                     {selItem.sk.map((z: { c: number; g?: { typ: number; rar: number } }, si: number) => (
                       <div key={"skui" + si} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                         {z.g ? <img src={sockGemIconURL(z.g)} alt="" width={26} height={26} draggable={false} style={{ imageRendering: "pixelated", border: "2px solid " + ((z.g.rar >= 7 && ((z.g as { s?: number }).s ?? 0) >= 10) ? GOLD : RC[z.g.rar]), borderRadius: 5, background: "#1a1028", flex: "none", outline: "1px solid " + sockCol(z.c), outlineOffset: 1 }} />

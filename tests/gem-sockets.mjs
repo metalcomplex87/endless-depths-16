@@ -108,8 +108,8 @@ async function main() {
   rec("regular gems fit only their color; Prismatic gems fit any socket including Prismatic",
     fits.rubyInRuby && !fits.rubyInSap && fits.prisInSap && fits.prisInPris,
     fits);
-  rec("non-Prismatic gems do not complete a Prismatic socket",
-    !fits.rubyInPris && !fits.diaInPris, fits);
+  rec("Prismatic sockets accept any gem (2026-11-19: no Prismatic socket is left unfillable)",
+    fits.rubyInPris && fits.diaInPris, fits);
 
   // Drops: 2★+ Prismatic always 4 Prismatic sockets
   const drops = await page.evaluate(() => {
