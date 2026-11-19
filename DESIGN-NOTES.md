@@ -155,25 +155,36 @@ General rules for this update:
   - Enemies spawn off-screen, 6-20 tiles away. Cap 40 alive, an opening burst of 18, then 6 per second.
   - A timer and kill counter show on screen. Swarm enemies give 60% XP and very little loot of their own.
 - **Death or leaving:** dying ends the event, and the shrine stays spent (saved per floor, `sud` / `shrUsedD`).
-- **Reward tiers by kills** (gold = (40 + depth x 18) x multiplier):
+- **Reward:** 25 kills is the base (Bronze). Under 25 kills still grants no shrine loot (the low-risk reading of
+  "reduced or no"). More kills then step through closer, reachable tiers. Item count, minimum rarity, item level
+  and gems are stepped; gold and the Prismatic-item chance rise smoothly toward the next tier.
+  - Gold = (40 + depth x 18) x multiplier x the equipped gold-gem bonus.
+  - The in-event HUD shows `kills/25` until Bronze, then `kills/next` plus the tier reached.
 
   | Tier | Kills | Items | Min rarity | ilvl bonus | Gold | Gems | Prismatic |
   |---|---|---|---|---|---|---|---|
   | Bronze | 25 | 2 | 1 | +0 | x4 | 0 | – |
-  | Silver | 60 | 3 | 2 | +2 | x8 | 0 | – |
-  | Gold | 110 | 4 | 3 | +4 | x14 | 1 | – |
-  | Mythic | 170 | 5 | 4 | +6 | x22 | 1 | – |
-  | Relic | 240 | 6 | 5 | +8 | x32 | 2 | 35% chance |
-  | Prismatic | 300 | 7 | 6 | +10 | x45 | 3 | guaranteed |
+  | Silver | 40 | 3 | 2 | +1 | x7 | 0 | – |
+  | Gold | 60 | 4 | 3 | +3 | x11 | 1 | – |
+  | Mythic | 80 | 5 | 4 | +5 | x16 | 1 | 10% (then rises) |
+  | Relic | 100 | 6 | 5 | +7 | x24 | 2 | 35% (then rises) |
+  | Prismatic | 130 | 7 | 6 | +10 | x36 | 3 | guaranteed |
+
+  Old thresholds (25 / 60 / 110 / 170 / 240 / 300) made 40 kills pay the same as 25, and 100 the same as 60.
+  Necklace drop rates are unchanged; swarm enemies still barely drop loot of their own.
 
 ### Item 16 + 20 — Lava-sealed artifact caves, trophy case, Resplendent Chest
 - **Where caves appear:** only on lava-eligible floors past depth 25 (clear or wind weather, never on act floors),
-  with a seeded roll of `ART_CH` = 0.1% per floor.
-  - Measured placement success is ~97%. The effective rate is about 0.1% of eligible floors.
+  with a seeded roll of `ART_CH` = 2% per floor (1 in 50). Lava floor odds themselves are unchanged.
+  - Measured placement success is ~97%. The effective rate is about 1.9% of eligible floors.
   - Prismatic drops measured on the same floors (normal monsters and chests, not counting act bosses or swarms):
     0.4% (depth 26-51), 0.7% (depth 101), 1.1% (depth 201-501).
-  - So a cave is 4-11x rarer than a Prismatic drop. It started at 0.15%; that was lowered to keep it well below.
+  - Raised from 0.1% (1 in 1000) on 2026-11-18. A cave is now several times more common than a Prismatic drop
+    on those floors; it had been 4-11x rarer.
 - **Shape:** a fixed pocket cut into solid rock: a 3x3 lava moat, a landing tile, a hidden door, a 3x3 chamber and a pedestal.
+- **Look:** the pocket's indestructible walls are a dark exotic alloy — plated steel with gold rivets, a brass
+  bevel around the vault, and a faint iridescent shimmer — so the structure stands out from ordinary rock in
+  the main view. On the minimap those tiles are a pulsing gold-brass, distinct from normal wall purple.
 - **The sealing rule:** pocket walls cannot be destroyed. Wall Breaker, cracks, ultimates and Paramount wall-ripping
   all skip them (`artLocked`).
   - Hazards, pools, melting and teleports never touch the pocket.
@@ -571,3 +582,15 @@ Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
 - Water, lava and ice are exclusive per floor (including artifact-cave lava moats).
 - A regular ultimate melts ice to water. Paramount evaporates water and ice to bare floor (steam burst) in its blast radius + 4 tiles (at least 9), and still turns lava into walkable obsidian.
 - Necklace drop rates (spec D) were not changed.
+
+### Artifact-cave metal walls and higher spawn rate (2026-11-18 evening CT)
+- Visual only: `artLocked` walls render as exotic metal (plated alloy, gold rivets and bevel, iridescent shimmer)
+  and as pulsing gold-brass on the minimap. No change to sealing, loot, or how you get in.
+- `ART_CH` raised from 0.001 (0.1%) to 0.02 (2%, 1 in 50) per lava-eligible floor. Depth, act-floor and
+  weather rules, and all lava/hazard generation rates, are unchanged.
+
+### Shrine swarm loot scaling (2026-11-18 evening CT)
+- 25 kills remains the base Bronze reward. Below 25 is still no shrine loot.
+- Tiers are now 25 / 40 / 60 / 80 / 100 / 130 (was 25 / 60 / 110 / 170 / 240 / 300). Gold and Prismatic
+  chance interpolate between tiers. The HUD shows kills against the 25 threshold, then against the next tier,
+  plus the tier reached. Necklace rates were not changed.

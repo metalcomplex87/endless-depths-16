@@ -15104,13 +15104,37 @@ type Swarm = { t: number; kills: number; acc: number; spawned: number; pool: num
 const SHRINE_MIN_DEPTH = 26, SHRINE_CH = 0.05, SWARM_SEC = 60, SWARM_CAP = 40, SWARM_RATE = 6, SWARM_BURST = 18;
 const SWARM_TIERS: { k: number; n: string; c: string; items: number; min: number; il: number; gold: number; gems: number; pris: number }[] = [
   { k: 25, n: "Bronze", c: "#d08a50", items: 2, min: 1, il: 0, gold: 4, gems: 0, pris: 0 },
-  { k: 60, n: "Silver", c: "#d0d8e8", items: 3, min: 2, il: 2, gold: 8, gems: 0, pris: 0 },
-  { k: 110, n: "Gold", c: GOLD, items: 4, min: 3, il: 4, gold: 14, gems: 1, pris: 0 },
-  { k: 170, n: "Mythic", c: "#ff60e0", items: 5, min: 4, il: 6, gold: 22, gems: 1, pris: 0 },
-  { k: 240, n: "Relic", c: "#ff8040", items: 6, min: 5, il: 8, gold: 32, gems: 2, pris: 0.35 },
-  { k: 300, n: "Prismatic", c: "#80ffff", items: 7, min: 6, il: 10, gold: 45, gems: 3, pris: 1 },
+  { k: 40, n: "Silver", c: "#d0d8e8", items: 3, min: 2, il: 1, gold: 7, gems: 0, pris: 0 },
+  { k: 60, n: "Gold", c: GOLD, items: 4, min: 3, il: 3, gold: 11, gems: 1, pris: 0 },
+  { k: 80, n: "Mythic", c: "#ff60e0", items: 5, min: 4, il: 5, gold: 16, gems: 1, pris: 0.1 },
+  { k: 100, n: "Relic", c: "#ff8040", items: 6, min: 5, il: 7, gold: 24, gems: 2, pris: 0.35 },
+  { k: 130, n: "Prismatic", c: "#80ffff", items: 7, min: 6, il: 10, gold: 36, gems: 3, pris: 1 },
 ];
 function swarmTierOf(kills: number): number { let t = -1; for (let i = 0; i < SWARM_TIERS.length; i++) if (kills >= SWARM_TIERS[i].k) t = i; return t; }
+// Gold and Prismatic chance rise smoothly toward the next tier; item count, min rarity, ilvl and gems stay at the reached tier.
+// Below 25 kills: no shrine loot (same as before — the low-risk reading of "reduced or no").
+type SwarmReward = { ti: number; n: string; c: string; items: number; min: number; il: number; gold: number; gems: number; pris: number };
+function swarmRewardOf(kills: number): SwarmReward | null {
+  const ti = swarmTierOf(kills); if (ti < 0) return null;
+  const T = SWARM_TIERS[ti], N = SWARM_TIERS[ti + 1];
+  let gold = T.gold, pris = T.pris;
+  if (N) {
+    const u = Math.max(0, Math.min(1, (kills - T.k) / (N.k - T.k)));
+    gold = T.gold + (N.gold - T.gold) * u;
+    pris = T.pris + (N.pris - T.pris) * u;
+  } else {
+    gold = T.gold + Math.min(12, Math.max(0, kills - T.k) * 0.08);
+  }
+  return { ti, n: T.n, c: T.c, items: T.items, min: T.min, il: T.il, gold, gems: T.gems, pris };
+}
+function swarmGoldPay(g: Game, goldMul: number): number { return Math.round((40 + g.depth * 18) * goldMul * gemGoldMul(g)); }
+function swarmHudBits(kills: number): { kills: number; goal: number; tier: string; line: string; count: string } {
+  const base = SWARM_TIERS[0].k, ti = swarmTierOf(kills), nx = SWARM_TIERS[ti + 1];
+  if (ti < 0) return { kills, goal: base, tier: "", line: "Bronze at " + base, count: kills + "/" + base + " KILLS" };
+  const T = SWARM_TIERS[ti];
+  if (!nx) return { kills, goal: T.k, tier: T.n, line: T.n + " · MAX", count: kills + " KILLS" };
+  return { kills, goal: nx.k, tier: T.n, line: T.n + " · next " + nx.n + " " + nx.k, count: kills + "/" + nx.k + " KILLS" };
+}
 function packShrine(s: Shrine | null | undefined): Shrine | null {
   if (!s || typeof s.x !== "number" || typeof s.y !== "number" || !inb(s.x, s.y)) return null;
   const o: Shrine = { x: Math.floor(s.x), y: Math.floor(s.y) };
@@ -15345,26 +15369,26 @@ function endSwarm(g: Game, died: boolean): void {
   for (const e of g.en) if (e.sw && e.hp > 0) { burst(g, e.x * TS + 12, e.y * TS + 12, 6, ["#ff4060", "#400010"], 30, 30); e.hp = 0; }
   g.en = g.en.filter((e: En) => e.hp > 0);
   if (died) { msg(g, "The shrine swarm ends with your death. The shrine crumbles.", "#ff6060"); return; }
-  const ti = swarmTierOf(S.kills);
-  if (ti < 0) {
-    setBanner(g, "SWARM SURVIVED", S.kills + " kills \u00b7 below Bronze (" + SWARM_TIERS[0].k + ") \u00b7 no reward", "#c0a0a0", 4, 3);
+  const Rwd = swarmRewardOf(S.kills);
+  if (!Rwd) {
+    setBanner(g, "SWARM SURVIVED", S.kills + " kills \u00b7 below Bronze (" + SWARM_TIERS[0].k + ") \u00b7 no reward", "#c0a0a0", 9, 4);
     msg(g, "The swarm recedes. " + S.kills + " kills - not enough to stir the shrine's hoard.", "#c0a0a0");
     return;
   }
-  const T = SWARM_TIERS[ti], d = g.depth, x = g.shrine ? g.shrine.x : g.hero.x, y = g.shrine ? g.shrine.y : g.hero.y;
+  const d = g.depth, x = g.shrine ? g.shrine.x : g.hero.x, y = g.shrine ? g.shrine.y : g.hero.y;
   let prisN = 0;
-  for (let i = 0; i < T.items; i++) {
-    let rar = Math.max(T.min, rollRar(1.3 + ti * 0.08, T.min, d));
-    if (i === 0 && T.pris > 0 && R() < T.pris) { rar = 7; prisN++; }
+  for (let i = 0; i < Rwd.items; i++) {
+    let rar = Math.max(Rwd.min, rollRar(1.3 + Rwd.ti * 0.08, Rwd.min, d));
+    if (i === 0 && Rwd.pris > 0 && R() < Rwd.pris) { rar = 7; prisN++; }
     rar = Math.min(rar, 7);
-    giveItem(g, makeItem(d + T.il, rar), x, y);
+    giveItem(g, makeItem(d + Rwd.il, rar), x, y);
   }
-  for (let i = 0; i < T.gems; i++) giveDroppedGem(g, x, y, d + T.il, true);
-  const gd = Math.round((40 + d * 18) * T.gold * gemGoldMul(g));
+  for (let i = 0; i < Rwd.gems; i++) giveDroppedGem(g, x, y, d + Rwd.il, true);
+  const gd = swarmGoldPay(g, Rwd.gold);
   g.gold += gd;
-  setBanner(g, "SWARM TIER: " + T.n.toUpperCase() + "!", S.kills + " kills \u00b7 " + T.items + " items" + (prisN ? " incl. PRISMATIC" : "") + " \u00b7 +" + gd + "g", T.c, 6 + ti, 4);
-  msg(g, "Shrine swarm complete: " + S.kills + " kills \u2192 " + T.n + " tier (" + T.items + " items" + (T.gems ? ", " + T.gems + " gems" : "") + ", +" + gd + " gold).", T.c);
-  g.flash = 0.5; g.flashC = T.c; g.sfx("levelup");
+  setBanner(g, "SWARM TIER: " + Rwd.n.toUpperCase() + "!", S.kills + " kills \u00b7 " + Rwd.items + " items" + (prisN ? " incl. PRISMATIC" : "") + " \u00b7 +" + gd + "g", Rwd.c, 10 + Rwd.ti, 4);
+  msg(g, "Shrine swarm complete: " + S.kills + " kills \u2192 " + Rwd.n + " tier (" + Rwd.items + " items" + (Rwd.gems ? ", " + Rwd.gems + " gems" : "") + ", +" + gd + " gold).", Rwd.c);
+  g.flash = 0.5; g.flashC = Rwd.c; g.sfx("levelup");
   saveGame(g, true);
 }
 function drawShrine(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
@@ -15408,19 +15432,19 @@ function drawShrine(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: 
 }
 function drawSwarmHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
   const S = g.swarm; if (!S) return;
-  const ti = swarmTierOf(S.kills), nx = SWARM_TIERS[ti + 1];
+  const bits = swarmHudBits(S.kills), ti = swarmTierOf(S.kills);
   const secs = Math.max(0, Math.ceil(S.t));
   ctx.save();
-  ctx.fillStyle = "rgba(20,0,8,0.78)"; ctx.fillRect(VW / 2 - 70, HUD + 26, 140, 34);
-  ctx.strokeStyle = secs <= 10 && Math.floor(t * 4) % 2 ? "#ffffff" : "#ff3060"; ctx.lineWidth = 1; ctx.strokeRect(VW / 2 - 69.5, HUD + 26.5, 139, 33);
+  ctx.fillStyle = "rgba(20,0,8,0.78)"; ctx.fillRect(VW / 2 - 78, HUD + 26, 156, 34);
+  ctx.strokeStyle = secs <= 10 && Math.floor(t * 4) % 2 ? "#ffffff" : "#ff3060"; ctx.lineWidth = 1; ctx.strokeRect(VW / 2 - 77.5, HUD + 26.5, 155, 33);
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = "bold 14px monospace"; ctx.fillStyle = secs <= 10 ? "#ff6060" : "#ffffff";
-  ctx.fillText("0:" + String(secs).padStart(2, "0"), VW / 2 - 34, HUD + 40);
-  ctx.font = "bold 11px monospace"; ctx.fillStyle = "#ffd040";
-  ctx.fillText(S.kills + " KILLS", VW / 2 + 30, HUD + 38);
+  ctx.fillText("0:" + String(secs).padStart(2, "0"), VW / 2 - 42, HUD + 40);
+  ctx.font = "bold 10px monospace"; ctx.fillStyle = "#ffd040";
+  ctx.fillText(bits.count, VW / 2 + 32, HUD + 38);
   ctx.font = "6px monospace"; ctx.fillStyle = ti >= 0 ? SWARM_TIERS[ti].c : "#c0a0a0";
-  ctx.fillText((ti >= 0 ? "Tier " + SWARM_TIERS[ti].n : "No tier yet") + (nx ? " \u00b7 next " + nx.k : " \u00b7 MAX"), VW / 2 + 30, HUD + 50);
-  ctx.fillStyle = "#ff3060"; ctx.fillRect(VW / 2 - 66, HUD + 56, Math.max(0, 132 * S.t / SWARM_SEC), 2);
+  ctx.fillText(bits.line, VW / 2 + 32, HUD + 50);
+  ctx.fillStyle = "#ff3060"; ctx.fillRect(VW / 2 - 74, HUD + 56, Math.max(0, 148 * S.t / SWARM_SEC), 2);
   ctx.restore();
 }
 // ---------- Item 16: hidden artifact caves + trophy case ----------
@@ -15478,7 +15502,7 @@ const ARTIFACTS: { t: string; n: string; l: string }[] = [
   { t: "Orb", n: "Void Marble", l: "Darker than shadow; light bends politely around it." },
 ];
 const ART_N = ARTIFACTS.length; // 50
-const ART_CH = 0.001; // per lava-eligible floor past depth 25
+const ART_CH = 0.02; // 1/50 per lava-eligible floor past depth 25
 function artsOf(g: Game): number[] { return Array.isArray(g.arts) ? g.arts : (g.arts = []); }
 function packArts(a: unknown): string {
   const ok = (Array.isArray(a) ? a : []).filter((n: unknown) => typeof n === "number" && n >= 0 && n < ART_N);
@@ -15513,6 +15537,62 @@ function artSQ(g: Game, x: number, y: number): { s: number; q: number } | null {
 function artInBlock(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= 0 && p.s <= ART_POCKET_S && Math.abs(p.q) <= ART_POCKET_Q; }
 // Walls of the pocket block can never be chipped, dug, cracked or ripped.
 function artLocked(g: Game, x: number, y: number): boolean { return inb(x, y) && g.map[y * MW + x] === 0 && artInBlock(g, x, y); }
+// Visual only: locked pocket walls are a unique exotic alloy so the vault is hard to miss. Rules unchanged.
+const ART_MM = "#e8c448";
+let ART_METAL: HTMLCanvasElement[] | null = null;
+function artMetalBase(): HTMLCanvasElement[] {
+  if (ART_METAL) return ART_METAL;
+  const mk = (face: boolean): HTMLCanvasElement => {
+    const c = document.createElement("canvas"); c.width = TS; c.height = TS;
+    const x = c.getContext("2d"); if (!x) return c;
+    const p = (a: number, b: number, w: number, h: number, col: string): void => { x.fillStyle = col; x.fillRect(a, b, w, h); };
+    p(0, 0, TS, TS, "#141820");
+    if (face) {
+      p(0, 0, TS, 5, "#2c3548"); p(0, 5, TS, 1, "#0a0c12");
+      p(1, 6, 22, 5, "#3c4a60"); p(1, 12, 22, 5, "#323a4c"); p(1, 18, 22, 5, "#3c4a60");
+      p(1, 6, 22, 1, "#7a8ca8"); p(1, 12, 22, 1, "#6a7a94"); p(1, 18, 22, 1, "#7a8ca8");
+      p(1, 10, 22, 1, "#0c1018"); p(1, 16, 22, 1, "#0c1018");
+      p(8, 6, 1, 17, "#0c1018"); p(16, 6, 1, 17, "#0c1018");
+      p(0, 0, TS, 1, "rgba(255,255,255,0.28)"); p(0, 1, TS, 1, "rgba(90,220,255,0.38)"); p(0, 2, TS, 1, "rgba(255,190,80,0.30)");
+      p(0, TS - 2, TS, 2, "#0a0c10");
+    } else {
+      p(1, 1, 10, 10, "#3c4a60"); p(13, 1, 10, 10, "#323a4c"); p(1, 13, 10, 10, "#323a4c"); p(13, 13, 10, 10, "#3c4a60");
+      p(1, 1, 10, 1, "#8a9cb4"); p(13, 1, 10, 1, "#7a8ca8"); p(1, 13, 10, 1, "#7a8ca8"); p(13, 13, 10, 1, "#8a9cb4");
+      p(1, 1, 1, 10, "#5a6c84"); p(13, 1, 1, 10, "#4a5a70");
+      p(11, 1, 2, 22, "#0c1018"); p(1, 11, 22, 2, "#0c1018");
+      p(0, 0, TS, 1, "rgba(90,220,255,0.28)"); p(0, 0, 1, TS, "rgba(255,200,90,0.22)");
+    }
+    const rivet = (rx: number, ry: number): void => {
+      p(rx, ry, 3, 3, "#2a1c08"); p(rx, ry, 2, 2, "#e0c050"); p(rx, ry, 1, 1, "#fff4c0");
+    };
+    if (face) { for (const rx of [2, 10, 19]) for (const ry of [7, 13, 19]) rivet(rx, ry); }
+    else { for (const rx of [2, 9, 14, 20]) for (const ry of [2, 9, 14, 20]) rivet(rx, ry); }
+    return c;
+  };
+  ART_METAL = [mk(false), mk(true)];
+  return ART_METAL;
+}
+function drawArtMetalWall(ctx: CanvasRenderingContext2D, g: Game, x: number, y: number, sx: number, sy: number, t: number): void {
+  const face = y + 1 < MH && g.map[(y + 1) * MW + x] !== 0;
+  ctx.drawImage(artMetalBase()[face ? 1 : 0], sx, sy);
+  const n = !artLocked(g, x, y - 1), e = !artLocked(g, x + 1, y), s = !artLocked(g, x, y + 1), w = !artLocked(g, x - 1, y);
+  const p = (a: number, b: number, ww: number, hh: number, c: string): void => { ctx.fillStyle = c; ctx.fillRect(sx + a, sy + b, ww, hh); };
+  if (n) { p(0, 0, TS, 2, "#f0d878"); p(0, 0, TS, 1, "#fff6c8"); p(0, 2, TS, 1, "#8a6a20"); }
+  if (s) { p(0, TS - 2, TS, 2, "#6a4a10"); p(0, TS - 1, TS, 1, "#1a1208"); p(1, TS - 2, TS - 2, 1, "#c8a038"); }
+  if (w) { p(0, 0, 2, TS, "#d8b858"); p(0, 0, 1, TS, "#fff0b0"); p(2, 1, 1, TS - 2, "#8a6a20"); }
+  if (e) { p(TS - 2, 0, 2, TS, "#6a4a10"); p(TS - 1, 0, 1, TS, "#1a1208"); p(TS - 2, 1, 1, TS - 2, "#c8a038"); }
+  if (n && w) { p(0, 0, 4, 2, "#fff6c8"); p(0, 0, 2, 4, "#fff6c8"); }
+  if (n && e) { p(TS - 4, 0, 4, 2, "#fff6c8"); p(TS - 2, 0, 2, 4, "#fff6c8"); }
+  if (s && w) { p(0, TS - 2, 4, 2, "#c8a038"); p(0, TS - 4, 2, 4, "#c8a038"); }
+  if (s && e) { p(TS - 4, TS - 2, 4, 2, "#8a6a20"); p(TS - 2, TS - 4, 2, 4, "#8a6a20"); }
+  const gleam = ((t * 22 + x * 11 + y * 7) % (TS + 10)) - 2;
+  ctx.fillStyle = "rgba(200,240,255,0.22)";
+  ctx.fillRect(sx + gleam, sy + (face ? 6 : 1), 2, face ? 16 : TS - 2);
+  const pulse = 0.16 + 0.16 * Math.sin(t * 2.1 + x * 0.7 + y * 0.5);
+  ctx.fillStyle = "rgba(120,230,255," + pulse.toFixed(3) + ")";
+  ctx.fillRect(sx + 1, sy + 1, TS - 2, 1);
+}
+
 // The landing/chamber behind the moat (used so a player who got in can always walk back out over the moat).
 function artInside(g: Game, x: number, y: number): boolean { const p = artSQ(g, x, y); return !!p && p.s >= 3 && p.s <= 7 && Math.abs(p.q) <= 1; }
 function artSpotOk(g: Game, ox: number, oy: number, sx: number, sy: number): boolean {
@@ -18577,7 +18657,21 @@ try {
     terrain: (para: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const before = hzCounts(g); const r = ultTerrain(g, para); return { ok: true, before, r, after: hzCounts(g), req: hzRequiredOk(g), rad: para ? paraObsRadius(g) : ultObsRadius(g), paraRadius: paraRadius(g) }; },
     swarmStart: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; startSwarm(g); return { ok: true, live: g.en.filter((e: En) => e.sw).length }; },
     swarmKill: (n: number): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; let k = 0; for (let i = 0; i < n * 3 && k < n; i++) { const e = g.en.find((q: En) => q.sw && q.hp > 0); if (!e) { swarmSpawnOne(g); continue; } e.hp = 0; kill(g, e); g.en = g.en.filter((q: En) => q.hp > 0); k++; } return { ok: true, killed: k, kills: g.swarm ? g.swarm.kills : -1 }; },
-    swarmEnd: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; const kills = g.swarm.kills; const d0 = g.drops.length, b0 = g.bag.length, gold0 = g.gold; const ae = g.autoEq; g.autoEq = false; endSwarm(g, false); g.autoEq = ae; const its = g.bag.slice(b0).concat(g.drops.slice(d0).map((d: Drop) => d.item).filter((x: Item | null): x is Item => !!x)); return { ok: true, kills, tier: swarmTierOf(kills), items: its.length, rars: its.map((x: Item) => x.rar), gold: g.gold - gold0, banner: g.banner ? g.banner.txt : "" }; },
+    swarmReward: (kills: number): Record<string, unknown> => {
+      const g = LIVE, r = swarmRewardOf(kills | 0), hud = swarmHudBits(kills | 0);
+      return { ok: true, kills: kills | 0, depth: g ? g.depth : 0, gemMul: g ? gemGoldMul(g) : 1, hud, reward: r, gold: r && g ? swarmGoldPay(g, r.gold) : 0, goldRaw: r ? Math.round((40 + (g ? g.depth : 0) * 18) * r.gold) : 0 };
+    },
+    swarmSetKills: (n: number): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; g.swarm.kills = Math.max(0, n | 0); return { ok: true, kills: g.swarm.kills, hud: swarmHudBits(g.swarm.kills) }; },
+    swarmEnd: (): Record<string, unknown> => {
+      const g = LIVE; if (!g || !g.swarm) return { ok: false };
+      const kills = g.swarm.kills, plan = swarmRewardOf(kills), gold0 = g.gold;
+      const ae = g.autoEq, ac = g.autoCombine, bag0 = g.bag.slice(), drop0 = g.drops.slice();
+      g.autoEq = false; g.autoCombine = false; g.bag = []; g.drops = [];
+      endSwarm(g, false);
+      const its = g.bag.concat(g.drops.map((d: Drop) => d.item).filter((x: Item | null): x is Item => !!x));
+      g.bag = bag0.concat(g.bag); g.drops = drop0.concat(g.drops); g.autoEq = ae; g.autoCombine = ac;
+      return { ok: true, kills, tier: swarmTierOf(kills), name: plan ? plan.n : "", items: its.length, rars: its.map((x: Item) => x.rar), gems: plan ? plan.gems : 0, gold: g.gold - gold0, goldPlan: plan && g ? swarmGoldPay(g, plan.gold) : 0, banner: g.banner ? g.banner.txt : "", sub: g.banner ? g.banner.sub : "" };
+    },
     swarmDie: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; heroDie(g); return { ok: true, swarm: !!g.swarm, used: g.shrine ? !!g.shrine.used : null }; },
     openPedestal: (): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a) return { ok: false }; const arts0 = artsOf(g).length, d0 = g.drops.length, gold0 = g.gold; const idx = discoverArtifact(g); return { ok: true, idx, artsGained: artsOf(g).length - arts0, chestItems: g.drops.slice(d0).filter((d: Drop) => d.item).length, gold: g.gold - gold0, taken: !!a.taken, rc: !!a.rc, banner: g.banner ? g.banner.txt : "" }; },
     openDoor: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.artCave) return { ok: false }; openArtifactDoor(g); return { ok: true }; },
@@ -21862,8 +21956,9 @@ export default function App() {
         else if (v === 3) img = g.tiles[7] || g.tiles[5];
         else img = g.tiles[(tx * 7 + ty * 13) % 3];
         ctx.drawImage(img, sx, sy);
+        if (v === 0 && artLocked(g, tx, ty)) drawArtMetalWall(ctx, g, tx, ty, sx, sy, t);
         if (v !== 0 && g.hz) { const hv = g.hz[i]; if (hv) drawHzTile(ctx, g, tx, ty, sx, sy, hv, t); }
-        if (v === 0) { const cp = g.cracks ? g.cracks[i] : 0; if (cp > 0) drawWallCracks(ctx, sx, sy, crackStage(cp)); }
+        if (v === 0) { const cp = g.cracks ? g.cracks[i] : 0; if (cp > 0 && !artLocked(g, tx, ty)) drawWallCracks(ctx, sx, sy, crackStage(cp)); }
         if (v === 1 && g.tiles[6] && (((tx * 31 + ty * 57) * 2654435761) >>> 0) % 29 === 0) ctx.drawImage(g.tiles[6], sx, sy);
         if (v !== 0 && FC.cells.size) { const fc = FC.cells.get(i); if (fc) drawFloorCrack(ctx, sx, sy, fc, FC.ax * TS + 12 - camX, FC.ay * TS + 12 - camY); }
         if ((v === 1 || v === 3) && THDREAD > 0.04) {
@@ -22164,7 +22259,7 @@ export default function App() {
             if (!g.seen[k]) continue;
             if (g.map[k] === 2 || g.map[k] === TILE_UP) stairsL.push([x, y]);
             const hv = g.hz ? g.hz[k] : 0;
-            mc.fillStyle = g.map[k] === 0 ? "#2c2440" : hv === HZ_WATER ? "#3a7ac8" : hv === HZ_LAVA ? "#ff6a20" : hv === HZ_ICE ? "#c8f0ff" : hv === HZ_OBS ? "#2a1e3a" : hv === HZ_PIT ? "#5a4a38" : "#8a80a8";
+            mc.fillStyle = g.map[k] === 0 ? (artLocked(g, x, y) ? ART_MM : "#2c2440") : hv === HZ_WATER ? "#3a7ac8" : hv === HZ_LAVA ? "#ff6a20" : hv === HZ_ICE ? "#c8f0ff" : hv === HZ_OBS ? "#2a1e3a" : hv === HZ_PIT ? "#5a4a38" : "#8a80a8";
             mc.fillRect(x, y, 1, 1);
           }
         }
@@ -22180,6 +22275,15 @@ export default function App() {
         ctx.strokeStyle = big ? "#8a80a8" : "#3a3450"; ctx.lineWidth = 1; ctx.strokeRect(mx0 - 1.5, my0 - 1.5, mw + 3, mh + 3);
         ctx.drawImage(mmCv, mx0, my0, mw, mh);
         ctx.globalAlpha = 1;
+        if (g.artCave && g.artCave.ox !== undefined && g.artCave.oy !== undefined && g.artCave.sx !== undefined && g.artCave.sy !== undefined) {
+          const ax = g.artCave.ox, ay = g.artCave.oy, asx = g.artCave.sx, asy = g.artCave.sy;
+          const glow = Math.sin(t * 3.2);
+          ctx.fillStyle = glow > 0.25 ? "#fff4b0" : ART_MM;
+          for (let s0 = 0; s0 <= ART_POCKET_S; s0++) for (let q0 = -ART_POCKET_Q; q0 <= ART_POCKET_Q; q0++) {
+            const xx = ax + s0 * asx - q0 * asy, yy = ay + s0 * asy + q0 * asx;
+            if (artLocked(g, xx, yy) && g.seen[yy * MW + xx]) ctx.fillRect(mx0 + xx * ms2, my0 + yy * ms2, Math.max(1, ms2), Math.max(1, ms2));
+          }
+        }
         const dot = (x: number, y: number, c: string, s: number): void => { ctx.fillStyle = c; ctx.fillRect(mx0 + x * ms2 + Math.floor((ms2 - s) / 2), my0 + y * ms2 + Math.floor((ms2 - s) / 2), s, s); };
         const ds = big ? 4 : 2;
         for (const c of g.chests) if (!c.open && g.seen[c.y * MW + c.x]) dot(c.x, c.y, RC[Math.max(0, Math.min(4, c.rar ?? 0))], ds);
