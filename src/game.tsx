@@ -10787,8 +10787,9 @@ function nkOnKill(g: Game, e: En): void {
   const r = nkRt(g);
   if (nkOn(g, 1) && !e.child && !e.sw && r.ghosts.length < 5) {
     r.ghosts.push({ x: e.x, y: e.y, t: 15, cd: 0.4 });
-    fxAdd(g, "nkburst", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.5, NK[1].c, NK[1].c2, 1.4 * TS);
-    burst(g, e.ax * TS + 12, e.ay * TS + 12, 18, [NK[1].c, NK[1].c2, "#ffffff"], 70, 50);
+    fxAdd(g, "nkburst", e.ax * TS + 12, e.ay * TS + 12, 0, 0, 0.5, GH_C, GH_C2, 1.4 * TS);
+    burst(g, e.ax * TS + 12, e.ay * TS + 12, 18, [GH_C, GH_C2, "#ffffff"], 70, 50);
+    nkvGhostSpawn(g, e.ax, e.ay);
     g.sfx("nkGrave");
   }
   if (nkOn(g, 2)) { const k = nkKey(g); if (r.skKey !== k) { r.skKey = k; r.skKills = 0; } r.skKills = Math.min(10, r.skKills + 1); }
@@ -10870,7 +10871,7 @@ function nkHit(g: Game, e: En, dmg: number, i: number, ox?: number, oy?: number)
   if (!e || e.hp <= 0 || dmg <= 0) return 0;
   const d = NK[i];
   const dealt = withHit({ ox: ox ?? g.hero.x, oy: oy ?? g.hero.y }, () => hurtEn(g, e, dmg, { n: d.n, t: "Eternum", c: d.c }));
-  floatTxt(g, e.x + (R() - 0.5) * 0.5, e.y - 0.25, String(dealt > 0 ? dealt : dmg), d.c);
+  floatTxt(g, e.x + (R() - 0.5) * 0.5, e.y - 0.25, String(dealt > 0 ? dealt : dmg), i === 1 ? GH_C : d.c);
   e.hit = 0.15; e.awake = true;
   if (e.hp <= 0) withHit({ ox: ox ?? g.hero.x, oy: oy ?? g.hero.y }, () => { kill(g, e); });
   return dealt;
@@ -10931,6 +10932,7 @@ function nkPreHurt(g: Game, dmg: number): boolean {
     const k = r.sk.findIndex((v: number) => v <= 0);
     if (k >= 0) {
       r.sk[k] = 4;
+      nkvSkBreak(g, k);
       const a = (DRAW_T * 1.2) + k * Math.PI / 3;
       burst(g, (g.hero.ax + Math.cos(a) * 1.25) * TS + 12, (g.hero.ay + Math.sin(a) * 1.25) * TS + 12, 10, ["#f0f0d8", NK[2].c], 70, 60);
       fxAdd(g, "nkimpact", (g.hero.ax + Math.cos(a) * 1.25) * TS + 12, (g.hero.ay + Math.sin(a) * 1.25) * TS + 12, 0, 0, 0.2, NK[2].c, "#f0f0d8", 8);
@@ -10983,6 +10985,7 @@ function nkBoneBurst(g: Game): void {
     fxAdd(g, "nkimpact", o.ax * TS + 12, o.ay * TS + 12, 0, 0, 0.22, NK[2].c, "#f0f0d8", 10);
   }
   floatTxt(g, g.hero.x, g.hero.y - 0.6, "BONE STORM", NK[2].c);
+  nkvBoneStorm(g);
   g.flash = Math.max(g.flash, 0.2); g.flashC = "#d0ff60"; g.shake = Math.max(g.shake, 4);
   g.sfx("nkPhalanx");
 }
@@ -10990,6 +10993,7 @@ function nkBoneBurst(g: Game): void {
 function nkTick(g: Game, dt: number): void {
   const s = g.nk;
   if (!s) return;
+  nkvTick(g, dt);
   const h = g.hero, key = nkKey(g);
   const plain = (!g.area || g.area === "dungeon") && !g.vault;
   for (const q of s.gd) {
@@ -11034,7 +11038,8 @@ function nkTick(g: Game, dt: number): void {
       const fx = tg ? tg.x : h.x - 0.8, fy = tg ? tg.y - 0.3 : h.y - 0.8;
       const ddx = fx - gh.x, ddy = fy - gh.y, dl = Math.hypot(ddx, ddy);
       if (dl > 0.9) { const sp = Math.min(dl - 0.8, 5 * dt); gh.x += (ddx / dl) * sp; gh.y += (ddy / dl) * sp; }
-      if (tg && bd <= 1.6 && gh.cd <= 0) { gh.cd = RT_ATK; nkHit(g, tg, nkWep(g, tg, st, 0.4), 1, gh.x, gh.y); }
+      nkvGhostAim(g, gh, tg);
+      if (tg && bd <= 1.6 && gh.cd <= 0) { gh.cd = RT_ATK; nkHit(g, tg, nkWep(g, tg, st, 0.4), 1, gh.x, gh.y); nkvGhostHit(g, gh, tg); }
     }
     r.ghosts = r.ghosts.filter((gh: NkGhost) => gh.t > 0);
   }
@@ -11053,7 +11058,7 @@ function nkTick(g: Game, dt: number): void {
         let tg: En | null = null, bd = 99;
         for (const o of g.en) { if (o.hp <= 0) continue; const dd = Math.max(Math.abs(o.x - sx), Math.abs(o.y - sy)); if (dd <= 1.6 && dd < bd) { bd = dd; tg = o; } }
         if (!tg) tg = nearestEnemy(g, 2);
-        if (tg) nkHit(g, tg, nkWep(g, tg, st, mul), 2, sx, sy);
+        if (tg) { nkHit(g, tg, nkWep(g, tg, st, mul), 2, sx, sy); nkvSkStrike(g, k, tg); }
       }
     }
   }
@@ -11209,6 +11214,494 @@ function strokeNkPath(ctx: CanvasRenderingContext2D, pts: { x: number; y: number
   ctx.stroke();
 }
 // world layer (after particles): scorch, skeletons, ghosts, twin, echo, Prism Guard shimmer, ground necklaces
+// ---------- Grave Toll + Phalanx of the Dead visuals v2 (2026-11-19) ----------
+// Render-only layer. It never changes damage, timing, targeting or any mechanic state, never calls R()/Math.random
+// (private PRNG), and never uses g.parts / g.fx, so the gameplay random stream and the shared fx caps are untouched.
+// Ghosts: large translucent green apparitions with trails and hollow faces. Skeletons: detailed vector skeletons with
+// two-handed greatswords that rise out of cracked earth, stride toward their target and smash it.
+const GH_C = "#5cff9a", GH_C2 = "#d8ffe6";
+const SK_RISE = 0.9, SK_SW_DUR = 0.62, SK_SW_HIT = 0.36;
+interface NkvPart { x: number; y: number; vx: number; vy: number; life: number; max: number; c: string; s: number; gr: number; rot: number; vr: number; k: number }
+interface NkvHit { x: number; y: number; t: number; max: number; a: number; seed: number }
+interface NkvSk { alive: boolean; rise: number; ox: number; oy: number; tx: number; ty: number; has: boolean; tgAt: number; swing: number; sdel: number; walk: number; face: number; growlAt: number; hitDone: boolean; impX: number; impY: number; moved: number }
+interface NkvMark { x: number; y: number; t: number; max: number; seed: number; big: boolean; glow: boolean }
+interface NkvGh { tr: { x: number; y: number }[]; tx: number; ty: number; has: boolean; atk: number; seed: number }
+interface Nkv { parts: NkvPart[]; ghit: NkvHit[]; gh: WeakMap<NkGhost, NkvGh>; sk: NkvSk[]; key: string; cracks: NkvMark[]; imps: NkvMark[]; time: number; smashAt: number; shakeAt: number; clackAt: number; ambAt: number; flashAt: number; ghSndAt: number; riseSndAt: number; growlAny: number; spawnN: number }
+const NKV = new WeakMap<Game, Nkv>();
+let NKV_SEED = 0x2f6b9e1d;
+let NKV_FREEZE = false;
+// cached soft-glow sprites (radial gradient baked once) so particles/trails cost one drawImage each
+const NKV_SPR = new Map<string, HTMLCanvasElement | null>();
+function nkvSpr(c0: string, c1: string): HTMLCanvasElement | null {
+  const k = c0 + c1;
+  if (NKV_SPR.has(k)) return NKV_SPR.get(k) ?? null;
+  let cv: HTMLCanvasElement | null = null;
+  try {
+    cv = document.createElement("canvas"); cv.width = cv.height = 64;
+    const x = cv.getContext("2d");
+    if (x) { const gg = x.createRadialGradient(32, 32, 0, 32, 32, 32); gg.addColorStop(0, c0); gg.addColorStop(0.35, c1); gg.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = gg; x.fillRect(0, 0, 64, 64); } else cv = null;
+  } catch { cv = null; }
+  NKV_SPR.set(k, cv);
+  return cv;
+}
+function nkvGlow(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement | null, x: number, y: number, r: number, a: number): void {
+  if (!spr || a <= 0.003 || r <= 0) return;
+  ctx.globalAlpha = Math.min(1, a); ctx.drawImage(spr, x - r, y - r, r * 2, r * 2);
+}
+const NKV_G = (): HTMLCanvasElement | null => nkvSpr("rgba(150,255,190,1)", "rgba(60,230,120,0.45)");
+const NKV_D = (): HTMLCanvasElement | null => nkvSpr("rgba(168,152,128,1)", "rgba(130,112,90,0.45)");
+const NKV_W = (): HTMLCanvasElement | null => nkvSpr("rgba(255,255,255,1)", "rgba(150,255,190,0.6)");
+function nvr(): number { NKV_SEED = (NKV_SEED + 0x6d2b79f5) | 0; let t = NKV_SEED; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+function nkvSkNew(): NkvSk { return { alive: false, rise: 0, ox: 0, oy: 0, tx: 0, ty: 0, has: false, tgAt: -9, swing: -1, sdel: 0, walk: 0, face: 1, growlAt: -9, hitDone: true, impX: 0, impY: 0, moved: 0 }; }
+function nkv(g: Game): Nkv {
+  let v = NKV.get(g);
+  if (!v) { v = { parts: [], ghit: [], gh: new WeakMap<NkGhost, NkvGh>(), sk: [0, 1, 2, 3, 4, 5].map(() => nkvSkNew()), key: "", cracks: [], imps: [], time: 0, smashAt: -9, shakeAt: -9, clackAt: -9, ambAt: -9, flashAt: -9, ghSndAt: -9, riseSndAt: -9, growlAny: -9, spawnN: 0 }; NKV.set(g, v); }
+  return v;
+}
+function nkvPart(v: Nkv, x: number, y: number, vx: number, vy: number, life: number, c: string, s: number, gr: number, k: number): void {
+  if (v.parts.length >= 170) v.parts.shift();
+  v.parts.push({ x, y, vx, vy, life, max: life, c, s, gr, rot: nvr() * 6.28, vr: (nvr() - 0.5) * 14, k });
+}
+function nkvRing(g: Game, k: number): { x: number; y: number } {
+  const a = DRAW_T * 1.2 + k * Math.PI / 3;
+  return { x: g.hero.ax + Math.cos(a) * 1.25, y: g.hero.ay + Math.sin(a) * 1.25 };
+}
+function nkvGh(v: Nkv, gh: NkGhost): NkvGh {
+  let o = v.gh.get(gh);
+  if (!o) { o = { tr: [], tx: gh.x, ty: gh.y, has: false, atk: -9, seed: nvr() * 100 }; v.gh.set(gh, o); }
+  return o;
+}
+// a corpse rises as a ghost
+function nkvGhostSpawn(g: Game, x: number, y: number): void {
+  const v = nkv(g), px = x * TS + 12, py = y * TS + 12;
+  v.spawnN++;
+  for (let i = 0; i < 22; i++) { const a = nvr() * 6.28, sp = 10 + nvr() * 40; nkvPart(v, px + Math.cos(a) * 6, py + Math.sin(a) * 3, Math.cos(a) * sp * 0.5, -20 - nvr() * 50, 0.7 + nvr() * 0.9, i % 3 ? GH_C : GH_C2, 3 + nvr() * 5, -18, 2); }
+  v.ghit.push({ x: px, y: py, t: 0.6, max: 0.6, a: -Math.PI / 2, seed: nvr() * 100 });
+}
+function nkvGhostAim(g: Game, gh: NkGhost, tg: En | null): void {
+  const o = nkvGh(nkv(g), gh);
+  if (tg) { o.tx = tg.ax; o.ty = tg.ay; o.has = true; } else o.has = false;
+}
+// one ghost strike lands: flash, ring, claw slashes, ectoplasm, its own sound
+function nkvGhostHit(g: Game, gh: NkGhost, tg: En): void {
+  const v = nkv(g), o = nkvGh(v, gh);
+  o.atk = v.time;
+  const x = tg.ax * TS + 12, y = tg.ay * TS + 10;
+  const a = Math.atan2(tg.ay - gh.y, tg.ax - gh.x);
+  v.ghit.push({ x, y, t: 0.42, max: 0.42, a, seed: nvr() * 100 });
+  if (v.ghit.length > 24) v.ghit.shift();
+  for (let i = 0; i < 12; i++) { const b = a + (nvr() - 0.5) * 2.2, sp = 40 + nvr() * 90; nkvPart(v, x, y, Math.cos(b) * sp, Math.sin(b) * sp - 20, 0.35 + nvr() * 0.45, i % 4 ? GH_C : "#ffffff", 1 + nvr() * 1.6, 120, 0); }
+  for (let i = 0; i < 4; i++) nkvPart(v, x + (nvr() - 0.5) * 10, y + (nvr() - 0.5) * 8, (nvr() - 0.5) * 20, -15 - nvr() * 25, 0.5 + nvr() * 0.4, GH_C, 4 + nvr() * 4, -10, 2);
+  if (v.time - v.ghSndAt > 0.09) { v.ghSndAt = v.time; g.sfx("nkGhostHit", 0); }
+  if (v.time - v.flashAt > 0.9) { v.flashAt = v.time; g.flash = Math.max(g.flash, 0.1); g.flashC = "#9dffbf"; g.shake = Math.max(g.shake, 1.5); }
+}
+// a Phalanx skeleton strikes this tick: stride to the target and start a two-handed swing
+function nkvSkStrike(g: Game, k: number, tg: En): void {
+  const v = nkv(g), sk = v.sk[k];
+  if (!sk) return;
+  sk.tx = tg.ax; sk.ty = tg.ay; sk.has = true; sk.tgAt = v.time;
+  if (!sk.alive || sk.rise < SK_RISE) return;
+  if (sk.swing < 0) { sk.swing = 0; sk.sdel = nvr() * 0.14; sk.hitDone = false; sk.impX = tg.ax * TS + 12 + (nvr() - 0.5) * 6; sk.impY = tg.ay * TS + 16; }
+  if (v.time - sk.growlAt > 5 + nvr() * 5) { sk.growlAt = v.time; if (v.time - v.growlAny > 1.4) { v.growlAny = v.time; g.sfx("nkSkGrowl", 0); } }
+}
+function nkvSkBreak(g: Game, k: number): void {
+  const v = nkv(g), sk = v.sk[k];
+  if (!sk) return;
+  const p = nkvRing(g, k), x = (p.x + sk.ox) * TS + 12, y = (p.y + sk.oy) * TS + 4;
+  for (let i = 0; i < 16; i++) { const a = nvr() * 6.28, sp = 30 + nvr() * 80; nkvPart(v, x, y - nvr() * 20, Math.cos(a) * sp, Math.sin(a) * sp - 40, 0.6 + nvr() * 0.5, i % 3 ? "#efe6cc" : "#bfb49a", 1.6 + nvr() * 2, 260, 1); }
+  sk.alive = false; sk.swing = -1;
+}
+function nkvBoneStorm(g: Game): void {
+  const v = nkv(g), x = g.hero.ax * TS + 12, y = g.hero.ay * TS + 16;
+  v.imps.push({ x, y, t: 0.9, max: 0.9, seed: nvr() * 100, big: true, glow: false });
+  v.cracks.push({ x, y, t: 2.6, max: 2.6, seed: nvr() * 100, big: true, glow: true });
+}
+function nkvTick(g: Game, dt: number): void {
+  const v = nkv(g);
+  if (NKV_FREEZE) return;
+  v.time += dt;
+  for (const p of v.parts) { p.life -= dt; p.vy += p.gr * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; if (p.k === 1 && p.gr > 0) { p.vx *= 1 - 1.5 * dt; } }
+  v.parts = v.parts.filter((p: NkvPart) => p.life > 0);
+  for (const q of v.ghit) q.t -= dt;
+  v.ghit = v.ghit.filter((q: NkvHit) => q.t > 0);
+  for (const q of v.cracks) q.t -= dt;
+  v.cracks = v.cracks.filter((q: NkvMark) => q.t > 0);
+  for (const q of v.imps) q.t -= dt;
+  v.imps = v.imps.filter((q: NkvMark) => q.t > 0);
+  const r = g.nkr;
+  if (r && r.ghosts.length) {
+    for (const gh of r.ghosts) {
+      const o = nkvGh(v, gh);
+      o.tr.unshift({ x: gh.x, y: gh.y + Math.sin(v.time * 4 + o.seed) * 0.08 });
+      if (o.tr.length > 16) o.tr.pop();
+      if (nvr() < dt * 10) nkvPart(v, gh.x * TS + 12 + (nvr() - 0.5) * 14, gh.y * TS + 18 + nvr() * 10, (nvr() - 0.5) * 10, -12 - nvr() * 16, 0.6 + nvr() * 0.6, GH_C, 3 + nvr() * 4, -6, 2);
+    }
+    if (v.time - v.ambAt > 3.4 + nvr() * 2.5) { v.ambAt = v.time; g.sfx("nkGhostAmb", 0); }
+  }
+  const on = !!r && nkOn(g, 2) && g.mode === "play";
+  if (!on) { for (const sk of v.sk) { sk.alive = false; sk.swing = -1; } v.key = ""; return; }
+  const key = nkKey(g);
+  if (v.key !== key) { v.key = key; for (const sk of v.sk) { sk.alive = false; sk.swing = -1; } }
+  let walking = false, rose = 0;
+  for (let k = 0; k < 6; k++) {
+    const sk = v.sk[k], active = (r as NkRt).sk[k] <= 0;
+    const ring = nkvRing(g, k);
+    if (active && !sk.alive) {
+      sk.alive = true; sk.rise = 0; sk.ox = 0; sk.oy = 0; sk.has = false; sk.swing = -1; sk.hitDone = true; sk.face = Math.cos(DRAW_T * 1.2 + k * Math.PI / 3) >= 0 ? 1 : -1;
+      const cx = ring.x * TS + 12, cy = ring.y * TS + 18;
+      v.cracks.push({ x: cx, y: cy, t: 2.4, max: 2.4, seed: nvr() * 100, big: false, glow: true });
+      for (let i = 0; i < 14; i++) { const a = -Math.PI / 2 + (nvr() - 0.5) * 2.4, sp = 40 + nvr() * 70; nkvPart(v, cx + (nvr() - 0.5) * 10, cy, Math.cos(a) * sp, Math.sin(a) * sp, 0.5 + nvr() * 0.6, nvr() < 0.5 ? "#5a4632" : "#8a7458", 1.4 + nvr() * 2.2, 300, 1); }
+      rose++;
+    }
+    if (!active && sk.alive) { sk.alive = false; sk.swing = -1; }
+    if (!sk.alive) continue;
+    sk.rise += dt;
+    let dx = 0, dy = 0;
+    if (sk.has && v.time - sk.tgAt < 0.8 && sk.rise >= SK_RISE) {
+      const ex = sk.tx - ring.x, ey = sk.ty - ring.y, L = Math.hypot(ex, ey);
+      const want = Math.max(0, Math.min(L - 0.62, 0.95));
+      if (L > 1e-3) { dx = ex / L * want; dy = ey / L * want; }
+      if (Math.abs(ex) > 0.1) sk.face = ex > 0 ? 1 : -1;
+    }
+    const mx = dx - sk.ox, my = dy - sk.oy, ml = Math.hypot(mx, my), step = Math.min(ml, 3.2 * dt);
+    if (ml > 1e-4) { sk.ox += mx / ml * step; sk.oy += my / ml * step; }
+    sk.moved = step / Math.max(1e-4, dt);
+    if (step > 0.004) { sk.walk += step * 9; walking = true; }
+    if (sk.swing >= 0) {
+      if (sk.sdel > 0) sk.sdel -= dt;
+      else {
+        sk.swing += dt;
+        if (!sk.hitDone && sk.swing >= SK_SW_HIT) {
+          sk.hitDone = true;
+          const x = sk.impX, y = sk.impY;
+          v.imps.push({ x, y, t: 0.55, max: 0.55, seed: nvr() * 100, big: false, glow: false });
+          if (v.imps.length > 18) v.imps.shift();
+          if (v.cracks.length < 22) v.cracks.push({ x, y, t: 1.4, max: 1.4, seed: nvr() * 100, big: false, glow: false });
+          for (let i = 0; i < 12; i++) { const a = -Math.PI / 2 + (nvr() - 0.5) * 2.8, sp = 50 + nvr() * 110; nkvPart(v, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 0.45 + nvr() * 0.5, nvr() < 0.4 ? "#6a5a48" : nvr() < 0.5 ? "#9a8a70" : "#efe6cc", 1.2 + nvr() * 2.4, 340, 1); }
+          for (let i = 0; i < 5; i++) nkvPart(v, x + (nvr() - 0.5) * 16, y - 2, (nvr() - 0.5) * 40, -10 - nvr() * 20, 0.6 + nvr() * 0.5, "#a89880", 5 + nvr() * 6, -4, 3);
+          if (v.time - v.smashAt > 0.16) { v.smashAt = v.time; g.sfx("nkSkSmash", 0); }
+          if (v.time - v.shakeAt > 0.28) { v.shakeAt = v.time; g.shake = Math.max(g.shake, 3); }
+        }
+        if (sk.swing >= SK_SW_DUR) sk.swing = -1;
+      }
+    }
+  }
+  if (rose && v.time - v.riseSndAt > 0.3) { v.riseSndAt = v.time; g.sfx("nkSkRise", 0); }
+  if (walking && v.time - v.clackAt > 0.42) { v.clackAt = v.time; g.sfx("nkSkClack", 0); }
+}
+// ---- drawing ----
+function nkvBone(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, w: number): void {
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#2e2418"; ctx.lineWidth = w + 0.9; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.strokeStyle = "#e9dfc4"; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,252,236,0.85)"; ctx.lineWidth = Math.max(0.25, w * 0.3); ctx.beginPath(); ctx.moveTo(x1 - 0.2, y1 - 0.2); ctx.lineTo(x2 - 0.2, y2 - 0.2); ctx.stroke();
+  for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.fillStyle = "#2e2418"; ctx.beginPath(); ctx.arc(x, y, w * 0.85 + 0.45, 0, 6.2832); ctx.fill(); ctx.fillStyle = "#efe6cc"; ctx.beginPath(); ctx.arc(x, y, w * 0.85, 0, 6.2832); ctx.fill(); }
+}
+function nkvIK(sx: number, sy: number, gx: number, gy: number, l1: number, l2: number, bend: number): { x: number; y: number } {
+  const dx = gx - sx, dy = gy - sy, d = Math.min(l1 + l2 - 0.01, Math.max(0.01, Math.hypot(dx, dy)));
+  const a = Math.atan2(dy, dx), c = Math.max(-1, Math.min(1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d)));
+  const b = a + bend * Math.acos(c);
+  return { x: sx + Math.cos(b) * l1, y: sy + Math.sin(b) * l1 };
+}
+function nkvEase(x: number): number { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); }
+// detailed skeleton with a two-handed greatsword; local space: feet at 0,0, forward = +x
+function drawNkvSkeleton(ctx: CanvasRenderingContext2D, x: number, y: number, sk: NkvSk, t: number, k: number): void {
+  const rise = Math.min(1, sk.rise / SK_RISE), em = nkvEase(rise);
+  // swing pose: blade angle (screen radians, forward = +x) and grip point
+  let th = -1.15, gx = 4.2, gy = -20.5, blur = 0;
+  const sw = sk.swing >= 0 && sk.sdel <= 0 ? sk.swing : -1;
+  if (sw >= 0) {
+    if (sw < 0.28) { const e = nkvEase(sw / 0.28); th = -1.15 + (-2.75 + 1.15) * e; gx = 4.2 + (-1.5 - 4.2) * e; gy = -20.5 + (-34 + 20.5) * e; }
+    else if (sw < SK_SW_HIT) { const e = (sw - 0.28) / (SK_SW_HIT - 0.28); th = -2.75 + (0.85 + 2.75) * e * e; gx = -1.5 + (8 + 1.5) * e; gy = -34 + (-15 + 34) * e; blur = 1; }
+    else { const e = nkvEase((sw - SK_SW_HIT) / (SK_SW_DUR - SK_SW_HIT)); th = 0.85 + (-1.15 - 0.85) * e; gx = 8 + (4.2 - 8) * e; gy = -15 + (-20.5 + 15) * e; blur = sw - SK_SW_HIT < 0.08 ? 0.6 : 0; }
+  }
+  const wk = sk.walk, bob = Math.abs(Math.sin(wk)) * 0.9, lean = sw >= 0.28 && sw < 0.45 ? 0.16 : 0.04;
+  ctx.save();
+  ctx.translate(x, y);
+  // shadow
+  ctx.globalAlpha = 0.45 * em; ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.ellipse(0, 0.5, 9, 3, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
+  if (rise < 1) { ctx.beginPath(); ctx.rect(-40, -80, 80, 80.6); ctx.clip(); ctx.translate(0, (1 - em) * 44); }
+  ctx.scale(sk.face, 1);
+  ctx.translate(0, -bob);
+  // legs
+  const hipY = -14, la = Math.sin(wk) * 0.5, lb = -la;
+  for (const [hx, a, back] of [[-1.6, lb, 1], [1.8, la, 0]] as [number, number, number][]) {
+    ctx.globalAlpha = back ? 0.82 : 1;
+    const kx = hx + Math.sin(a) * 7, ky = hipY + Math.cos(a) * 7;
+    const ax = kx + Math.sin(a * 0.4) * 6.6, ay = Math.min(-0.8, ky + Math.cos(a * 0.4) * 6.6);
+    nkvBone(ctx, hx, hipY, kx, ky, 1.35);
+    nkvBone(ctx, kx, ky, ax, ay, 1.1);
+    nkvBone(ctx, ax, ay, ax + 2.6, ay + 0.5, 0.8);
+  }
+  ctx.globalAlpha = 1;
+  ctx.rotate(lean);
+  // pelvis
+  ctx.fillStyle = "#2e2418"; ctx.beginPath(); ctx.ellipse(0, -15.2, 4.6, 2.8, 0, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = "#e6dcc0"; ctx.beginPath(); ctx.ellipse(-1.9, -15.6, 2.4, 2.1, -0.4, 0, 6.2832); ctx.fill(); ctx.beginPath(); ctx.ellipse(1.9, -15.6, 2.4, 2.1, 0.4, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = "#3a2e20"; ctx.beginPath(); ctx.ellipse(-1.6, -15, 0.9, 0.8, 0, 0, 6.2832); ctx.fill(); ctx.beginPath(); ctx.ellipse(1.6, -15, 0.9, 0.8, 0, 0, 6.2832); ctx.fill();
+  // spine
+  for (let i = 0; i < 11; i++) { const vy = -16.5 - i * 1.3, vx = Math.sin(i * 0.5) * 0.25; ctx.fillStyle = "#2e2418"; ctx.fillRect(vx - 1.05, vy - 0.62, 2.1, 1.1); ctx.fillStyle = i % 2 ? "#e9dfc4" : "#d9cfb2"; ctx.fillRect(vx - 0.8, vy - 0.5, 1.6, 0.8); }
+  // rib cage
+  ctx.lineCap = "round";
+  for (let i = 0; i < 6; i++) {
+    const ry = -28.6 + i * 1.45, w = 5.2 - Math.abs(i - 1.8) * 0.55;
+    for (const sgn of [-1, 1]) {
+      ctx.strokeStyle = "#2e2418"; ctx.lineWidth = 1.15; ctx.beginPath(); ctx.moveTo(0, ry); ctx.bezierCurveTo(sgn * w * 0.7, ry - 1.4, sgn * w * 1.1, ry + 0.4, sgn * w * 0.55, ry + 2.3); ctx.stroke();
+      ctx.strokeStyle = "#ece3c8"; ctx.lineWidth = 0.65; ctx.beginPath(); ctx.moveTo(0, ry); ctx.bezierCurveTo(sgn * w * 0.7, ry - 1.4, sgn * w * 1.1, ry + 0.4, sgn * w * 0.55, ry + 2.3); ctx.stroke();
+    }
+  }
+  ctx.fillStyle = "#d8cdb0"; ctx.fillRect(-0.55, -29, 1.1, 6.5);
+  // clavicles + arms to the grip (two-handed)
+  const s1x = -4.6, s1y = -29.2, s2x = 4.4, s2y = -29.4;
+  nkvBone(ctx, -0.3, -29.6, s1x, s1y, 0.75); nkvBone(ctx, 0.3, -29.6, s2x, s2y, 0.75);
+  const dirx = Math.cos(th), diry = Math.sin(th);
+  const h1x = gx - dirx * 1.6, h1y = gy - diry * 1.6, h2x = gx + dirx * 1.4, h2y = gy + diry * 1.4;
+  const e1 = nkvIK(s1x, s1y, h1x, h1y, 6.6, 6.2, 1), e2 = nkvIK(s2x, s2y, h2x, h2y, 6.6, 6.2, 1);
+  ctx.globalAlpha = 0.85; nkvBone(ctx, s1x, s1y, e1.x, e1.y, 1.05); nkvBone(ctx, e1.x, e1.y, h1x, h1y, 0.9); ctx.globalAlpha = 1;
+  // greatsword (motion smear first)
+  const bl = 27;
+  if (blur > 0) {
+    const prev = ctx.globalCompositeOperation; ctx.globalCompositeOperation = "lighter";
+    for (let j = 1; j <= 5; j++) {
+      const ta = th - j * 0.22;
+      ctx.globalAlpha = 0.16 * blur * (1 - j / 6); ctx.strokeStyle = "#f4faff"; ctx.lineWidth = 3.4;
+      ctx.beginPath(); ctx.moveTo(gx + Math.cos(ta) * 4, gy + Math.sin(ta) * 4); ctx.lineTo(gx + Math.cos(ta) * (bl + 4), gy + Math.sin(ta) * (bl + 4)); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.35 * blur; ctx.strokeStyle = "#c8ff90"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(gx, gy, bl + 3, th - 1.2, th); ctx.stroke();
+    ctx.globalCompositeOperation = prev; ctx.globalAlpha = 1;
+  }
+  ctx.save();
+  ctx.translate(gx, gy); ctx.rotate(th);
+  ctx.fillStyle = "#3a2a1a"; ctx.fillRect(-4.2, -0.9, 6.6, 1.8);            // grip
+  ctx.fillStyle = "#6a4e2e"; for (let i = 0; i < 4; i++) ctx.fillRect(-3.8 + i * 1.6, -0.9, 0.5, 1.8);
+  ctx.fillStyle = "#b89a50"; ctx.beginPath(); ctx.arc(-4.8, 0, 1.4, 0, 6.2832); ctx.fill();   // pommel
+  ctx.fillStyle = "#2a2a30"; ctx.fillRect(2.2, -4.6, 1.9, 9.2);              // crossguard
+  ctx.fillStyle = "#9aa0aa"; ctx.fillRect(2.5, -4.3, 1.3, 8.6);
+  const bg = ctx.createLinearGradient(0, -2.2, 0, 2.2);
+  bg.addColorStop(0, "#ffffff"); bg.addColorStop(0.35, "#c9d2dc"); bg.addColorStop(0.55, "#7d8895"); bg.addColorStop(1, "#dfe6ee");
+  ctx.fillStyle = "#1a1c22"; ctx.beginPath(); ctx.moveTo(4, -2.5); ctx.lineTo(bl - 2, -2.1); ctx.lineTo(bl + 2.4, 0); ctx.lineTo(bl - 2, 2.1); ctx.lineTo(4, 2.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.moveTo(4, -2.1); ctx.lineTo(bl - 2, -1.7); ctx.lineTo(bl + 1.8, 0); ctx.lineTo(bl - 2, 1.7); ctx.lineTo(4, 2.1); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(60,66,80,0.8)"; ctx.lineWidth = 0.45; ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(bl - 5, 0); ctx.stroke();   // fuller
+  ctx.fillStyle = "rgba(120,30,20,0.55)"; ctx.beginPath(); ctx.ellipse(bl - 8, 0.8, 2.2, 0.6, 0.1, 0, 6.2832); ctx.fill();               // old blood
+  ctx.restore();
+  // near arm over the hilt
+  nkvBone(ctx, s2x, s2y, e2.x, e2.y, 1.1); nkvBone(ctx, e2.x, e2.y, h2x, h2y, 0.95);
+  ctx.fillStyle = "#e9dfc4"; ctx.beginPath(); ctx.arc(h1x, h1y, 1.1, 0, 6.2832); ctx.arc(h2x, h2y, 1.15, 0, 6.2832); ctx.fill();
+  // skull
+  const nod = sw >= 0 && sw < SK_SW_HIT ? -0.15 : Math.sin(t * 2 + k) * 0.05;
+  ctx.save(); ctx.translate(0.6, -35.2); ctx.rotate(nod);
+  for (let i = 0; i < 3; i++) { ctx.fillStyle = "#d9cfb2"; ctx.fillRect(-0.7, 2.6 + i * 1.0, 1.4, 0.7); }
+  const sg = ctx.createRadialGradient(-1.2, -1.8, 0.5, 0, 0, 5.2);
+  sg.addColorStop(0, "#fffaf0"); sg.addColorStop(0.7, "#e2d7ba"); sg.addColorStop(1, "#a89a7c");
+  ctx.fillStyle = "#2e2418"; ctx.beginPath(); ctx.ellipse(0, -0.6, 4.7, 4.9, 0, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(0, -0.6, 4.2, 4.4, 0, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = "#2e2418"; ctx.beginPath(); ctx.moveTo(-2.4, 2.4); ctx.lineTo(3.8, 2.2); ctx.lineTo(3.2, 4.6); ctx.lineTo(-1.6, 4.4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#e2d7ba"; ctx.beginPath(); ctx.moveTo(-2, 2.6); ctx.lineTo(3.5, 2.4); ctx.lineTo(2.9, 4.2); ctx.lineTo(-1.3, 4.0); ctx.closePath(); ctx.fill();   // jaw
+  ctx.fillStyle = "#3a2e20"; for (let i = 0; i < 5; i++) ctx.fillRect(-1.2 + i * 0.95, 2.25, 0.28, 1.1);                                                   // teeth gaps
+  ctx.fillStyle = "#120c08"; ctx.beginPath(); ctx.ellipse(0.3, -0.5, 1.25, 1.45, -0.2, 0, 6.2832); ctx.fill(); ctx.beginPath(); ctx.ellipse(3.0, -0.6, 1.05, 1.35, 0.2, 0, 6.2832); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(2.0, 0.9); ctx.lineTo(1.4, 2.0); ctx.lineTo(2.5, 2.0); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(60,46,30,0.7)"; ctx.lineWidth = 0.3; ctx.beginPath(); ctx.moveTo(-3, -3.2); ctx.lineTo(-1.6, -2.2); ctx.lineTo(-2.2, -0.9); ctx.stroke();   // crack
+  const prev = ctx.globalCompositeOperation; ctx.globalCompositeOperation = "lighter";
+  const fl = 0.7 + 0.3 * Math.sin(t * 9 + k * 1.7);
+  for (const ex of [0.3, 3.0]) { const eg = ctx.createRadialGradient(ex, -0.5, 0, ex, -0.5, 2.6); eg.addColorStop(0, "rgba(220,255,140," + (0.95 * fl).toFixed(2) + ")"); eg.addColorStop(1, "rgba(120,230,40,0)"); ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(ex, -0.5, 2.6, 0, 6.2832); ctx.fill(); }
+  ctx.globalCompositeOperation = prev;
+  ctx.restore();
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+// large translucent green apparition with a flowing tail, hollow face, glow and trail
+function drawNkvGhost(ctx: CanvasRenderingContext2D, gh: NkGhost, o: NkvGh, v: Nkv, camX: number, camY: number, t: number): void {
+  const fade = Math.min(1, gh.t / 1.2) * Math.min(1, (15 - gh.t) / 0.5 + 0.2);
+  const x = gh.x * TS + 12 - camX + Math.cos(t * 0.9 + o.seed) * 7, y = gh.y * TS + 4 - camY + Math.sin(t * 2.6 + o.seed) * 2.2 + Math.sin(t * 1.1 + o.seed * 1.3) * 4;
+  const atk = Math.max(0, 1 - (v.time - o.atk) / 0.28);
+  const ta = o.has ? Math.atan2(o.ty - gh.y, o.tx - gh.x) : 0;
+  const face = o.has ? (Math.cos(ta) >= 0 ? 1 : -1) : 1;
+  const prev = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = "lighter";
+  // trail
+  for (let i = o.tr.length - 1; i >= 1; i--) {
+    const p = o.tr[i], f = 1 - i / o.tr.length;
+    const px = p.x * TS + 12 - camX, py = p.y * TS + 12 - camY;
+    if (i % 2) continue;
+    nkvGlow(ctx, NKV_G(), px, py, 4 + 9 * f, 0.36 * f * fade);
+  }
+  // eerie aura
+  nkvGlow(ctx, NKV_G(), x, y + 2, 34, 0.36 * fade * (0.85 + 0.15 * Math.sin(t * 7 + o.seed)));
+  ctx.globalCompositeOperation = prev;
+  ctx.save();
+  ctx.translate(x, y);
+  const lean = o.has ? Math.max(-0.45, Math.min(0.45, Math.cos(ta) * 0.25 + atk * 0.25 * face)) : Math.sin(t * 1.3 + o.seed) * 0.1;
+  ctx.rotate(lean);
+  ctx.scale(face, 1);
+  const flick = (0.82 + 0.18 * Math.sin(t * 23 + o.seed * 3)) * fade;
+  const sway = Math.sin(t * 3.1 + o.seed), sway2 = Math.sin(t * 4.3 + o.seed * 1.7);
+  const stretch = 1 + atk * 0.25;
+  // wispy arms (behind the body) reaching forward when it strikes
+  ctx.lineCap = "round";
+  for (const [sx, ph] of [[-7, 0], [7.5, 1.3]] as [number, number][]) {
+    const reach = 6 + atk * 12;
+    ctx.globalAlpha = 0.55 * flick; ctx.strokeStyle = "#7dffb0"; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(sx, -6); ctx.bezierCurveTo(sx + 5, -2 + Math.sin(t * 5 + ph) * 3, sx + reach, 2 + Math.sin(t * 6 + ph) * 4, sx + reach + 4, -1 + Math.sin(t * 7 + ph) * 3); ctx.stroke();
+    ctx.globalAlpha = 0.5 * flick; ctx.strokeStyle = "#b8ffd4"; ctx.lineWidth = 0.6; ctx.stroke();
+    ctx.globalAlpha = 0.55 * flick; ctx.strokeStyle = "#7dffb0"; ctx.lineWidth = 0.45;
+    for (let f = 0; f < 3; f++) { const fx = sx + reach + 4, fy = -1 + Math.sin(t * 7 + ph) * 3; ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + 2.6 + atk * 2, fy - 1.5 + f * 1.5); ctx.stroke(); }
+  }
+  // body: hooded dome, shoulders, flowing tail into three tendrils
+  const body = new Path2D();
+  body.moveTo(-9.5, -10);
+  body.bezierCurveTo(-10.5, -26 * stretch, 10.5, -26 * stretch, 9.5, -10);
+  body.bezierCurveTo(12 + sway * 2, -1, 9 + sway * 3, 10, 6 + sway * 5, 18);
+  body.bezierCurveTo(5 + sway * 6, 24, 3 + sway2 * 7, 30, 1 + sway2 * 9, 36);
+  body.bezierCurveTo(-1 + sway2 * 5, 30, -2 + sway * 4, 27, -3 + sway * 4, 25);
+  body.bezierCurveTo(-4 + sway2 * 4, 30, -6 + sway2 * 6, 33, -8 + sway2 * 7, 34);
+  body.bezierCurveTo(-8 + sway * 3, 26, -9 + sway * 2, 20, -10 + sway * 2, 14);
+  body.bezierCurveTo(-12 + sway2, 6, -11.5, -2, -9.5, -10);
+  body.closePath();
+  const bgd = ctx.createLinearGradient(0, -24, 0, 36);
+  bgd.addColorStop(0, "rgba(225,255,235," + (0.82 * flick).toFixed(3) + ")");
+  bgd.addColorStop(0.35, "rgba(110,255,165," + (0.58 * flick).toFixed(3) + ")");
+  bgd.addColorStop(0.75, "rgba(30,210,100," + (0.25 * flick).toFixed(3) + ")");
+  bgd.addColorStop(1, "rgba(0,160,70,0)");
+  ctx.globalAlpha = 1; ctx.fillStyle = bgd; ctx.fill(body);
+  ctx.save(); ctx.clip(body);
+  ctx.globalCompositeOperation = "lighter";
+  const ig = ctx.createRadialGradient(0, -12, 1, 0, -10, 18);
+  ig.addColorStop(0, "rgba(180,255,210," + (0.5 * flick).toFixed(3) + ")"); ig.addColorStop(1, "rgba(60,255,140,0)");
+  ctx.fillStyle = ig; ctx.fillRect(-14, -30, 28, 40);
+  ctx.strokeStyle = "rgba(200,255,225," + (0.22 * flick).toFixed(3) + ")"; ctx.lineWidth = 0.6;
+  for (let i = 0; i < 4; i++) { const sx2 = -6 + i * 4; ctx.beginPath(); ctx.moveTo(sx2, -4); ctx.bezierCurveTo(sx2 + sway * 2, 8, sx2 - sway2 * 3, 18, sx2 + sway * 4, 30); ctx.stroke(); }   // flowing folds
+  ctx.restore();
+  ctx.globalAlpha = 0.65 * flick; ctx.strokeStyle = "#c8ffe0"; ctx.lineWidth = 0.5; ctx.stroke(body);
+  // hollow face: deep eye sockets, a long screaming mouth
+  ctx.globalAlpha = 0.9 * fade;
+  const eg = (ex: number, ey: number, rx: number, ry: number): void => {
+    const gg = ctx.createRadialGradient(ex, ey, 0.2, ex, ey, ry);
+    gg.addColorStop(0, "rgba(0,8,4,0.98)"); gg.addColorStop(0.7, "rgba(0,30,14,0.9)"); gg.addColorStop(1, "rgba(0,60,30,0)");
+    ctx.fillStyle = gg; ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry, 0, 0, 6.2832); ctx.fill();
+  };
+  eg(-2.6, -14.5, 2.4, 3.4); eg(3.4, -14.3, 2.2, 3.2);
+  const mo = 3.4 + atk * 2.6 + Math.max(0, Math.sin(t * 2.2 + o.seed)) * 1.2;
+  eg(0.8, -6.5 + mo * 0.3, 1.9 + atk * 0.6, mo);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = (0.8 + 0.2 * Math.sin(t * 11 + o.seed)) * fade; ctx.fillStyle = "#eafff2";
+  ctx.beginPath(); ctx.arc(-2.4, -14, 0.55, 0, 6.2832); ctx.arc(3.3, -13.8, 0.5, 0, 6.2832); ctx.fill();
+  ctx.globalCompositeOperation = prev;
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+function nkvCrackPath(ctx: CanvasRenderingContext2D, x: number, y: number, seed: number, big: boolean, grow: number): void {
+  let s = seed;
+  const rnd = (): number => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  const n = big ? 11 : 7, R0 = (big ? 34 : 13) * grow;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    let a = (i / n) * 6.2832 + rnd() * 0.5, px = x, py = y, L = 0;
+    ctx.moveTo(px, py);
+    while (L < R0) {
+      const st = 2 + rnd() * 3; a += (rnd() - 0.5) * 0.9; px += Math.cos(a) * st; py += Math.sin(a) * st * 0.5; L += st; ctx.lineTo(px, py);
+      if (rnd() < 0.22) { const b = a + (rnd() < 0.5 ? 0.9 : -0.9); ctx.lineTo(px + Math.cos(b) * st * 1.2, py + Math.sin(b) * st * 0.6); ctx.moveTo(px, py); }
+    }
+  }
+}
+function drawNkvGround(ctx: CanvasRenderingContext2D, v: Nkv, camX: number, camY: number, t: number): void {
+  for (const c of v.cracks) {
+    const age = 1 - c.t / c.max, grow = Math.min(1, age * 6), a = Math.min(1, c.t / 0.8);
+    const x = c.x - camX, y = c.y - camY;
+    ctx.globalAlpha = 0.55 * a; ctx.fillStyle = "#1a120a"; ctx.beginPath(); ctx.ellipse(x, y, (c.big ? 22 : 9) * grow, (c.big ? 9 : 3.6) * grow, 0, 0, 6.2832); ctx.fill();
+    nkvCrackPath(ctx, x, y, Math.floor(c.seed * 1000), c.big, grow);
+    ctx.globalAlpha = 0.9 * a; ctx.strokeStyle = "#140c06"; ctx.lineWidth = 1.4; ctx.lineJoin = "round"; ctx.stroke();
+    if (c.glow) {
+      const prev = ctx.globalCompositeOperation; ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.7 * a * (0.7 + 0.3 * Math.sin(t * 12 + c.seed)); ctx.strokeStyle = "#a8e830"; ctx.lineWidth = 0.6; ctx.stroke();
+      ctx.globalCompositeOperation = prev;
+    } else { ctx.globalAlpha = 0.5 * a; ctx.strokeStyle = "#7a6650"; ctx.lineWidth = 0.4; ctx.stroke(); }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawNkvTop(ctx: CanvasRenderingContext2D, v: Nkv, camX: number, camY: number, t: number): void {
+  const prev = ctx.globalCompositeOperation;
+  // skeleton smash: shockwave ring, dust, white impact star
+  for (const q of v.imps) {
+    const p = 1 - q.t / q.max, a = 1 - p, x = q.x - camX, y = q.y - camY, R1 = (q.big ? 70 : 34) * nkvEase(Math.min(1, p * 1.6));
+    ctx.globalAlpha = 0.85 * a; ctx.strokeStyle = "#f2e8d0"; ctx.lineWidth = 3.2 * a + 0.4; ctx.beginPath(); ctx.ellipse(x, y, R1, R1 * 0.42, 0, 0, 6.2832); ctx.stroke();
+    ctx.globalAlpha = 0.5 * a; ctx.strokeStyle = "#8a7458"; ctx.lineWidth = 6 * a; ctx.beginPath(); ctx.ellipse(x, y, R1 * 0.8, R1 * 0.34, 0, 0, 6.2832); ctx.stroke();
+    for (let i = 0; i < 5; i++) {
+      const ang = q.seed + i * 1.256, d = R1 * 0.55, px = x + Math.cos(ang) * d, py = y + Math.sin(ang) * d * 0.4 - p * 8, rr = 5 + p * 12;
+      nkvGlow(ctx, NKV_D(), px, py, rr, 0.5 * a);
+    }
+    if (p < 0.3) {
+      ctx.globalCompositeOperation = "lighter";
+      const f = 1 - p / 0.3;
+      const wg = ctx.createRadialGradient(x, y - 4, 0, x, y - 4, (q.big ? 40 : 18));
+      wg.addColorStop(0, "rgba(255,255,255," + (0.95 * f).toFixed(3) + ")"); wg.addColorStop(0.4, "rgba(255,240,200," + (0.5 * f).toFixed(3) + ")"); wg.addColorStop(1, "rgba(255,200,120,0)");
+      ctx.fillStyle = wg; ctx.beginPath(); ctx.arc(x, y - 4, (q.big ? 40 : 18), 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.2; ctx.globalAlpha = f;
+      for (let i = 0; i < 10; i++) { const ang = q.seed * 2 + i * 0.628, L = (q.big ? 46 : 22) * (0.6 + (i % 2) * 0.5) * (0.4 + p * 2); ctx.beginPath(); ctx.moveTo(x + Math.cos(ang) * 4, y - 4 + Math.sin(ang) * 3); ctx.lineTo(x + Math.cos(ang) * L, y - 4 + Math.sin(ang) * L * 0.6); ctx.stroke(); }
+      ctx.globalCompositeOperation = prev;
+    }
+  }
+  // ghost strike: green-white core, shock ring, three claw slashes, spikes
+  ctx.globalCompositeOperation = "lighter";
+  for (const q of v.ghit) {
+    const p = 1 - q.t / q.max, a = 1 - p, x = q.x - camX, y = q.y - camY;
+    const cr = 6 + 22 * p;
+    nkvGlow(ctx, NKV_W(), x, y, cr, 0.95 * a);
+    ctx.globalAlpha = 0.9 * a; ctx.strokeStyle = "#b8ffd0"; ctx.lineWidth = 2.6 * a + 0.4; ctx.beginPath(); ctx.arc(x, y, 5 + 30 * nkvEase(p), 0, 6.2832); ctx.stroke();
+    if (p < 0.55) {
+      const f = 1 - p / 0.55;
+      for (let i = -1; i <= 1; i++) {
+        const o2 = i * 4.2, ca = Math.cos(q.a), sa = Math.sin(q.a), nx = -sa, ny = ca;
+        const x0 = x - ca * 14 + nx * (o2 - 6), y0 = y - sa * 14 + ny * (o2 - 6), x1 = x + ca * 14 + nx * (o2 + 6), y1 = y + sa * 14 + ny * (o2 + 6);
+        ctx.globalAlpha = 0.9 * f; ctx.strokeStyle = "#5cff9a"; ctx.lineWidth = 3.2 * f;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(x + nx * (o2 + 3), y + ny * (o2 + 3), x1, y1); ctx.stroke();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.1 * f; ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 0.8 * a; ctx.strokeStyle = "#d8ffe6"; ctx.lineWidth = 1;
+    for (let i = 0; i < 8; i++) { const ang = q.seed + i * 0.785, L = 8 + 22 * p; ctx.beginPath(); ctx.moveTo(x + Math.cos(ang) * L * 0.4, y + Math.sin(ang) * L * 0.4); ctx.lineTo(x + Math.cos(ang) * L, y + Math.sin(ang) * L); ctx.stroke(); }
+  }
+  ctx.globalCompositeOperation = prev;
+  // particles: 0 spark, 1 bone/rock shard, 2 ectoplasm wisp, 3 dust puff
+  for (const p of v.parts) {
+    const a = Math.max(0, Math.min(1, p.life / p.max)), x = p.x - camX, y = p.y - camY;
+    if (p.k === 2 || p.k === 3) {
+      const rr = p.s * (1.4 - a * 0.6);
+      if (p.k === 2) { ctx.globalCompositeOperation = "lighter"; nkvGlow(ctx, NKV_G(), x, y, rr, 0.5 * a); ctx.globalCompositeOperation = prev; }
+      else nkvGlow(ctx, NKV_D(), x, y, rr, 0.45 * a);
+    } else if (p.k === 1) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot); ctx.globalAlpha = a;
+      ctx.fillStyle = "#1a120a"; ctx.fillRect(-p.s * 0.6 - 0.3, -p.s * 0.35 - 0.3, p.s * 1.2 + 0.6, p.s * 0.7 + 0.6);
+      ctx.fillStyle = p.c; ctx.fillRect(-p.s * 0.6, -p.s * 0.35, p.s * 1.2, p.s * 0.7);
+      ctx.restore();
+    } else {
+      ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = a; ctx.fillStyle = p.c;
+      ctx.fillRect(x - p.s * 0.6, y - p.s * 0.6, p.s * 1.2, p.s * 1.2);
+      ctx.globalCompositeOperation = prev;
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+// under the darkness pass: cracked earth and the skeletons (lit by the hero's torch like everything else on the ground)
+function drawNkvUnder(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const v = NKV.get(g), r = g.nkr;
+  if (!v) return;
+  drawNkvGround(ctx, v, camX, camY, t);
+  if (r && nkOn(g, 2)) {
+    const order: { k: number; y: number; x: number }[] = [];
+    for (let k = 0; k < 6; k++) { const sk = v.sk[k]; if (!sk.alive || r.sk[k] > 0) continue; const p = nkvRing(g, k); order.push({ k, x: (p.x + sk.ox) * TS + 12 - camX, y: (p.y + sk.oy) * TS + 20 - camY }); }
+    order.sort((a: { y: number }, b: { y: number }) => a.y - b.y);
+    for (const o of order) drawNkvSkeleton(ctx, o.x, o.y, v.sk[o.k], t, o.k);
+  }
+  ctx.globalAlpha = 1;
+}
+// over the darkness pass: the glowing apparitions and every impact, so they read in the dark
+function drawNkvOver(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const v = NKV.get(g), r = g.nkr;
+  if (!v || !g.nk) return;
+  if (r) for (const gh of r.ghosts) drawNkvGhost(ctx, gh, nkvGh(v, gh), v, camX, camY, t);
+  drawNkvTop(ctx, v, camX, camY, t);
+  ctx.globalAlpha = 1;
+}
 function drawNkWorld(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
   const s = g.nk; if (!s) return;
   const r = g.nkr, h = g.hero;
@@ -11232,19 +11725,7 @@ function drawNkWorld(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY:
       ctx.globalCompositeOperation = prev;
     }
     ctx.globalAlpha = 1;
-    if (nkOn(g, 2)) for (let k = 0; k < 6; k++) {
-      if (r.sk[k] > 0) continue;
-      const a = DRAW_T * 1.2 + k * Math.PI / 3;
-      const x = Math.round(hx + Math.cos(a) * 1.25 * TS), y = Math.round(hy + Math.sin(a) * 1.25 * TS);
-      ctx.fillStyle = "#e8e8d0"; ctx.fillRect(x - 2, y - 7, 4, 4); ctx.fillRect(x - 1, y - 3, 2, 6); ctx.fillRect(x - 3, y - 2, 6, 1); ctx.fillRect(x - 2, y + 3, 1, 3); ctx.fillRect(x + 1, y + 3, 1, 3);
-      ctx.fillStyle = "#101010"; ctx.fillRect(x - 1, y - 6, 1, 1); ctx.fillRect(x + 1, y - 6, 1, 1);
-      ctx.fillStyle = NK[2].c; ctx.fillRect(x + 3, y - 6 + (Math.sin(t * 9 + k) > 0 ? 0 : 2), 1, 7);
-    }
-    for (const gh of r.ghosts) {
-      const x = gh.x * TS + 12 - camX, y = gh.y * TS + 10 - camY + Math.sin(t * 4 + gh.x) * 2;
-      ctx.globalAlpha = 0.55 * Math.min(1, gh.t); ctx.fillStyle = NK[1].c; ctx.beginPath(); ctx.arc(x, y, 6, Math.PI, 0); ctx.lineTo(x + 6, y + 7); ctx.lineTo(x + 3, y + 5); ctx.lineTo(x, y + 8); ctx.lineTo(x - 3, y + 5); ctx.lineTo(x - 6, y + 7); ctx.closePath(); ctx.fill();
-      ctx.globalAlpha = Math.min(1, gh.t); ctx.fillStyle = "#ffffff"; ctx.fillRect(x - 3, y - 1, 2, 2); ctx.fillRect(x + 1, y - 1, 2, 2);
-    }
+    drawNkvUnder(ctx, g, camX, camY, t);
     ctx.globalAlpha = 1;
     if (r.twin) {
       const tw = r.twin, x = tw.x * TS - camX, y = tw.y * TS - camY;
@@ -11623,13 +12104,19 @@ try {
         }
         g.flash = Math.max(g.flash, 0.16); g.flashC = "#c8e8ff"; g.shake = Math.max(g.shake, 2);
       } else if (i === 1) {
-        mid("nkburst", hx + 24, hy, 0, 0, 0.5, NK[1].c, NK[1].c2, 1.4 * TS);
-        burst(g, hx + 24, hy, 18, [NK[1].c, NK[1].c2, "#ffffff"], 70, 50);
+        mid("nkburst", hx + 24, hy, 0, 0, 0.5, GH_C, GH_C2, 1.4 * TS);
+        burst(g, hx + 24, hy, 18, [GH_C, GH_C2, "#ffffff"], 70, 50);
+        nkvGhostSpawn(g, h.ax + 1, h.ay);
+        const v = nkv(g);
+        v.ghit.push({ x: hx + 40, y: hy - 2, t: 0.42 * 0.75, max: 0.42, a: 0, seed: 1.3 });
         g.sfx("nkGrave");
       } else if (i === 2) {
         mid("nkburst", hx, hy, 0, 0, 0.55, "#f0f0d8", NK[2].c, 3.2 * TS);
         burst(g, hx, hy, 50, ["#f0f0d8", NK[2].c], 140, 40);
         g.flash = 0.2; g.flashC = "#d0ff60"; g.shake = Math.max(g.shake, 4);
+        nkvBoneStorm(g);
+        const v = nkv(g);
+        v.imps.push({ x: hx + 30, y: hy + 6, t: 0.55 * 0.8, max: 0.55, seed: 2.1, big: false, glow: false });
         g.sfx("nkPhalanx");
       } else if (i === 3) {
         mid("nkburst", hx, hy, 0, 0, 0.3, NK[3].c2, "#ffffff", 1.2 * TS);
@@ -11674,6 +12161,44 @@ try {
     },
     rates: (): Record<string, unknown> => ({ NK_BASE, NK_BASE_E, NK_MIN_DEPTH, NK_W_NORM, NK_W_ACT }),
     holdFx: (on: boolean): void => { NK_FX_HOLD = !!on; },
+    // mechanics fingerprint for Grave Toll (1) / Phalanx (2): seeded Math.random + fixed DRAW_T, fixed foes, N ticks of nkTick
+    nkMechSim: (which: number, steps: number, seed: number): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const mr = Math.random, dt0 = DRAW_T, prevSkip = GIB_SKIP_SAVE;
+      let sd = seed >>> 0;
+      Math.random = (): number => { sd = (sd + 0x6d2b79f5) >>> 0; let t = sd; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+      const log: unknown[] = [];
+      try {
+        GIB_SKIP_SAVE = true;
+        g.mode = "play";
+        const s = nkOf(g); s.own = [1, 1, 1, 1, 1, 1, 1, 0]; s.got = true; s.eq = [which]; s.gd = [];
+        g.nkr = undefined as unknown as NkRt; const r = nkRt(g);
+        const h = g.hero; h.hp = 1e12;
+        g.en = [];
+        const offs: number[][] = [[2, 0], [-1, 2], [3, -2], [0, -3], [1, 1]];
+        const foes: En[] = [];
+        for (const [dx, dy] of offs) { const e = mkEnemy(g, h.x + dx, h.y + dy, 0); e.hp = e.mhp = 1e9; e.def = 0; g.en.push(e); foes.push(e); }
+        if (which === 1) for (let k = 0; k < 3; k++) { const e = mkEnemy(g, h.x + 1 + k, h.y + 1, 0); e.hp = 0; nkOnKill(g, e); }
+        for (let i = 0; i < steps; i++) {
+          DRAW_T = i * 0.05;
+          if (which === 2 && i % 23 === 11) nkPreHurt(g, 10);
+          nkTick(g, 0.05);
+          if (i % 5 === 4) log.push([i, foes.map((e: En) => e.hp), r.ghosts.map((q: NkGhost) => [Math.round(q.x * 1e6), Math.round(q.y * 1e6), Math.round(q.t * 1e6), Math.round(q.cd * 1e6)]), r.sk.map((v: number) => Math.round(v * 1e6)), r.skKills, Math.round(r.skCd * 1e6)]);
+        }
+        const dealt = foes.map((e: En) => 1e9 - e.hp);
+        g.en = []; g.fx = []; g.parts = []; g.floats = [];
+        return { ok: true, which, steps, dealt, log };
+      } finally { Math.random = mr; DRAW_T = dt0; GIB_SKIP_SAVE = prevSkip; }
+    },
+    nkvState: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const v = NKV.get(g), r = g.nkr;
+      if (!v) return { ok: true, none: true, ghosts: r ? r.ghosts.length : 0 };
+      return { ok: true, time: v.time, ghosts: r ? r.ghosts.length : 0, ghit: v.ghit.map((q: NkvHit) => +(1 - q.t / q.max).toFixed(3)), parts: v.parts.length, cracks: v.cracks.length, imps: v.imps.map((q: NkvMark) => +(1 - q.t / q.max).toFixed(3)), spawnN: v.spawnN,
+        sk: v.sk.map((k: NkvSk) => ({ alive: k.alive, rise: +k.rise.toFixed(3), swing: +k.swing.toFixed(3), sdel: +k.sdel.toFixed(3), ox: +k.ox.toFixed(3), oy: +k.oy.toFixed(3), hitDone: k.hitDone })) };
+    },
+    nkvFreeze: (on: boolean): void => { NKV_FREEZE = !!on; },
+    nkvReset: (): void => { const g = nkTestG(); if (g) NKV.delete(g); },
     quietHud: (): void => { const g = nkTestG(); if (!g) return; g.banner = null; g.flash = Math.min(g.flash, 0.2); g.floats = []; g.msgs = []; g.warn = ""; },
   };
 } catch { /* ignore */ }
@@ -22389,6 +22914,163 @@ export default function App() {
       // release the bus nodes after the tail
       window.setTimeout(() => { try { bus.disconnect(); } catch { /* ignore */ } }, (DET + 6) * 1000);
     };
+    // Grave Toll / Phalanx of the Dead sound design: one persistent bus -> limiter -> the normal SFX gain (mute still applies),
+    // with a cached long cave reverb and a tanh drive stage. Everything here is procedural WebAudio.
+    let nkuBus: GainNode | null = null, nkuVerb: ConvolverNode | null = null, nkuDrive: WaveShaperNode | null = null, nkuVoices = 0;
+    const nkuSetup = (): boolean => {
+      if (!ac || !sfxGain || !noiseBuf) return false;
+      if (nkuBus) return true;
+      const A = ac;
+      const lim = A.createDynamicsCompressor();
+      lim.threshold.value = -14; lim.knee.value = 8; lim.ratio.value = 10; lim.attack.value = 0.002; lim.release.value = 0.3;
+      lim.connect(sfxGain);
+      nkuBus = A.createGain(); nkuBus.gain.value = 0.95; nkuBus.connect(lim);
+      const len = Math.floor(A.sampleRate * 3.6), ir = A.createBuffer(2, len, A.sampleRate);
+      for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2) * (i < 900 ? i / 900 : 1); }
+      nkuVerb = A.createConvolver(); nkuVerb.buffer = ir;
+      const wet = A.createGain(); wet.gain.value = 0.6; nkuVerb.connect(wet); wet.connect(lim);
+      nkuDrive = A.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 4.5); }
+      nkuDrive.curve = curve; nkuDrive.connect(nkuBus);
+      return true;
+    };
+    const nkuSfx = (n: string): void => {
+      if (!ac || !sfxShouldPlay(mutedRef.current) || !nkuSetup() || !nkuBus || !nkuVerb || !nkuDrive || !noiseBuf) return;
+      if (nkuVoices > 14) return; // keep the node count bounded in big fights
+      nkuVoices++; window.setTimeout(() => { nkuVoices = Math.max(0, nkuVoices - 1); }, 900);
+      const A = ac, T = A.currentTime + 0.01, dry = nkuBus, verb = nkuVerb, drive = nkuDrive, nb = noiseBuf;
+      const out = (node: AudioNode, wet: number, pan: number, dest: AudioNode = dry): void => {
+        let o: AudioNode = node;
+        if (pan && A.createStereoPanner) { const p = A.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan)); node.connect(p); o = p; }
+        o.connect(dest);
+        if (wet > 0) { const s = A.createGain(); s.gain.value = wet; o.connect(s); s.connect(verb); }
+      };
+      const env = (gn: GainNode, t0: number, pts: [number, number][]): number => {
+        gn.gain.setValueAtTime(0.0001, T + t0); let end = t0;
+        for (const [t, v] of pts) { gn.gain.linearRampToValueAtTime(Math.max(0.0001, v), T + t0 + t); end = t0 + t; }
+        return end;
+      };
+      // oscillator voice; fpts = [time, freq] exponential glide; optional vibrato
+      const vo = (t0: number, type: OscillatorType, f0: number, fpts: [number, number][], gpts: [number, number][], wet: number, pan = 0, vib = 0, vibHz = 5, dest?: AudioNode, lp = 0): void => {
+        const o = A.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, T + t0);
+        for (const [t, f] of fpts) o.frequency.exponentialRampToValueAtTime(Math.max(16, f), T + t0 + t);
+        if (vib) { const l = A.createOscillator(); l.frequency.value = vibHz; const lg = A.createGain(); lg.gain.value = vib; l.connect(lg); lg.connect(o.frequency); l.start(T + t0); l.stop(T + t0 + 4); }
+        const gn = A.createGain(); const end = env(gn, t0, gpts);
+        let src: AudioNode = o;
+        if (lp) { const f = A.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = lp; f.Q.value = 0.8; o.connect(f); src = f; }
+        src.connect(gn); out(gn, wet, pan, dest);
+        o.start(T + t0); o.stop(T + end + 0.05);
+      };
+      // filtered noise; ftype sweep f0->f1; am = amplitude-modulation rate (whispers / rasp)
+      const nn = (t0: number, dur: number, gpts: [number, number][], ftype: BiquadFilterType, f0: number, f1: number, q: number, wet: number, pan = 0, am = 0, dest?: AudioNode): void => {
+        const s = A.createBufferSource(); s.buffer = nb; s.loop = true;
+        const f = A.createBiquadFilter(); f.type = ftype; f.Q.value = q;
+        f.frequency.setValueAtTime(f0, T + t0); f.frequency.exponentialRampToValueAtTime(Math.max(30, f1), T + t0 + dur);
+        const gn = A.createGain(); env(gn, t0, gpts);
+        s.connect(f);
+        if (am) { const m = A.createGain(); m.gain.value = 0.5; const l = A.createOscillator(); l.frequency.value = am; const lg = A.createGain(); lg.gain.value = 0.5; l.connect(lg); lg.connect(m.gain); l.start(T + t0); l.stop(T + t0 + dur + 0.05); f.connect(m); m.connect(gn); }
+        else f.connect(gn);
+        out(gn, wet, pan, dest);
+        s.start(T + t0, Math.random() * 0.4); s.stop(T + t0 + dur + 0.05);
+      };
+      const rr = (a: number, b: number): number => a + Math.random() * (b - a);
+      switch (n) {
+        case "nkGrave": {
+          // A soul tears loose: reverse swell, three layered formant wails gliding down with vibrato, whispered breath,
+          // a 55 Hz grave drone and two beating glass tones. Heavy reverb, about 2.5 s.
+          nn(0, 0.55, [[0.5, 0.09], [0.55, 0.0001]], "bandpass", 300, 2400, 1.4, 0.8, 0);
+          const base = rr(330, 380);
+          for (let i = 0; i < 3; i++) {
+            const f = base * [1, 1.335, 0.75][i], p = [-0.45, 0.45, 0][i], d = 0.18 + i * 0.12;
+            vo(d, "sawtooth", f * 0.8, [[0.35, f * 1.25], [1.6, f * 0.55], [2.1, f * 0.42]], [[0.12, 0.05], [1.2, 0.035], [2.1, 0.0001]], 0.9, p, f * 0.035, 5.5 + i * 0.7, undefined, 1400 - i * 250);
+            vo(d, "sine", f * 1.6, [[0.35, f * 2.5], [1.6, f * 1.1]], [[0.15, 0.02], [1.4, 0.0001]], 1, -p, f * 0.05, 6.3);
+          }
+          nn(0.25, 1.8, [[0.2, 0.05], [1.2, 0.035], [1.8, 0.0001]], "bandpass", 3200, 1800, 4, 0.9, -0.6, 7.5);
+          nn(0.45, 1.6, [[0.3, 0.04], [1.6, 0.0001]], "bandpass", 2400, 4200, 5, 0.9, 0.6, 9.3);
+          vo(0, "sine", 55, [[2.4, 48]], [[0.4, 0.13], [1.8, 0.08], [2.5, 0.0001]], 0.4, 0, 1.5, 0.7);
+          vo(0.1, "triangle", 110, [[2.2, 98]], [[0.5, 0.04], [2.3, 0.0001]], 0.5, 0, 2, 3.1);
+          vo(0.6, "sine", 1568, [[1.6, 1560]], [[0.2, 0.014], [1.7, 0.0001]], 1, -0.3);
+          vo(0.6, "sine", 1574, [[1.6, 1566]], [[0.2, 0.014], [1.7, 0.0001]], 1, 0.3);
+          break;
+        }
+        case "nkGhostHit": {
+          // An apparition rips into flesh: chest thump, a wet crack, a distorted slap, a shrieking sweep and a cold exhale.
+          const p = rr(-0.4, 0.4);
+          vo(0, "sine", 150, [[0.14, 42]], [[0.004, 0.32], [0.18, 0.0001]], 0.15, p);
+          nn(0, 0.06, [[0.002, 0.3], [0.06, 0.0001]], "highpass", 5200, 2400, 0.8, 0.2, p);
+          nn(0, 0.1, [[0.003, 0.32], [0.1, 0.0001]], "bandpass", 1300, 500, 1.1, 0.25, p, 0, drive);
+          const f = rr(900, 1150);
+          vo(0.01, "sawtooth", f, [[0.07, f * 2.2], [0.32, f * 0.6]], [[0.02, 0.05], [0.34, 0.0001]], 0.9, -p, 40, 23, undefined, 3200);
+          vo(0.01, "sine", f * 1.5, [[0.08, f * 3], [0.3, f]], [[0.02, 0.03], [0.3, 0.0001]], 1, p, 60, 17);
+          nn(0.06, 0.45, [[0.05, 0.06], [0.45, 0.0001]], "bandpass", 2200, 700, 2.5, 1, p, 11);
+          break;
+        }
+        case "nkGhostAmb": {
+          // Haunting bed while ghosts walk: a beating low drone, panned whisper syllables and a distant moan.
+          vo(0, "sine", 73.4, [[3.2, 70]], [[0.8, 0.05], [2.6, 0.04], [3.4, 0.0001]], 0.7, -0.3);
+          vo(0, "sine", 74.6, [[3.2, 71]], [[0.8, 0.05], [2.6, 0.04], [3.4, 0.0001]], 0.7, 0.3);
+          for (let i = 0; i < 5; i++) { const t0 = rr(0, 2.4), d = rr(0.18, 0.4); nn(t0, d, [[d * 0.3, rr(0.025, 0.045)], [d, 0.0001]], "bandpass", rr(2600, 4200), rr(1800, 3000), 6, 1, rr(-0.9, 0.9), rr(6, 14)); }
+          const f = rr(240, 300);
+          vo(0.7, "triangle", f, [[0.8, f * 1.18], [2.4, f * 0.7]], [[0.6, 0.03], [2.4, 0.0001]], 1, rr(-0.7, 0.7), 6, 4.5, undefined, 900);
+          break;
+        }
+        case "nkSkRise": {
+          // The earth splits: low rumble, stone cracks, gritty grind, sub thump, a bone rattle climbing out.
+          vo(0, "sine", 46, [[0.8, 34]], [[0.05, 0.22], [0.9, 0.0001]], 0.3, 0);
+          nn(0, 0.9, [[0.05, 0.2], [0.9, 0.0001]], "lowpass", 380, 60, 0.9, 0.35, 0);
+          for (let i = 0; i < 4; i++) { const t0 = i * rr(0.05, 0.09); nn(t0, 0.06, [[0.002, rr(0.18, 0.28)], [0.06, 0.0001]], "highpass", rr(2400, 3800), 1200, 0.8, 0.35, rr(-0.5, 0.5), 0, drive); }
+          nn(0.1, 0.55, [[0.15, 0.08], [0.55, 0.0001]], "bandpass", 700, 220, 1.5, 0.3, 0, 31);
+          for (let i = 0; i < 7; i++) { const t0 = 0.32 + i * rr(0.035, 0.06), f = rr(1300, 2600); vo(t0, "square", f, [[0.03, f * 0.4]], [[0.002, 0.045], [0.04, 0.0001]], 0.3, rr(-0.6, 0.6)); }
+          break;
+        }
+        case "nkSkClack": {
+          // Marching bones: two or three dry woody clicks.
+          const k = 2 + (Math.random() < 0.5 ? 1 : 0);
+          for (let i = 0; i < k; i++) { const t0 = i * rr(0.045, 0.08), f = rr(1500, 2300), p = rr(-0.5, 0.5); vo(t0, "square", f, [[0.025, f * 0.45]], [[0.0015, 0.05], [0.03, 0.0001]], 0.25, p); nn(t0, 0.025, [[0.001, 0.08], [0.025, 0.0001]], "bandpass", 3400, 2200, 3, 0.2, p); vo(t0, "triangle", 420, [[0.04, 260]], [[0.002, 0.04], [0.05, 0.0001]], 0.2, p); }
+          break;
+        }
+        case "nkSkGrowl": {
+          // Guttural growl: FM sawtooth through the drive and a lowpass, plus a raspy throat noise.
+          const f = rr(68, 84), p = rr(-0.5, 0.5);
+          const o = A.createOscillator(); o.type = "sawtooth"; o.frequency.setValueAtTime(f, T); o.frequency.linearRampToValueAtTime(f * 1.3, T + 0.35); o.frequency.exponentialRampToValueAtTime(f * 0.7, T + 1.1);
+          const m = A.createOscillator(); m.frequency.value = f * 0.5; const mg = A.createGain(); mg.gain.value = f * 0.9; m.connect(mg); mg.connect(o.frequency);
+          const lp = A.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.setValueAtTime(500, T); lp.frequency.linearRampToValueAtTime(900, T + 0.35); lp.frequency.linearRampToValueAtTime(320, T + 1.1); lp.Q.value = 3;
+          const g1 = A.createGain(); env(g1, 0, [[0.08, 0.16], [0.6, 0.12], [1.15, 0.0001]]);
+          const pre = A.createGain(); pre.gain.value = 0.9;
+          const sh = A.createWaveShaper(); sh.curve = drive.curve; o.connect(pre); pre.connect(sh); sh.connect(lp); lp.connect(g1); out(g1, 0.35, p);
+          o.start(T); o.stop(T + 1.2); m.start(T); m.stop(T + 1.2);
+          nn(0, 1.1, [[0.1, 0.07], [0.6, 0.05], [1.1, 0.0001]], "bandpass", 500, 260, 2.5, 0.35, p, 37);
+          break;
+        }
+        case "nkSkSmash": {
+          // The heaviest sound in the game: a rushing whoosh, a sub-bass slam, a distorted crunch, inharmonic steel ringing,
+          // falling pebbles and a long cave tail. Nothing else in the game uses this stack.
+          const p = rr(-0.35, 0.35);
+          nn(0, 0.14, [[0.1, 0.12], [0.14, 0.0001]], "bandpass", 600, 2600, 1.2, 0.3, -p);
+          const H = 0.13;
+          vo(H, "sine", 120, [[0.35, 30]], [[0.003, 0.65], [0.6, 0.0001]], 0.25, 0);
+          vo(H, "triangle", 70, [[0.5, 28]], [[0.004, 0.35], [0.7, 0.0001]], 0.3, 0, 0, 5, drive);
+          nn(H, 0.22, [[0.002, 0.55], [0.22, 0.0001]], "lowpass", 2600, 200, 0.9, 0.5, p, 0, drive);
+          nn(H, 0.06, [[0.001, 0.45], [0.06, 0.0001]], "highpass", 6000, 3000, 0.7, 0.4, p);
+          for (const [r, v] of [[1, 0.05], [2.76, 0.035], [5.4, 0.025], [8.93, 0.016]] as [number, number][]) { const f = 410 * r * rr(0.98, 1.02); vo(H + 0.005, "sine", f, [[1.1, f * 0.985]], [[0.003, v], [1.2, 0.0001]], 0.8, p * 1.5); }
+          for (let i = 0; i < 6; i++) { const t0 = H + 0.12 + rr(0, 0.5), f = rr(2200, 4200); vo(t0, "square", f, [[0.02, f * 0.5]], [[0.001, 0.025], [0.025, 0.0001]], 0.5, rr(-0.8, 0.8)); }
+          nn(H + 0.05, 1.4, [[0.05, 0.12], [1.4, 0.0001]], "lowpass", 300, 50, 0.7, 0.9, 0);
+          break;
+        }
+        case "nkPhalanx": {
+          // Bone storm: a dense rattle cascade into a double smash and a ringing steel bloom.
+          for (let i = 0; i < 12; i++) { const t0 = i * 0.022, f = rr(1200, 2800); vo(t0, "square", f, [[0.03, f * 0.4]], [[0.0015, 0.05], [0.035, 0.0001]], 0.35, rr(-0.9, 0.9)); }
+          const H = 0.28;
+          vo(H, "sine", 110, [[0.5, 26]], [[0.003, 0.7], [0.8, 0.0001]], 0.35, 0);
+          nn(H, 0.35, [[0.002, 0.55], [0.35, 0.0001]], "lowpass", 3000, 120, 0.9, 0.6, 0, 0, drive);
+          vo(H + 0.12, "sine", 80, [[0.4, 24]], [[0.003, 0.45], [0.6, 0.0001]], 0.4, 0);
+          for (const [r, v] of [[1, 0.04], [2.76, 0.03], [5.4, 0.02]] as [number, number][]) vo(H + 0.01, "sine", 330 * r, [[1.6, 330 * r * 0.98]], [[0.003, v], [1.7, 0.0001]], 1, 0);
+          nn(H + 0.05, 1.8, [[0.05, 0.12], [1.8, 0.0001]], "lowpass", 260, 40, 0.7, 1, 0);
+          break;
+        }
+      }
+    };
     const lastS: Record<string, number> = {};
     let lootBurstAt = 0, lootBurstN = 0;
     // unique magic sounds: per-sound 110 ms gap, at most 4 magic sounds per 300 ms, quieter when busy
@@ -22650,15 +23332,8 @@ export default function App() {
           nz(0.28, 0.05, "lowpass", 260, 45, d + 0.04);
           break;
         }
-        case "nkGrave":
-          // Hollow descending whoosh, a bony click, a ghostly sine cluster. Not "kill" or "die".
-          nz(0.22, 0.07, "bandpass", 900, 180);
-          tone(220, 70, 0.28, "sawtooth", 0.035);
-          tone(140, 55, 0.32, "sine", 0.03, 0.04);
-          nz(0.04, 0.07, "highpass", 3500, 2000, 0.08);
-          tone(70, 70, 0.03, "square", 0.04, 0.09);
-          tone(392, 196, 0.45, "sine", 0.025, 0.1);
-          tone(494, 247, 0.4, "triangle", 0.018, 0.16);
+        case "nkGrave": case "nkGhostHit": case "nkGhostAmb": case "nkSkRise": case "nkSkClack": case "nkSkGrowl": case "nkSkSmash":
+          nkuSfx(n);
           break;
         case "nkBone":
           // Short dry bone clack when a Phalanx skeleton breaks. Rate-light on purpose.
@@ -22667,11 +23342,7 @@ export default function App() {
           tone(240, 80, 0.07, "triangle", 0.025, 0.02);
           break;
         case "nkPhalanx":
-          // Bone storm: a cascade of dry rattles, then a heavy lime crunch. Not generic "boom".
-          for (let i = 0; i < 6; i++) { nz(0.04, 0.055, "highpass", 3200 - i * 280, 800, i * 0.03); tone(700 - i * 70, 120, 0.05, "square", 0.02, i * 0.03); }
-          tone(90, 32, 0.4, "sawtooth", 0.06, 0.16);
-          nz(0.32, 0.1, "lowpass", 700, 50, 0.16);
-          tone(160, 40, 0.22, "triangle", 0.035, 0.2);
+          nkuSfx(n);
           break;
         case "nkEcho":
           // Reverse glassy swell, then a doubled muted strike (phasey, not a weapon "hit").
@@ -23387,6 +24058,7 @@ export default function App() {
       drawWeather(ctx, g, t, FRAME_VDT, camX, camY);
       drawTorchLights(ctx, g, camX, camY, t);
       drawNkBeams(ctx, g, camX, camY, t, text);
+      drawNkvOver(ctx, g, camX, camY, t);
       for (const f of g.floats) { ctx.globalAlpha = Math.min(1, f.life * 2); text(f.txt, f.x - camX, f.y - camY, f.c, "center", 8); }
       ctx.globalAlpha = 1;
       ctx.restore();
