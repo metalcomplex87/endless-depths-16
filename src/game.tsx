@@ -7876,7 +7876,7 @@ function simBwFight(depth: number, stars: number, on: boolean, nPris = 6, swings
 }
 // O6 fight simulator (test hook): a real act boss fought to the end on a 0.33 s attack clock.
 // mode "basic": expected swing damage + C1 %-strike through hurtEn each attack; "full": real heroAttack (spells/procs/on-hit).
-function simO6Fight(depth: number, stars: number, full: boolean, on: boolean, maxSec = 1800): Record<string, number | boolean> {
+function simO6Fight(depth: number, stars: number, full: boolean, on: boolean, maxSec = 1800, gems?: { typs: number[]; rar: number; s: number }): Record<string, number | boolean> {
   const oldG = STAT_G, oldOff = O6_OFF;
   O6_OFF = !on;
   try {
@@ -7884,6 +7884,10 @@ function simO6Fight(depth: number, stars: number, full: boolean, on: boolean, ma
     const ilvl = Math.max(1, depth + 1 + Math.floor(act / 2));
     const fe = fullPrisEq(ilvl, stars);
     const eq: Eq = { head: fe.head, chest: fe.chest, arms: fe.arms, legs: fe.legs, rh: fe.rh, lh: fe.lh, pet: null };
+    // gem v2 check: optionally fill every socket (4 Prismatic sockets per piece) with the given gems, cycling types
+    let gi = 0;
+    if (gems) for (const k of EQK) { const it = eq[k]; if (!it) continue; it.sk = [0, 1, 2, 3].map(() => ({ c: it.rar >= 7 ? SOCK_PRIS : 0, g: { typ: gems.typs[(gi++) % gems.typs.length], rar: gems.rar, s: gems.s } })); }
+    else for (const k of EQK) { const it = eq[k]; if (it && it.sk) for (const z of it.sk) delete z.g; }
     const lvl = Math.max(1, depth);
     const g = newGame(null);
     g.mode = "play"; g.depth = depth; g.lvl = lvl; g.area = "dungeon"; g.eq = eq; g.petAbiT = 0;
@@ -7907,7 +7911,7 @@ function simO6Fight(depth: number, stars: number, full: boolean, on: boolean, ma
     while (boss.hp > 0 && n < maxN) {
       t += RT_ATK; g.petAbiT = t; n++;
       g.mode = "play"; g.hero.hp = st.maxHp;
-      if (full) { heroAttack(g, boss, st, 1, 1, 0); boss.stun = 0; }
+      if (full) { heroAttack(g, boss, st, 1, 1, 0); boss.stun = 0; if (gems && boss.hp > 0) { const hx0 = g.hero.x; gemTick(g, st); g.hero.x = hx0; g.ground = []; } }
       else {
         hurtEn(g, boss, raw, { n: "sim", t: "", c: "" });
         if (bw && bw.pct > 0 && boss.hp > 0) hurtEn(g, boss, Math.max(1, safeRound(safeMul(boss.mhp, bw.pct) / bw.bossMul)), { n: "sim%", t: "", c: "" });
@@ -10344,7 +10348,7 @@ function lowSalvage(g: Game): { n: number; gold: number } {
   return salvageBagItems(g, isLowSalvageItem, "Salvaged low", "SALVAGE LOW");
 }
 function salvageQuality(it: Item, lvl: number): number {
-  return isGem(it) ? gemQ(it.rar) : itemPower(it, lvl);
+  return isGem(it) ? gemQ(it.rar) * gemStarMul(it.rar, gemStarsOf(it)) : itemPower(it, lvl);
 }
 function salvageStars(it: Item): number { return it.st ? it.st.length : 0; }
 function salvageWorse(a: Item, b: Item, lvl: number): boolean {
@@ -12015,7 +12019,41 @@ function gemFullName(it: Item): string {
   const base = GEM_QN[r] + " " + GEMT[t].n + " Gem";
   return (GEM_QN[r] === RT[r] ? base : base + " (" + RT[r] + ")") + stars;
 }
-function gemQ(rar: number): number { return 1 + Math.max(0, Math.min(7, rar)) * 0.4; }
+// ---- Gem power v2 (2026-11-19) ----
+// Each rarity tier is x1.5 the one below (Chipped 1 ... Imperial 11.39); Prismatic is a further x2.25 over Imperial
+// (25.63). Every star adds +15% (Prismatic up to 10 stars = x2.5, Golden 64.07). Computed at runtime from rarity and
+// stars only, so it applies to every gem already owned (bag and sockets). Core-stat gems are percentages of the hero's
+// pre-gem stats, so they stay a secondary layer on top of gear at every depth.
+const GEM_TIER_MUL = 1.5;
+const GEM_PRIS_JUMP = 2.25;
+const GEM_STAR_STEP = 0.15;
+const GEM_DIA_PCT = 0.03;     // % Max HP, Atk and Def per unit
+const GEM_EM_HP_PCT = 0.04;   // % Max HP per unit
+const GEM_EM_REGEN_PCT = 0.0005; // Regen / turn as % of Max HP per unit
+const GEM_SAP_DEF_PCT = 0.04; // % Def per unit
+const GEM_RUBY_ATK = 0.0002;  // aura damage per unit as a fraction of Atk
+const GEM_FROST_ATK = 0.0001; // frost patch damage per unit as a fraction of Atk
+const GEM_MF_K = 0.3;
+const GEM_GOLD_K = 0.06, GEM_GOB_K = 0.054, GEM_PORT_K = 0.054, GEM_RARE_K = 0.045;
+function gemQ(rar: number): number {
+  const r = Math.max(0, Math.min(7, rar | 0));
+  return r >= 7 ? Math.pow(GEM_TIER_MUL, 6) * GEM_PRIS_JUMP : Math.pow(GEM_TIER_MUL, r);
+}
+function gemRubyAura(u: number, d: number, atk: number): number { return Math.max(1, Math.round(u * (0.85 + 0.06 * d) + u * GEM_RUBY_ATK * Math.max(0, atk))); }
+function gemFrostPow(u: number, d: number, atk: number): number { return Math.max(1, Math.round(u * (0.4 + 0.03 * d) + u * GEM_FROST_ATK * Math.max(0, atk))); }
+function gemFrostN(u: number): number { return u >= 25 ? 3 : u >= 5 ? 2 : 1; }
+function gemMulFmt(v: number): string { return (Math.round(v * 100) / 100).toFixed(2); }
+function gemPctFmt(v: number): string { return v >= 10 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(3); }
+let GEM_SKIP = false;
+// Live hero stats for tooltips: before gems (for the % gems) and in full (Ruby / Sapphire use full Atk).
+function gemLiveStats(): { pre: Stats; full: Stats } | null {
+  const g = STAT_G && STAT_G.eq ? STAT_G : LIVE;
+  if (!g || !g.eq) return null;
+  try {
+    GEM_SKIP = true; const pre = calc(g.lvl, g.eq); GEM_SKIP = false;
+    return { pre, full: calc(g.lvl, g.eq) };
+  } catch { GEM_SKIP = false; return null; }
+}
 function sockWeights(rar: number, d: number = 1): number[] {
   const w = SOCK_W[Math.max(0, Math.min(7, rar | 0))].slice();
   const t = rampT(d);
@@ -12080,34 +12118,45 @@ function gemFitsSocket(gem: Item, color: number): boolean {
   if (gem.rar >= 7) return true;
   return gem.gt === color;
 }
-function gemEffectText(it: Item, depth?: number): string {
+function gemEffectText(it: Item, depth?: number, live?: { pre: Stats; full: Stats } | null): string {
   if (!isGem(it) || it.gt === undefined) return "";
   const p = gemQ(it.rar) * gemStarMul(it.rar, gemStarsOf(it));
   const d = depth ?? (STAT_G && STAT_G.depth > 0 ? STAT_G.depth : (LIVE && LIVE.depth > 0 ? LIVE.depth : 1));
+  const L = live === undefined ? gemLiveStats() : live;
   const typ = it.gt;
-  if (typ === 0) return "+" + Math.round(4 * p) + " Max HP, +" + Math.round(p) + " Atk, +" + Math.round(p) + " Def.";
+  const pw = "Gem power " + (Math.round(p * 100) / 100) + ". ";
+  const now = (parts: string[]): string => (L ? " (now " + parts.join(", ") + ")" : "");
+  if (typ === 0) {
+    const pc = GEM_DIA_PCT * p;
+    return pw + "+" + gemPctFmt(pc) + "% Max HP, Atk and Def" + now(L ? ["+" + fmtFull(Math.round(L.pre.maxHp * pc / 100)) + " HP", "+" + fmtFull(Math.round(L.pre.atk * pc / 100)) + " Atk", "+" + fmtFull(Math.round(L.pre.def * pc / 100)) + " Def"] : []) + ".";
+  }
   if (typ === 1) {
-    const aura = Math.max(1, Math.round((1 + p) * 0.85 + d * 0.06 * p));
-    return "Aura: " + aura + " damage to adjacent foes each turn (at depth " + d + "; scales with depth).";
+    const atk = L ? L.full.atk : 0;
+    const aura = gemRubyAura(p, d, atk);
+    return pw + "Aura: " + fmtFull(aura) + " damage each turn to foes within 2 tiles (" + (Math.round(p * (0.85 + 0.06 * d) * 10) / 10) + " at depth " + d + " + " + gemPctFmt(p * GEM_RUBY_ATK * 100) + "% of Atk" + (L ? " " + fmtFull(Math.round(atk)) : "") + ").";
   }
   if (typ === 2) {
-    const n = p >= 2.5 ? 2 : 1;
-    return "+" + Math.round(1.2 * p) + " Def. Every 3 turns, " + n + " frost patch" + (n > 1 ? "es" : "") + " (power " + Math.round(0.6 * p) + ", lasts 3 turns).";
+    const n = gemFrostN(p), pc = GEM_SAP_DEF_PCT * p, atk = L ? L.full.atk : 0;
+    return pw + "+" + gemPctFmt(pc) + "% Def" + now(L ? ["+" + fmtFull(Math.round(L.pre.def * pc / 100)) + " Def"] : []) + ". Every 3 turns, " + n + " frost patch" + (n > 1 ? "es" : "") + " (" + fmtFull(gemFrostPow(p, d, atk)) + " damage per turn and chill at depth " + d + ", lasts 3 turns).";
   }
-  if (typ === 3) return "+" + Math.round(8 * p) + " Max HP, +" + (Math.round(0.2 * p * 10) / 10) + " Regen / turn.";
+  if (typ === 3) {
+    const pc = GEM_EM_HP_PCT * p, rg = GEM_EM_REGEN_PCT * p;
+    return pw + "+" + gemPctFmt(pc) + "% Max HP" + now(L ? ["+" + fmtFull(Math.round(L.pre.maxHp * pc / 100)) + " HP"] : []) + ", Regen +" + (rg < 0.01 ? rg.toFixed(4) : rg.toFixed(3)) + "% of Max HP / turn" + now(L ? ["+" + fmtBig(Math.round(L.pre.maxHp * rg / 100 * 10) / 10) + " / turn"] : []) + ".";
+  }
   if (typ === 4) {
-    const ch = Math.min(0.6, 0.06 * p);
-    return "+" + fmtUltMul(p) + " Magic Find. This gem adds a " + (Math.round(ch * 1000) / 10) + "% chance to raise a drop's rarity (below Ethereal; combined Citrine chance is capped at 60%).";
+    const mf = GEM_MF_K * p;
+    const ch = Math.min(0.6, 0.06 * mf);
+    return pw + "+" + (Math.round(mf * 100) / 100) + " Magic Find. This gem adds a " + (Math.round(ch * 1000) / 10) + "% chance to raise a drop's rarity (below Ethereal; combined Citrine chance is capped at 60%).";
   }
   if (typ === 5) {
-    const gold = Math.min(8, 1 + 0.12 * p);
-    const gob = Math.min(2.5, 1 + 0.18 * p);
-    return "Gold gains \u00d7" + fmtUltMul(gold) + " (this gem; combined cap \u00d78). Goblin spawns \u00d7" + fmtUltMul(gob) + " (combined cap \u00d72.5).";
+    const gold = Math.min(8, 1 + GEM_GOLD_K * p);
+    const gob = Math.min(2.5, 1 + GEM_GOB_K * p);
+    return pw + "Gold gains \u00d7" + gemMulFmt(gold) + " (this gem; combined cap \u00d78). Goblin spawns \u00d7" + gemMulFmt(gob) + " (combined cap \u00d72.5).";
   }
   if (typ === 6) {
-    const port = Math.min(2.5, 1 + 0.18 * p);
-    const rare = Math.min(2.5, 1 + 0.15 * p);
-    return "Portal chance \u00d7" + fmtUltMul(port) + " (cap \u00d72.5). Rare and elite encounters \u00d7" + fmtUltMul(rare) + " (cap \u00d72.5).";
+    const port = Math.min(2.5, 1 + GEM_PORT_K * p);
+    const rare = Math.min(2.5, 1 + GEM_RARE_K * p);
+    return pw + "Portal chance \u00d7" + gemMulFmt(port) + " (cap \u00d72.5). Rare and elite encounters \u00d7" + gemMulFmt(rare) + " (cap \u00d72.5).";
   }
   return "";
 }
@@ -12376,8 +12425,7 @@ function gemStarsOf(it: Item | null | undefined): number { return it && it.kind 
 function gemStarMul(rar: number, stars: number): number {
   const n = Math.max(0, Math.min(gemStarMax(rar), stars | 0));
   if (n <= 0) return 1;
-  if (rar >= 7) return prisStarMulN(n);
-  return 1 + 0.15 * n;
+  return 1 + GEM_STAR_STEP * n; // gem v2: +15% per star at every rarity (Prismatic 10 stars = x2.5)
 }
 function setGemStars(it: Item, stars: number): void {
   const n = Math.max(0, Math.min(gemStarMax(it.rar), stars | 0));
@@ -12455,24 +12503,26 @@ function gemTypePower(eq: Eq, typ: number): number {
   for (const g of equippedGems(eq)) if (g.typ === typ) p += gemSockPow(g);
   return p;
 }
-function applyGemStats(s: Stats, eq: Eq): void {
-  const dia = gemTypePower(eq, 0), em = gemTypePower(eq, 3);
-  if (dia > 0) { s.maxHp += Math.round(4 * dia); s.atk += Math.round(1 * dia); s.def += Math.round(1 * dia); }
-  if (em > 0) { s.maxHp += Math.round(8 * em); s.regen = Math.round((s.regen + 0.2 * em) * 10) / 10; }
-  const sap = gemTypePower(eq, 2);
-  if (sap > 0) s.def += Math.round(1.2 * sap);
+// Gem v2: % of the hero's stats before gems (all % gems add on the same pre-gem base).
+function applyGemStats(s: Stats, eq: Eq, _lvl?: number): void {
+  if (GEM_SKIP) return;
+  const dia = gemTypePower(eq, 0), em = gemTypePower(eq, 3), sap = gemTypePower(eq, 2);
+  const hp0 = s.maxHp, atk0 = s.atk, def0 = s.def;
+  if (dia > 0) { const k = GEM_DIA_PCT * dia / 100; s.maxHp += Math.round(hp0 * k); s.atk += Math.round(atk0 * k); s.def += Math.round(def0 * k); }
+  if (em > 0) { s.maxHp += Math.round(hp0 * GEM_EM_HP_PCT * em / 100); s.regen = Math.round((s.regen + hp0 * GEM_EM_REGEN_PCT * em / 100) * 10) / 10; }
+  if (sap > 0) s.def += Math.round(def0 * GEM_SAP_DEF_PCT * sap / 100);
 }
-function gemMagicFind(g: Game): number { return gemTypePower(g.eq, 4) + sockMagicFindBonus(g.eq); }
-function gemGoldMul(g: Game): number { return Math.min(8, 1 + 0.12 * gemTypePower(g.eq, 5) + sockGoldBonusMul(g.eq)); }
-function gemGobMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 5)); }
-function gemPortalMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 6)); }
-function gemRareMul(g: Game): number { return Math.min(2.5, 1 + 0.15 * gemTypePower(g.eq, 6)); }
+function gemMagicFind(g: Game): number { return GEM_MF_K * gemTypePower(g.eq, 4) + sockMagicFindBonus(g.eq); }
+function gemGoldMul(g: Game): number { return Math.min(8, 1 + GEM_GOLD_K * gemTypePower(g.eq, 5) + sockGoldBonusMul(g.eq)); }
+function gemGobMul(g: Game): number { return Math.min(2.5, 1 + GEM_GOB_K * gemTypePower(g.eq, 5)); }
+function gemPortalMul(g: Game): number { return Math.min(2.5, 1 + GEM_PORT_K * gemTypePower(g.eq, 6)); }
+function gemRareMul(g: Game): number { return Math.min(2.5, 1 + GEM_RARE_K * gemTypePower(g.eq, 6)); }
 function gemTick(g: Game, st: Stats): void {
   if (g.mode !== "play" || g.area === "camp") return;
   const h = g.hero;
   const ruby = gemTypePower(g.eq, 1);
   if (ruby > 0) {
-    const dmg = Math.max(1, Math.round((1 + ruby) * 0.85 + g.depth * 0.06 * ruby));
+    const dmg = gemRubyAura(ruby, g.depth, st.atk);
     for (const e of g.en) {
       if (e.hp <= 0) continue;
       const md = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y));
@@ -12485,7 +12535,7 @@ function gemTick(g: Game, st: Stats): void {
   }
   const sap = gemTypePower(g.eq, 2);
   if (sap > 0 && (g.turn % 3 === 0)) {
-    const n = sap >= 2.5 ? 2 : 1;
+    const n = gemFrostN(sap);
     const spots: { x: number; y: number }[] = [];
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       if (dx === 0 && dy === 0) continue;
@@ -12494,7 +12544,7 @@ function gemTick(g: Game, st: Stats): void {
     }
     for (let i = 0; i < n && spots.length; i++) {
       const j = ri(spots.length), p = spots.splice(j, 1)[0];
-      addGround(g, p.x, p.y, "frost", 3, Math.max(1, Math.round(0.6 * sap)));
+      addGround(g, p.x, p.y, "frost", 3, gemFrostPow(sap, g.depth, st.atk));
     }
   }
 }
@@ -19321,7 +19371,7 @@ try {
       return { ok: true, armor200: a.bonus.mv, weapon150: w.bonus.mv, legs20r4at90: lo.bonus.mv, clampedHead1500: [mvOldClampMax(1500, 7), cl.bonus.mv], clampedChest215: [mvOldClampMax(215, 7), cl2.bonus.mv], newItemAtOldMax: nw.bonus.mv, pet40: pet.bonus.mv, reloadKeeps: again.bonus.mv, restored: MV_RESTORED.n - r0 };
     },
     bwSim: (depth: number, stars: number, on: boolean, nPris?: number): Record<string, unknown> => simBwFight(depth, stars, on, nPris ?? 6),
-    o6Sim: (depth: number, stars: number, full: boolean, on: boolean, maxSec?: number): Record<string, unknown> => simO6Fight(depth, stars, full, on, maxSec ?? 1800),
+    o6Sim: (depth: number, stars: number, full: boolean, on: boolean, maxSec?: number, gems?: { typs: number[]; rar: number; s: number }): Record<string, unknown> => simO6Fight(depth, stars, full, on, maxSec ?? 1800, gems),
     o6Log: (): Record<string, unknown> => ({ ...O6_LOG }),
     o6Migrate: (): Record<string, unknown> => { // a boss saved by the 13:19 build (o6 = 1, HP x1e6) is re-matched under the retune
       const oldG = STAT_G;
@@ -21328,6 +21378,30 @@ try {
       effect: (rar: number, typ: number, stars: number, depth?: number): string => gemEffectText(makeGem(rar, typ, 1, stars), depth ?? 1),
       q: (rar: number): number => gemQ(rar),
       starMul: (rar: number, stars: number): number => gemStarMul(rar, stars),
+      pow: (rar: number, stars: number): number => gemSockPow({ typ: 0, rar, s: stars }),
+      // 2026-11-19 gem v2: gear vs gem contribution at a depth. Every armor/weapon slot gets 4 sockets of gemTyp.
+      gearProbe: (depth: number, lvl: number, gearRar: number, gearStars: number, gemRar: number, gemStars: number, gemTyp: number): Record<string, unknown> => {
+        const empty: Eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+        const mk = (k: Kind): Item => { const it = makeItem(depth, gearRar, k, depth); delete it.set; forceStars(it, gearStars); it.sk = [0, 1, 2, 3].map(() => ({ c: gearRar >= 7 ? SOCK_PRIS : gemTyp, g: { typ: gemTyp, rar: gemRar, s: gemStars } })); return it; };
+        const eq: Eq = { head: mk("head"), chest: mk("chest"), arms: mk("arms"), legs: mk("legs"), rh: mk("sword"), lh: mk("shield"), pet: null };
+        const bare: Eq = { ...empty }; for (const k of EQK) { const it = eq[k]; if (it) { const c = { ...it, sk: it.sk ? it.sk.map((z: { c: number }) => ({ c: z.c })) : undefined }; (bare as Record<string, Item | null>)[k] = c; } }
+        const z = (): Stats => ({ maxHp: 0, atk: 0, def: 0, crit: 0, spd: 0, block: 0, regen: 0, reach: 1, range: 0, magic: false, cleave: false, pierce: 0, stun: 0, ward: 0, mv: 0 });
+        const s0 = calc(lvl, empty), s1 = calc(lvl, bare), s2 = calc(lvl, eq);
+        GEM_SKIP = true; const s3 = calc(lvl, eq); GEM_SKIP = false;
+        const gs = z(); gs.maxHp = s2.maxHp - s3.maxHp; gs.atk = s2.atk - s3.atk; gs.def = s2.def - s3.def; gs.regen = Math.round((s2.regen - s3.regen) * 10) / 10;
+        const pick = (s: Stats) => ({ hp: Math.round(s.maxHp), atk: Math.round(s.atk), def: Math.round(s.def), regen: s.regen });
+        return { base: pick(s0), gearOnly: pick(s1), gearAndGems: pick(s2), gemsOnly: pick(gs), gearAdds: { hp: Math.round(s1.maxHp - s0.maxHp), atk: Math.round(s1.atk - s0.atk), def: Math.round(s1.def - s0.def) }, sockets: 24 };
+      },
+      // gems the LIVE (loaded) save owns: socketed + bag, each with its live tooltip text, plus hero totals with/without gems
+      liveGems: (): Record<string, unknown> => {
+        const g = LIVE; if (!g) return { ok: false };
+        const sock: { slot: string; item: string; gem: string; text: string; pow: number }[] = [];
+        for (const k of EQK) { const it = g.eq[k]; if (!it || !it.sk) continue; for (const zz of it.sk) if (zz.g) { const gm = gemFromSock(zz.g, it.ilvl); sock.push({ slot: k, item: it.name, gem: gemFullName(gm), text: gemEffectText(gm, g.depth), pow: +gemSockPow(zz.g).toFixed(3) }); } }
+        const bag = ensureGemBag(g).concat(g.bag.filter((x: Item) => isGem(x))).map((x: Item) => ({ gem: gemFullName(x), text: gemEffectText(x, g.depth), pow: +gemSockPow(gemSockOf(x)).toFixed(3) }));
+        const bare: Eq = { ...g.eq }; for (const k of EQK) { const it = g.eq[k]; if (it && it.sk) (bare as Record<string, Item | null>)[k] = { ...it, sk: it.sk.map((zz: { c: number }) => ({ c: zz.c })) }; }
+        const a = calc(g.lvl, g.eq), b = calc(g.lvl, bare);
+        return { ok: true, lvl: g.lvl, depth: g.depth, socketed: sock, bag, withGems: { hp: a.maxHp, atk: a.atk, def: a.def, regen: a.regen }, withoutGems: { hp: b.maxHp, atk: b.atk, def: b.def, regen: b.regen } };
+      },
       names: GEMT.map((t: { n: string; c: string; d: string }) => ({ n: t.n, d: t.d })),
       fits: (gemRar: number, gemTyp: number, sockC: number): boolean => gemFitsSocket(makeGem(gemRar, gemTyp, 1, 0), sockC),
       dropSockets: (kind: string, rar: number, stars: number): Record<string, unknown> => {
@@ -24278,7 +24352,7 @@ export default function App() {
                       <div key={"skui" + si} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                         {z.g ? <img src={sockGemIconURL(z.g)} alt="" width={26} height={26} draggable={false} style={{ imageRendering: "pixelated", border: "2px solid " + ((z.g.rar >= 7 && ((z.g as { s?: number }).s ?? 0) >= 10) ? GOLD : RC[z.g.rar]), borderRadius: 5, background: "#1a1028", flex: "none", outline: "1px solid " + sockCol(z.c), outlineOffset: 1 }} />
                           : <span style={{ width: 12, height: 12, borderRadius: "50%", background: "transparent", border: "2px solid " + sockCol(z.c), flex: "none" }} />}
-                        <span style={{ color: z.g ? RC[z.g.rar] : sockCol(z.c), fontSize: 11, flex: 1 }}>{z.g ? (gemFullName(gemFromSock(z.g, 1))) : (sockName(z.c) + " socket (empty)")}</span>
+                        <span style={{ color: z.g ? RC[z.g.rar] : sockCol(z.c), fontSize: 11, flex: 1 }}>{z.g ? (gemFullName(gemFromSock(z.g, 1))) : (sockName(z.c) + " socket (empty)")}{z.g && <span className="dc-sockfx" style={{ display: "block", color: GEMT[z.g.typ] ? GEMT[z.g.typ].c : "#ccc", fontSize: 10, opacity: 0.9 }}>{gemEffectText(gemFromSock(z.g, 1))}</span>}</span>
                         {z.g && <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11, padding: "0 8px" }} onClick={() => doAct(() => unsocketGem(g, selItem, si))}>Unsocket</button>}
                         {!z.g && ensureGemBag(g).some((it: Item) => isGem(it) && gemFitsSocket(it, z.c)) && (
                           <select defaultValue="" style={{ minHeight: 32, fontSize: 11, background: "#1a1626", color: "#fff", border: "1px solid #555", borderRadius: 6 }} onChange={(ev: { target: { value: string } }) => { const id = Number(ev.target.value); ev.target.value = ""; if (!isFinite(id)) return; doAct(() => { const gb = ensureGemBag(g); const bi = bagIndexById(gb, id); const gem = bi >= 0 ? gb[bi] : undefined; if (!gem) return ""; const r = socketGem(selItem, si, gem); if (r.indexOf("Socketed") === 0) gb.splice(bi, 1); return r; }); }}>

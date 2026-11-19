@@ -34,3 +34,8 @@ tests/nk-pris-rates.json
 
 # local test output
 tests/hazmove-results.json
+
+# gem v2 tuning probe (local only)
+tests/_gemprobe.mjs
+tests/_gemboss.mjs
+tests/_gemsave.mjs

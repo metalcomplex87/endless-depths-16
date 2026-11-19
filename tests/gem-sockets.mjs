@@ -72,13 +72,21 @@ async function main() {
   rec("every gem type/tier tooltip is numeric (not just flavor text)", textsOk,
     byType.map((t) => t.name + ": " + t.cells[0].text + " / " + t.cells[7].text));
 
-  // Spot-check Diamond / Emerald math at 0 stars: p = 1 + rar*0.4
+  // Spot-check gem v2 (2026-11-19): power = 1.5^tier (Prismatic 1.5^6 x 2.25), Diamond +0.03% per power, Emerald +0.04%
   const dia0 = await page.evaluate(() => window.__ED16_PRIS.gems.effect(0, 0, 0, 1));
   const dia7 = await page.evaluate(() => window.__ED16_PRIS.gems.effect(7, 0, 0, 1));
-  rec("Chipped Diamond is +4 Max HP, +1 Atk, +1 Def (p=1.0)", dia0 === "+4 Max HP, +1 Atk, +1 Def.", dia0);
-  rec("Prismatic Diamond is +15 Max HP, +4 Atk, +4 Def (p=3.8)", dia7 === "+15 Max HP, +4 Atk, +4 Def.", dia7);
+  rec("Chipped Diamond is +0.030% Max HP, Atk and Def (power 1)", dia0.startsWith("Gem power 1. +0.030% Max HP, Atk and Def"), dia0);
+  rec("Prismatic Diamond is +0.77% Max HP, Atk and Def (power 25.63)", dia7.startsWith("Gem power 25.63. +0.77% Max HP, Atk and Def"), dia7);
   const em3 = await page.evaluate(() => window.__ED16_PRIS.gems.effect(3, 3, 0, 1));
-  rec("Bright Emerald is +18 Max HP, +0.4 Regen (p=2.2)", em3 === "+18 Max HP, +0.4 Regen / turn.", em3);
+  rec("Bright Emerald is +0.14% Max HP (power 3.38)", em3.startsWith("Gem power 3.38. +0.14% Max HP"), em3);
+  const pows = await page.evaluate(() => [0, 1, 2, 3, 4, 5, 6, 7].map((r) => window.__ED16_PRIS.gems.pow(r, 0)));
+  const steps = pows.slice(1).map((v, i) => v / pows[i]);
+  rec("each rarity tier is x1.5 the one below; Prismatic is x2.25 over Imperial",
+    steps.slice(0, 6).every((x) => Math.abs(x - 1.5) < 1e-9) && Math.abs(steps[6] - 2.25) < 1e-9, pows.map((v) => +v.toFixed(3)));
+  const maxStarBelow = await page.evaluate(() => [3, 4, 5, 6].map((r) => [window.__ED16_PRIS.gems.pow(r, [0, 0, 0, 1, 2, 3, 4][r]), window.__ED16_PRIS.gems.pow(r + 1, 0)]));
+  rec("a max-star gem never out-powers the next rarity at 0 stars", maxStarBelow.every(([a, b]) => a < b), maxStarBelow);
+  const pris = await page.evaluate(() => [0, 5, 10].map((n) => window.__ED16_PRIS.gems.starMul(7, n)));
+  rec("Prismatic gem stars add +15% each (x1.75 at 5, x2.5 at 10)", Math.abs(pris[1] - 1.75) < 1e-9 && Math.abs(pris[2] - 2.5) < 1e-9, pris);
 
   const starMul = await page.evaluate(() => [0, 1, 2, 3, 4].map((n) => window.__ED16_PRIS.gems.starMul(5, n)));
   rec("non-Prismatic gem stars add +15% each (Ethereal cap 3)",
@@ -206,7 +214,7 @@ async function main() {
   await sleep(300);
   await page.evaluate(() => {
     const inv = document.querySelector(".dc-inv");
-    const el = Array.from(document.querySelectorAll(".dc-inv div")).find((d) => /Aura:.*damage to adjacent/.test(d.textContent || ""));
+    const el = Array.from(document.querySelectorAll(".dc-inv div")).find((d) => /Aura:.*damage each turn/.test(d.textContent || ""));
     if (el) el.scrollIntoView({ block: "center" });
     else if (inv) inv.scrollTop = inv.scrollHeight;
   });
