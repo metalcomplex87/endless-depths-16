@@ -31,3 +31,6 @@ tests/_nk*
 tests/nk-rework-*.json
 tests/nkfloorshots.mjs
 tests/nk-pris-rates.json
+
+# local test output
+tests/hazmove-results.json

@@ -46,23 +46,28 @@ async function main() {
       await H(page, "force", {});
       for (const d of [26, 60, 110]) {
         const r = await H(page, "sim", 400, d);
-        record("hazard sim depth " + d + " (400 floors): no required tile cut off", r.reqFail === 0, r);
+        record("hazard sim depth " + d + " (400 floors): no required tile cut off; water/lava/ice never share a floor", r.reqFail === 0 && r.mixWaterLava === 0 && r.mixIceWater === 0 && r.mixIceLava === 0, r);
       }
       // bigger floors handle hazards too
       const rb = await H(page, "sim", 160, 180, 7);
-      record("hazard sim on all size tiers: no required tile cut off", rb.reqFail === 0, rb);
+      record("hazard sim on all size tiers: no required tile cut off; water/lava/ice never share a floor", rb.reqFail === 0 && rb.mixWaterLava === 0 && rb.mixIceWater === 0 && rb.mixIceLava === 0, rb);
       // weather rules: lava never under rain/snow/storm/ice/lightning
       let bad = 0, coldIce = 0, coldWater = 0;
       for (const k of ["snow", "blizzard", "drift", "frost", "drizzle", "rain", "lightning", "storm", "wind", ""]) {
-        await H(page, "wx", k); await H(page, "force", { haz: "both" });
-        let lava = 0, ice = 0, water = 0;
-        for (let i = 0; i < 25; i++) { const r = await H(page, "gen", 61 + (i % 3)); lava += r.hz.lava; ice += r.hz.ice; water += r.hz.water; }
+        await H(page, "wx", k); await H(page, "force", {});
+        let lava = 0, ice = 0, water = 0, mix = 0;
+        for (let i = 0; i < 25; i++) {
+          const r = await H(page, "gen", 61 + (i % 3));
+          lava += r.hz.lava; ice += r.hz.ice; water += r.hz.water;
+          const families = [r.hz.water > 0, (r.hz.lava - (r.art ? 9 : 0) > 0), r.hz.ice > 0].filter(Boolean).length;
+          if (families > 1) mix++;
+        }
         const lavaOk = ["", "wind"].includes(k) ? lava > 0 : lava === 0;
-        if (!lavaOk) bad++;
+        if (!lavaOk || mix) bad++;
         if (["snow", "blizzard", "drift", "frost"].includes(k)) { coldIce += ice; coldWater += water; }
-        console.log("  wx " + (k || "clear") + ": lava " + lava + " ice " + ice + " water " + water);
+        console.log("  wx " + (k || "clear") + ": lava " + lava + " ice " + ice + " water " + water + " mix " + mix);
       }
-      record("lava only on clear/wind floors; cold floors freeze big pools into ice", bad === 0 && coldIce > 0, { coldIce, coldWater });
+      record("lava only on clear/wind; cold floors are ice-only (no water); never two hazard families on one floor", bad === 0 && coldIce > 0 && coldWater === 0, { coldIce, coldWater });
       await H(page, "wx", null); await H(page, "force", {});
     }
     if (want("move")) {
@@ -163,7 +168,7 @@ async function main() {
     }
     if (want("terrain")) {
       // ult on ice / Paramount on water / Paramount on lava, with before/after shots
-      for (const [label, wx, haz, para] of [["ult-ice", "frost", "water", false], ["para-water", "", "water", true], ["para-lava", "", "lava", true]]) {
+      for (const [label, wx, haz, para] of [["ult-ice", "frost", "ice", false], ["para-water", "", "water", true], ["para-lava", "", "lava", true]]) {
         await H(page, "wx", wx); await H(page, "force", { haz });
         let r = null, target = null;
         for (let i = 0; i < 40; i++) {
@@ -187,13 +192,15 @@ async function main() {
         }
         const after = await H(page, "state");
         await shot(page, "screenshots-terrain", label + "-after", 600, para ? "" : "raw");
-        const ok = label === "ult-ice" ? after.hz.ice < res.before.ice && after.hz.water > res.before.water : label === "para-water" ? after.hz.pit > 0 : after.hz.obs > 0;
+        const ok = label === "ult-ice" ? after.hz.ice < res.before.ice && after.hz.water > res.before.water
+          : label === "para-water" ? after.hz.water < res.before.water && (after.hz.pit || 0) <= (res.before.pit || 0)
+          : after.hz.obs > (res.before.obs || 0);
         record("terrain reaction " + label, ok && near && near.ok, { near, before: res.before, after: after.hz, cast: res.ok });
       }
       await H(page, "wx", null);
     }
     if (want("look")) {
-      for (const [k, wx, haz] of [["water", "", "water"], ["lava", "", "lava"], ["ice", "frost", "water"]]) {
+      for (const [k, wx, haz] of [["water", "", "water"], ["lava", "", "lava"], ["ice", "frost", "ice"]]) {
         await H(page, "wx", wx); await H(page, "force", { haz });
         for (let i = 0; i < 40; i++) { const r = await H(page, "gen", 61 + i); if (r.hz[k] > 0) break; }
         await H(page, "force", {});

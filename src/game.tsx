@@ -15530,6 +15530,11 @@ function maybeSpawnArtifactCave(g: Game): boolean {
   g.artCave = null;
   if (g.area === "camp" || g.vault || (g.area ?? "dungeon") !== "dungeon") return false;
   if (!ART_FORCE && (g.depth < HZ_MIN_DEPTH || isActFloor(g.depth) || !lavaWxOk(floorWx(g)))) return false; // lava-eligible floors only
+  // Water and ice never share a floor with lava, including the cave moat. A forced cave (tests) clears them first.
+  if (hzHas(g, HZ_WATER, HZ_ICE)) {
+    if (!ART_FORCE) return false;
+    if (g.hz) for (let k = 0; k < g.hz.length; k++) if (g.hz[k] === HZ_WATER || g.hz[k] === HZ_ICE) g.hz[k] = 0;
+  }
   const ar = rng32(hash32(floorSeed(g), g.depth, 0xa27) | 1);
   if (!ART_FORCE && ar() >= ART_CH) return false;
   // Item 20: each cave holds exactly ONE prize - an artifact OR a Resplendent Chest (50/50); once all 50 artifacts are owned, always the chest.
@@ -15801,28 +15806,51 @@ function drawArtReveal(ctx: CanvasRenderingContext2D, dt: number, t: number): vo
 }
 
 // ---------- Item 17: water, lava and ice hazards (depth 26+), item 18: gib reactions, item 19: obsidian ----------
-// g.hz per tile: 0 none, 1 water, 2 lava, 3 ice (walkable, slippery), 4 obsidian (walkable, lava hit by Paramount), 5 dry pit (walkable, water/ice hit by Paramount).
+// g.hz per tile: 0 none (plain floor; Paramount evaporates water/ice into this), 1 water (hero can walk/run across; enemies cannot), 2 lava (impassable unless Lavastrider), 3 ice (walkable, slippery), 4 obsidian (walkable, lava hit by Paramount), 5 dry pit (legacy walkable tile; Paramount no longer creates these).
 const HZ_NONE = 0, HZ_WATER = 1, HZ_LAVA = 2, HZ_ICE = 3, HZ_OBS = 4, HZ_PIT = 5;
 const HZ_MIN_DEPTH = 26, HZ_WATER_CH = 0.32, HZ_LAVA_CH = 0.26;
-const WW_NAME = "Waterwalker / Lavastrider", WW_DESC = "walk across water and lava unharmed";
+const WW_NAME = "Lavastrider", WW_DESC = "walk across lava unharmed";
 const WW_CH_GEAR = [0, 0, 0.003, 0.006, 0.012, 0.02, 0.03, 0.045]; // per item, by rarity (Common..Prismatic)
 const WW_CH_PET = [0, 0, 0.005, 0.01, 0.018, 0.03, 0.045, 0.065];
-let HZ_FORCE: "" | "water" | "lava" | "both" = "";
+let HZ_FORCE: "" | "water" | "lava" | "ice" | "both" = "";
+type HzKind = "water" | "lava" | "ice";
 function rollWW(it: Item, pet: boolean): void { it.mvv = MVV; if (R() < (pet ? WW_CH_PET : WW_CH_GEAR)[Math.max(0, Math.min(7, it.rar))]) it.ww = 1; }
 function hzAt(g: Game, x: number, y: number): number { const a = g.hz; return a && a.length === MW * MH && inb(x, y) ? a[y * MW + x] : 0; }
 function hzSolid(g: Game, x: number, y: number): boolean { const v = hzAt(g, x, y); return v === HZ_WATER || v === HZ_LAVA; }
 function heroWW(g: Game): boolean { for (const k of EQK) { const it = g.eq[k]; if (it && it.ww) return true; } return false; }
-// Water/lava stop the hero unless the lava-walking affix is equipped. Escape rule (never a way in): a hero already standing
-// on water/lava, or inside the artifact pocket, may always walk over it to get back out (e.g. after unequipping the affix).
+function hzHas(g: Game, ...kinds: number[]): boolean { const a = g.hz; if (!a) return false; for (const v of a) if (kinds.includes(v)) return true; return false; }
+// The hero can always walk or run across water at normal speed (enemies still cannot enter it). Lava still stops the
+// hero unless the Lavastrider affix is equipped. Escape rule (never a way in): a hero already standing on lava, or
+// inside the artifact pocket, may always walk over lava to get back out (e.g. after unequipping the affix).
 function hzBlocksHero(g: Game, x: number, y: number): boolean {
-  if (!hzSolid(g, x, y) || heroWW(g)) return false;
+  if (hzAt(g, x, y) !== HZ_LAVA) return false;
+  if (heroWW(g)) return false;
   const h = g.hero;
-  if (hzSolid(g, h.x, h.y) || artInside(g, h.x, h.y)) return false;
+  if (hzAt(g, h.x, h.y) === HZ_LAVA || artInside(g, h.x, h.y)) return false;
   return true;
+}
+// Like walkable(), but water is allowed for the hero (lava still follows hzBlocksHero).
+function heroCanStep(g: Game, x: number, y: number): boolean {
+  return inb(x, y) && g.map[y * MW + x] !== 0 && !enemyAt(g, x, y) && !chestAt(g, x, y) && !merchAt(g, x, y) && !campBlocked(g, x, y) && !hzBlocksHero(g, x, y) && !shrineHit(g, x, y);
 }
 function hzAllowed(g: Game): boolean { return g.area !== "camp" && !g.vault && (g.area ?? "dungeon") === "dungeon" && g.mode !== "title"; }
 // Lava is only allowed on clear or wind-only floors (never with rain, snow, thunderstorm, lightning or ice/frost).
 function lavaWxOk(k: WxKind | ""): boolean { return k === "" || k === "wind"; }
+// A floor gets at most one hazard family: water, lava, or ice. Cold weather turns a water roll into an ice-only floor.
+// "both" is accepted from older tests but never places two families — it falls through to a natural exclusive roll.
+function pickHzKind(wx: WxKind | "", rW: number, rL: number): HzKind | "" {
+  const lavaOk = lavaWxOk(wx), cold = wxCold(wx);
+  if (HZ_FORCE === "ice") return "ice";
+  if (HZ_FORCE === "water") return "water";
+  if (HZ_FORCE === "lava") return lavaOk ? "lava" : "";
+  const wantW = rW < HZ_WATER_CH;
+  const wantL = rL < HZ_LAVA_CH && lavaOk;
+  if (cold && wantW) return "ice";
+  if (wantW && wantL) return (rW / HZ_WATER_CH) <= (rL / HZ_LAVA_CH) ? "water" : "lava";
+  if (wantW) return "water";
+  if (wantL) return "lava";
+  return "";
+}
 function hzBfs(g: Game, hz: Uint8Array, sx: number, sy: number): Uint8Array {
   const seen = new Uint8Array(MW * MH);
   if (!inb(sx, sy)) return seen;
@@ -15864,13 +15892,8 @@ function genHazards(g: Game): HzStats {
   if (!HZ_FORCE && (g.depth < HZ_MIN_DEPTH || isActFloor(g.depth))) return st;
   const r = rng32(hash32(floorSeed(g), g.depth, 0x1a7a) | 1);
   const wx = floorWx(g);
-  const cold = wxCold(wx);
-  const rW = r(), rL = r();
-  let wantW = rW < HZ_WATER_CH, wantL = rL < HZ_LAVA_CH && lavaWxOk(wx);
-  if (HZ_FORCE === "water") { wantW = true; wantL = false; }
-  if (HZ_FORCE === "lava") { wantW = false; wantL = lavaWxOk(wx); }
-  if (HZ_FORCE === "both") { wantW = true; wantL = lavaWxOk(wx); }
-  if (!wantW && !wantL) return st;
+  const kind = pickHzKind(wx, r(), r());
+  if (!kind) return st;
   const hz = new Uint8Array(MW * MH);
   const res = hzReservedMask(g);
   const base = hzBfs(g, hz, g.hero.x, g.hero.y);
@@ -15878,14 +15901,13 @@ function genHazards(g: Game): HzStats {
   const cand: number[] = [];
   for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) { const k = y * MW + x; if (base[k] && g.map[k] === 1 && !res[k] && !isCorridorCell(g.map, x, y)) cand.push(k); }
   if (!cand.length) return st;
-  const jobs: number[] = [];
-  if (wantW) { const n = Math.max(1, Math.round((1 + Math.floor(r() * 3)) * areaK)); for (let i = 0; i < n; i++) jobs.push(HZ_WATER); }
-  if (wantL) { const n = Math.max(1, Math.round((1 + Math.floor(r() * 2)) * areaK)); for (let i = 0; i < n; i++) jobs.push(HZ_LAVA); }
-  for (const kind of jobs) {
+  const tile = kind === "lava" ? HZ_LAVA : kind === "ice" ? HZ_ICE : HZ_WATER;
+  const jobs = kind === "lava" ? Math.max(1, Math.round((1 + Math.floor(r() * 2)) * areaK)) : Math.max(1, Math.round((1 + Math.floor(r() * 3)) * areaK));
+  for (let j = 0; j < jobs; j++) {
     for (let attempt = 0; attempt < 6; attempt++) {
       const seed = cand[Math.floor(r() * cand.length)];
       if (hz[seed] || res[seed]) continue;
-      const size = kind === HZ_WATER ? 5 + Math.floor(r() * 12) : 3 + Math.floor(r() * 8);
+      const size = tile === HZ_LAVA ? 3 + Math.floor(r() * 8) : 5 + Math.floor(r() * 12);
       const pool: number[] = [seed];
       const inPool = new Set<number>([seed]);
       for (let guard = 0; pool.length < size && guard < size * 12; guard++) {
@@ -15898,28 +15920,14 @@ function genHazards(g: Game): HzStats {
         inPool.add(k); pool.push(k);
       }
       if (pool.length < 3) continue;
-      // cold floors: big water pools freeze (whole, or a frozen rim around open water)
-      const vals = new Map<number, number>();
-      let iceN = 0;
-      if (kind === HZ_WATER && cold && pool.length >= 8) {
-        const whole = r() < 0.5;
-        for (const k of pool) {
-          const x = k % MW, y = (k / MW) | 0;
-          const inner = inPool.has(k - 1) && inPool.has(k + 1) && inPool.has(k - MW) && inPool.has(k + MW);
-          const v = whole || !inner ? HZ_ICE : HZ_WATER;
-          vals.set(k, v); if (v === HZ_ICE) iceN++;
-          void x; void y;
-        }
-      } else for (const k of pool) vals.set(k, kind);
-      for (const [k, v] of vals) hz[k] = v;
+      for (const k of pool) hz[k] = tile;
       // connectivity: every tile reachable before must stay reachable (unless it is now water/lava)
       const reach = hzBfs(g, hz, g.hero.x, g.hero.y);
       let ok = true;
       for (let k = 0; k < MW * MH && ok; k++) if (base[k] && !reach[k] && hz[k] !== HZ_WATER && hz[k] !== HZ_LAVA) ok = false;
       if (!ok) { for (const k of pool) hz[k] = 0; st.rejected++; continue; }
       st.pools++;
-      for (const v of vals.values()) { if (v === HZ_WATER) st.water++; else if (v === HZ_LAVA) st.lava++; else if (v === HZ_ICE) st.ice++; }
-      void iceN;
+      if (tile === HZ_WATER) st.water += pool.length; else if (tile === HZ_LAVA) st.lava += pool.length; else st.ice += pool.length;
       break;
     }
   }
@@ -15955,7 +15963,10 @@ function hzAfterStep(g: Game, dx: number, dy: number, fromSlide: boolean): void 
   if (hzAt(g, h.x, h.y) === HZ_ICE && (dx || dy)) {
     if (!fromSlide || !g.slide) g.slide = { dx, dy, t: SLIDE_STEP };
     if (!fromSlide) g.sfx("skate");
-  } else g.slide = null;
+  } else {
+    g.slide = null;
+    if (hzAt(g, h.x, h.y) === HZ_WATER) hzFx(g, "ripple", h.x * TS + 12, h.y * TS + 12);
+  }
 }
 function slideBlocked(g: Game, x: number, y: number): boolean {
   if (!inb(x, y) || g.map[y * MW + x] === 0) return true;
@@ -15983,9 +15994,8 @@ function slideTick(g: Game, dt: number): void {
   g.notify();
 }
 // ---- item 19: terrain reactions to ultimates ----
-// Single (Prismatic) ultimate: ice in range melts back into water (water and lava unchanged). Melting never traps
-// the player: the tile under the hero and any ice that keeps a path open stays frozen.
-// Paramount: ice and water in range boil away into a dry, walkable pit; lava hardens into walkable obsidian.
+// Single (Prismatic) ultimate: ice in range melts into water (now walkable for the hero). Water and lava are unchanged.
+// Paramount: ice and water in range evaporate into plain floor with a steam burst; lava hardens into walkable obsidian.
 function hzReachOk(g: Game, hz: Uint8Array, base: Uint8Array): boolean {
   const reach = hzBfs(g, hz, g.hero.x, g.hero.y);
   for (let k = 0; k < MW * MH; k++) if (base[k] && !reach[k] && hz[k] !== HZ_WATER && hz[k] !== HZ_LAVA) return false;
@@ -16003,31 +16013,27 @@ function ultTerrain(g: Game, para: boolean): { melted: number; kept: number; pit
   if (para) {
     for (const k of cells) {
       const v = a[k], px = (k % MW) * TS + 12, py = ((k / MW) | 0) * TS + 12;
-      if (v === HZ_WATER || v === HZ_ICE) { a[k] = HZ_PIT; out.pits++; if (out.pits % 2 === 0 || out.pits < 12) hzFx(g, "steam", px, py); }
+      if (v === HZ_WATER || v === HZ_ICE) { a[k] = HZ_NONE; out.pits++; if (out.pits % 2 === 0 || out.pits < 12) hzFx(g, "steam", px, py); }
       else if (v === HZ_LAVA) { a[k] = HZ_OBS; out.obs++; if (out.obs % 2 === 0 || out.obs < 12) hzFx(g, "steam", px, py); }
     }
     if (out.pits || out.obs) {
       g.sfx("hiss", Math.min(1, (out.pits + out.obs) / 20));
-      if (out.pits) { setBannerSoft(g, "STEAM BURST!", out.pits + " tiles of water and ice boiled away"); msg(g, "Paramount boils away " + out.pits + " tiles of water and ice - only a dry pit remains.", "#d0e8ff"); }
+      if (out.pits) { setBannerSoft(g, "STEAM BURST!", out.pits + " tiles of water and ice boiled away"); msg(g, "Paramount evaporates " + out.pits + " tiles of water and ice into bare floor.", "#d0e8ff"); }
       if (out.obs) msg(g, out.obs + " tiles of lava hiss and harden into black obsidian.", "#c8b0ff");
       g.wallVer = (g.wallVer || 0) + 1;
     }
     return out;
   }
-  const base = hzBfs(g, a, h.x, h.y);
-  const hk = h.y * MW + h.x;
-  cells.sort((p: number, q: number) => { const dp = Math.abs(p % MW - h.x) + Math.abs(((p / MW) | 0) - h.y), dq = Math.abs(q % MW - h.x) + Math.abs(((q / MW) | 0) - h.y); return dq - dp; });
+  // Water is walkable for the hero, so melting ice can never cut the player off. Melt every ice tile in range.
   for (const k of cells) {
     if (a[k] !== HZ_ICE) continue;
-    if (k === hk) { out.kept++; continue; } // the tile under the hero stays frozen
     a[k] = HZ_WATER;
-    if (!hzReachOk(g, a, base)) { a[k] = HZ_ICE; out.kept++; continue; }
     out.melted++;
     if (out.melted < 14 || out.melted % 3 === 0) hzFx(g, "ripple", (k % MW) * TS + 12, ((k / MW) | 0) * TS + 12);
   }
   if (out.melted) {
     g.sfx("hiss", 0.25);
-    msg(g, "The ultimate's heat melts " + out.melted + " tiles of ice back into water" + (out.kept ? " (" + out.kept + " stay frozen so you are never cut off)" : "") + ".", "#a0e0ff");
+    msg(g, "The ultimate's heat melts " + out.melted + " tiles of ice into water.", "#a0e0ff");
     g.wallVer = (g.wallVer || 0) + 1;
     if (g.slide) g.slide = null;
   }
@@ -16225,7 +16231,7 @@ function drawHzOverlay(ctx: CanvasRenderingContext2D, g: Game, camX: number, cam
 let HZ_MSG_T = 0;
 function hzBlockedMsg(g: Game, v: number): void {
   const now = Date.now(); if (now - HZ_MSG_T < 1800) return; HZ_MSG_T = now;
-  msg(g, v === HZ_LAVA ? "Boiling lava blocks the way. Only a " + WW_NAME + " item - or a Paramount - gets you across." : "Deep water blocks the way. A " + WW_NAME + " item lets you walk across.", v === HZ_LAVA ? "#ff9040" : "#80c8ff");
+  msg(g, "Boiling lava blocks the way. Only a " + WW_NAME + " item - or a Paramount - gets you across.", "#ff9040");
 }
 // gib particles (small bits) react to hazards too, cheaply: they vanish into water/lava with a rare tiny effect, and glide on ice
 function partHz(g: Game, p: Part, dt: number): void {
@@ -17116,7 +17122,7 @@ function act(g: Game, dx: number, dy: number): void {
   const tg = findTarget(g, st);
   if (tg) {
     const cd = Math.abs(tg.x - h.x) + Math.abs(tg.y - h.y), nd = Math.abs(tg.x - nx) + Math.abs(tg.y - ny);
-    if (!(walkable(g, nx, ny) && nd > cd)) {
+    if (!(heroCanStep(g, nx, ny) && nd > cd)) {
       if (!fired && projReady) {
         attackTarget(g, tg, st); fired = true;
         if (!ranged) markSwing(g);
@@ -18492,7 +18498,7 @@ try {
     campView: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.area = "dungeon"; genCamp(g); const t = g.trophyAt; if (t) for (const [x, y] of [[t.x, t.y + 3], [t.x + 3, t.y], [t.x - 2, t.y], [t.x, t.y - 2]]) if (inb(x, y) && g.map[y * MW + x] === 1 && !campBlocked(g, x, y) && !portalAt(g, x, y)) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; break; } IP.camOk = false; computeVis(g); return { ok: !!t, area: g.area, trophyAt: t ? { ...t } : null, hero: [g.hero.x, g.hero.y] }; },
     peek: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; return { ok: true, gold: g.gold, depth: g.depth, xp: g.xp, lvl: g.lvl, mode: g.mode, locked: !!g.locked, prof: activeProf, para: !!g.para, ushows: USHOWS.length, awake: g.en.filter((e: En) => e.hp > 0 && e.awake).length }; },
     light: (d: number | null): Record<string, unknown> => { TL_FORCE_DARK = d; const g = LIVE; return { ok: true, dark: g ? lightDark(g) : null, lum: g ? floorLum(g) : null, act: g ? isActFloor(g.depth) : null, last: { ...TL_LAST }, torches: g ? (g.torches || []).length : 0 }; },
-    force: (o: { haz?: string; art?: boolean; prize?: string; shrine?: boolean; buried?: boolean }): void => { HZ_FORCE = (o.haz || "") as "" | "water" | "lava" | "both"; ART_FORCE = !!o.art; ART_PRIZE = (o.prize || "") as "" | "art" | "chest"; SHRINE_FORCE = !!o.shrine; BURIED_FORCE = !!o.buried; },
+    force: (o: { haz?: string; art?: boolean; prize?: string; shrine?: boolean; buried?: boolean }): void => { HZ_FORCE = (o.haz || "") as "" | "water" | "lava" | "ice" | "both"; ART_FORCE = !!o.art; ART_PRIZE = (o.prize || "") as "" | "art" | "chest"; SHRINE_FORCE = !!o.shrine; BURIED_FORCE = !!o.buried; },
     gen: (depth: number, tier?: number): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
       g.depth = depth; g.front = Math.max(floorFront(g), depth); g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null; g.mode = "play";
@@ -18503,7 +18509,7 @@ try {
     },
     sim: (n: number, depth: number, tierMax?: number): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
-      const res = { floors: 0, eligible: 0, water: 0, lava: 0, ice: 0, any: 0, tiles: { water: 0, lava: 0, ice: 0 }, rejected: 0, reqFail: 0, reqBad: [] as string[], art: 0, artChest: 0, shrine: 0, bySize: {} as Record<string, number> };
+      const res = { floors: 0, eligible: 0, water: 0, lava: 0, ice: 0, any: 0, mixWaterLava: 0, mixIceWater: 0, mixIceLava: 0, tiles: { water: 0, lava: 0, ice: 0 }, rejected: 0, reqFail: 0, reqBad: [] as string[], art: 0, artChest: 0, shrine: 0, bySize: {} as Record<string, number> };
       for (let i = 0; i < n; i++) {
         let d = depth + (i % 40); if (isActFloor(d)) d++;
         g.depth = d; g.area = "dungeon"; g.vault = null; g.mode = "play";
@@ -18513,7 +18519,11 @@ try {
         res.bySize[String(MW)] = (res.bySize[String(MW)] || 0) + 1;
         if (!isActFloor(d) && d >= HZ_MIN_DEPTH) res.eligible++;
         const c = hzCounts(g);
-        if (c.water) res.water++; if (c.lava - (g.artCave ? 9 : 0) > 0) res.lava++; if (c.ice) res.ice++; if (c.water || c.lava || c.ice) res.any++;
+        const lavaPools = c.lava - (g.artCave ? 9 : 0);
+        if (c.water) res.water++; if (lavaPools > 0) res.lava++; if (c.ice) res.ice++; if (c.water || c.lava || c.ice) res.any++;
+        if (c.water && c.lava) res.mixWaterLava++;
+        if (c.ice && c.water) res.mixIceWater++;
+        if (c.ice && c.lava) res.mixIceLava++;
         res.tiles.water += c.water; res.tiles.lava += c.lava; res.tiles.ice += c.ice; res.rejected += HZ_LAST.rejected;
         const rq = hzRequiredOk(g); if (!rq.ok) { res.reqFail++; if (res.reqBad.length < 6) res.reqBad.push(d + ":" + rq.bad.join("/")); }
         if (g.artCave) { res.art++; if (g.artCave.rc) res.artChest++; }
@@ -18526,10 +18536,45 @@ try {
     goto: (x: number, y: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.slide = null; IP.camOk = false; computeVis(g); return { ok: true }; },
     gotoFront: (back = 1): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a || a.ox === undefined) return { ok: false }; const x = a.ox - a.sx! * back, y = a.oy - a.sy! * back; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); return { ok: true, x, y, dir: [a.sx, a.sy] }; },
     ww: (on: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (!g.eq.chest) g.eq.chest = makeItem(g.depth, 3, "chest" as Kind); if (on) g.eq.chest.ww = 1; else { for (const k of EQK) { const it = g.eq[k]; if (it) delete it.ww; } } bustIcon(g.eq.chest); return { ok: true, ww: heroWW(g) }; },
-    step: (dx: number, dy: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.pcd = 0; g.acd = 0; g.qd = undefined; g.paused = false; g.mode = "play"; const fx = g.hero.x, fy = g.hero.y; act(g, dx, dy); return { ok: true, from: [fx, fy], to: [g.hero.x, g.hero.y], onHz: hzAt(g, g.hero.x, g.hero.y), slide: !!g.slide }; },
+    step: (dx: number, dy: number, rt?: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (rt === true || rt === false) g.rt = rt; g.pcd = 0; g.acd = 0; g.qd = undefined; g.paused = false; g.mode = "play"; const fx = g.hero.x, fy = g.hero.y; const pcd0 = heroStepDur(g); act(g, dx, dy); return { ok: true, from: [fx, fy], to: [g.hero.x, g.hero.y], onHz: hzAt(g, g.hero.x, g.hero.y), slide: g.slide ? { ...g.slide } : null, blocked: fx === g.hero.x && fy === g.hero.y, rt: !!g.rt, stepDur: pcd0 }; },
+    setRt: (on: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.rt = !!on; return { ok: true, rt: !!g.rt }; },
+    load: (code: string): Record<string, unknown> => {
+      const g = decodeCode(String(code || ""), LIVE);
+      if (!g) return { ok: false };
+      if (installTestGame) installTestGame(g);
+      IP.camOk = false;
+      return { ok: true, depth: g.depth, hero: [g.hero.x, g.hero.y], gold: g.gold, bag: g.bag.length, lvl: g.lvl };
+    },
+    tick: (dt: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; slideTick(g, dt); return { ok: true, hero: [g.hero.x, g.hero.y], onHz: hzAt(g, g.hero.x, g.hero.y), slide: g.slide ? { ...g.slide } : null }; },
+    paintFront: (kind: string, n = 5): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      if (!g.hz || g.hz.length !== MW * MH) g.hz = new Uint8Array(MW * MH);
+      const v = kind === "lava" ? HZ_LAVA : kind === "ice" ? HZ_ICE : kind === "obs" ? HZ_OBS : kind === "pit" ? HZ_PIT : HZ_WATER;
+      const h = g.hero;
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+      for (const [dx, dy] of dirs) {
+        const cells: number[][] = [];
+        let ok = true;
+        for (let i = 1; i <= n; i++) {
+          const x = h.x + dx * i, y = h.y + dy * i;
+          if (!inb(x, y) || g.map[y * MW + x] !== 1 || chestAt(g, x, y) || merchAt(g, x, y) || portalAt(g, x, y) || shrineHit(g, x, y) || campBlocked(g, x, y)) { ok = false; break; }
+          cells.push([x, y]);
+        }
+        if (!ok) continue;
+        g.en = g.en.filter((e: En) => !cells.some((c) => c[0] === e.x && c[1] === e.y));
+        for (const [x, y] of cells) g.hz[y * MW + x] = v;
+        computeVis(g);
+        return { ok: true, kind, v, dir: [dx, dy], cells, from: [h.x, h.y], stepDur: heroStepDur(g) };
+      }
+      return { ok: false };
+    },
+    probe: (x: number, y: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      return { ok: true, hz: hzAt(g, x, y), solid: hzSolid(g, x, y), blocksHero: hzBlocksHero(g, x, y), heroStep: heroCanStep(g, x, y), enemyWalk: walkable(g, x, y), map: inb(x, y) ? g.map[y * MW + x] : -1 };
+    },
     ult: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; prisArm(g); g.ultAts = {}; g.ultAt = 0; g.ultAtA = 0; const before = hzCounts(g); const ok = castUlt(g); return { ok, before, after: hzCounts(g) }; },
     para: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; prisArm(g); g.ultAts = {}; g.paraAt = 0; g.para = null; const ok = castParamount(g); return { ok, before: hzCounts(g) }; },
-    terrain: (para: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const before = hzCounts(g); const r = ultTerrain(g, para); return { ok: true, before, r, after: hzCounts(g), req: hzRequiredOk(g) }; },
+    terrain: (para: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const before = hzCounts(g); const r = ultTerrain(g, para); return { ok: true, before, r, after: hzCounts(g), req: hzRequiredOk(g), rad: para ? paraObsRadius(g) : ultObsRadius(g), paraRadius: paraRadius(g) }; },
     swarmStart: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.shrine) return { ok: false }; startSwarm(g); return { ok: true, live: g.en.filter((e: En) => e.sw).length }; },
     swarmKill: (n: number): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; let k = 0; for (let i = 0; i < n * 3 && k < n; i++) { const e = g.en.find((q: En) => q.sw && q.hp > 0); if (!e) { swarmSpawnOne(g); continue; } e.hp = 0; kill(g, e); g.en = g.en.filter((q: En) => q.hp > 0); k++; } return { ok: true, killed: k, kills: g.swarm ? g.swarm.kills : -1 }; },
     swarmEnd: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.swarm) return { ok: false }; const kills = g.swarm.kills; const d0 = g.drops.length, b0 = g.bag.length, gold0 = g.gold; const ae = g.autoEq; g.autoEq = false; endSwarm(g, false); g.autoEq = ae; const its = g.bag.slice(b0).concat(g.drops.slice(d0).map((d: Drop) => d.item).filter((x: Item | null): x is Item => !!x)); return { ok: true, kills, tier: swarmTierOf(kills), items: its.length, rars: its.map((x: Item) => x.rar), gold: g.gold - gold0, banner: g.banner ? g.banner.txt : "" }; },

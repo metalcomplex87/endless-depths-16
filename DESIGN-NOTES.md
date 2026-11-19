@@ -178,7 +178,7 @@ General rules for this update:
   all skip them (`artLocked`).
   - Hazards, pools, melting and teleports never touch the pocket.
   - There are exactly two ways across:
-    1. a Waterwalker / Lavastrider item;
+    1. a Lavastrider item (water is now always walkable, but the moat is lava);
     2. a Paramount, which turns the moat into obsidian.
   - The connectivity test proves this every time:
     - not reachable without the affix, even after wall attacks and a single ult;
@@ -201,15 +201,20 @@ General rules for this update:
 
 ### Item 17 — Water, lava and ice
 - **Where:** past depth 25 on dungeon floors only (never camp, caves, vaults or act floors), seeded per floor.
-  - Water appears on 32% of floors; pool counts scale with floor area.
-  - Lava appears on 26% of floors, only when the weather is clear or wind.
-  - Cold weather (snow, blizzard, drift, frost) freezes pools of 8+ tiles, either whole or as a frozen rim around open water.
+  - A floor gets at most one hazard family: water, or lava, or ice — never two together. Artifact-cave lava moats
+    are skipped on water or ice floors so they cannot mix.
+  - Water appears on about 32% of non-cold floors (the same roll as before); pool counts scale with floor area.
+  - Lava appears on about 26% of clear or wind floors, and never together with water. If both water and lava would
+    have rolled, the floor picks one.
+  - Ice has its own floors: a water roll on cold weather (snow, blizzard, drift, frost) becomes an all-ice floor,
+    with no open water and no lava. Water or lava floors never have ice.
 - **Never blocking:** every pool is undone if it would cut off any tile that was reachable before. Stairs, portals,
   shrines, chests, traders and the cave front are kept clear. Tested over 1,360 floors on every size tier: 0 failures.
-- **Crossing:** water and lava cannot be crossed without the new affix "Waterwalker / Lavastrider".
-  - The affix rolls on gear and pets. Gear chance by rarity: 0, 0, 0.3%, 0.6%, 1.2%, 2%, 3%, 4.5%.
-    Pets: 0, 0, 0.5%, 1%, 1.8%, 3%, 4.5%, 6.5%.
-  - A hero already standing on water or lava, or inside a cave pocket, can always walk out.
+- **Crossing:** the hero can walk and run across water at normal speed, with a small ripple at each footstep.
+  Enemies still cannot enter water or lava.
+  - Lava still cannot be crossed without the affix "Lavastrider" (same roll chances as the old Waterwalker /
+    Lavastrider: gear 0, 0, 0.3%, 0.6%, 1.2%, 2%, 3%, 4.5%; pets 0, 0, 0.5%, 1%, 1.8%, 3%, 4.5%, 6.5%).
+  - A hero already standing on lava, or inside a cave pocket, can always walk out (so unequipping the affix never traps you).
 - **Ice:** walkable, and the hero slides with momentum (up to 8 tiles, slowing down). Any input steers. The slide
   stops at anything solid, so it can never trap the player.
 
@@ -220,11 +225,14 @@ General rules for this update:
 - The effects buffer is capped at 140 particles, and the normal shard and particle caps still apply.
 
 ### Item 19 — Ultimates and terrain (replaces the earlier lava-to-obsidian idea)
-- **Single Prismatic ultimate:** melts ice back into water within 3 + round(3 x max(0.3, wall power)) tiles (4-6).
-  Water and lava are not changed. The hero's tile and any ice that keeps a path open stay frozen.
-- **Paramount:** within paramount radius + 4, ice and water boil into a walkable dry pit with a big steam burst, and
-  lava hardens into walkable obsidian.
-- Both results are saved with the floor.
+- **Single Prismatic ultimate:** melts ice into water within 3 + round(3 x max(0.3, wall power)) tiles (4-6).
+  Water and lava are not changed. Because water is now walkable for the hero, every ice tile in range melts
+  (the old "keep a path frozen" rule is no longer needed). An ice floor can end up with water after a melt;
+  that is a conversion, not generation, and still never places lava on that floor.
+- **Paramount:** within the Paramount blast radius plus 4 tiles (at least 9, typically 9-10; `paraRadius(g) + 4`,
+  and `paraRadius` is `4 + 2 * max(wallPower, 0.5)`), ice and water evaporate into plain floor with a steam burst,
+  and lava hardens into walkable obsidian (dark glassy tile, no damage).
+- Both results are saved with the floor. Legacy dry-pit tiles from older saves stay walkable but are no longer created.
 
 ### Item 21 — Pets and chests; buried chests
 - **Pets:** they no longer open any chest (dungeon, Resplendent or camp pet chest), but still pick up what drops out.
@@ -426,11 +434,12 @@ Design only; no Eternum necklaces exist in the code or earlier notes as of this 
 - **Paramount** (`paraPieces`): unlocks with any six Prismatic ultimates among head, chest, arms, legs, rh, lh, pet. Chosen rule: the six gear slots are used first (an existing full set behaves exactly as before); the pet fills in only when a gear slot has no ultimate (e.g. a shield in the left hand). Never seven. Only the six used are locked for the 3 minutes. Beam/visuals/shake/damage formula unchanged.
 - Bulwark already counts all 7 slots incl. pet; fuse multiplier is per-item (unchanged). Test: tests/combine.mjs (17 checks), hook `__ED16_PRIS.combineRules`, `__ED16_HZ.ultLive`.
 
-## Water, ice and lava — design rules (Metal Complex voice, 2026-11-18 1:57 PM CT) — NOT YET IMPLEMENTED
-Design only; game code unchanged as of this note. Sits alongside the Prismatic pet combine rules and Eternum necklace rules above.
-- Water: no longer blocks the player's path. The player can walk through water, with splashing sound effects while moving through it. All other existing water rules still apply, including that certain abilities can completely evaporate water.
-- Ice: a regular (non-Paramount) ultimate that hits ice melts it into water. A Paramount attack evaporates both ice and water.
-- Lava: unchanged. It still blocks the path completely. The only way past it is a Paramount attack, which turns lava into obsidian the player can walk across.
+## Water, ice and lava — design rules (Metal Complex voice, 2026-11-18 1:57 PM CT; implemented 2026-11-18 evening)
+Implemented in the same update as exclusive hazard floors. Tests: `tests/hazmove.mjs` and updated `tests/terrain.mjs`.
+- Water: no longer blocks the player's path. The hero can walk and run across water at normal speed, with a small ripple at each footstep. Enemies still cannot enter water. A Paramount evaporates water (and ice) into plain floor.
+- Ice: a regular (non-Paramount) ultimate that hits ice melts it into water. A Paramount attack evaporates both ice and water into plain floor. Ice still only slides the hero; that behavior is unchanged.
+- Lava: unchanged as a blocker. It still blocks the path completely without a Lavastrider item. A Paramount attack turns lava in the same area into walkable obsidian.
+- Generation: water, lava and ice never share a floor. Ice has its own floors (no water, no lava). Floors with water or lava have no ice.
 
 ## 2026-11-18 (14:05 CT): O6 retune (approved) — act-boss fights 1-3 min at d500+
 Only O6 levers changed; player side, A1/C1, Paramount and everything else untouched.
@@ -556,3 +565,9 @@ Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
 - **Saved earlier versions:** C in tests/nk-rework-C-final.json; the table is in tests/nk-drop-table.md.
 
 - **Deployed** to https://metalcomplex87.github.io/endless-depths-16/ on 2026-11-18 ~6:25 PM CT (America/Chicago), together with the Prismatic Eternum drop effect and the rest of the necklace system. The test-only `NK_PX` hook stays inert in production unless a test enables it. Necklace rate-tuning scratch (`tests/_nk*`, `tests/nk-rework-*.json`, `screenshots-necklaces/`, `necklace-icons/`) and the usual options/audit/screenshots material were kept out of the publish.
+
+### Water walking, exclusive floors, ultimate melt and Paramount terrain (2026-11-18 evening CT)
+- The hero can walk and run on water at normal speed. Lava stays impassable without Lavastrider. Ice sliding is unchanged.
+- Water, lava and ice are exclusive per floor (including artifact-cave lava moats).
+- A regular ultimate melts ice to water. Paramount evaporates water and ice to bare floor (steam burst) in its blast radius + 4 tiles (at least 9), and still turns lava into walkable obsidian.
+- Necklace drop rates (spec D) were not changed.
