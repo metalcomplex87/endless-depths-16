@@ -185,6 +185,13 @@ General rules for this update:
   Immediately behind the lava, inside the U, is a small open space (3x2) with the prize (artifact or Resplendent
   Chest) on the first tile after the moat. There is no hidden door and no extra wall between the lava and the prize.
   The arms and a thick back of the 5x9 block stay solid, so you cannot go around or dig in from behind.
+- **Floor-entry alert:** the moment you land on a floor where a cave spawned (including the first load after a
+  continue), a unique sealed-vault fanfare plays and an ornate gold-brass plate appears in the center of the
+  play view — not the ordinary top `msg()` / `setBanner()` strip. The text names the prize if known:
+  "A Resplendent Chest lies sealed behind lava nearby!" or "An Artifact lies sealed behind lava nearby!"
+  A brief gold-brass screen-edge glow, a compass hint, and a minimap ping accompany it. It fires once per
+  arrival; a saved `al` flag prevents it from repeating on a save-reload of the same floor. Mute silences
+  the chime. Spawn odds and loot are unchanged.
 - **Look:** the pocket's indestructible walls are a dark exotic alloy — plated steel with gold rivets, a brass
   bevel around the vault, and a faint iridescent shimmer — so the structure stands out from ordinary rock in
   the main view. On the minimap those tiles are a pulsing gold-brass, distinct from normal wall purple.
@@ -607,3 +614,14 @@ Verification (local headless, throwaway profiles; 28 + 36 + 8 + 4 checks):
   (same plated look, gold rivets and brass trim). Lava fills the open side and is the only entry.
   The prize sits in the open space immediately behind the lava and is reachable as soon as you cross.
   The back and sides stay indestructible. Spawn odds and loot are unchanged.
+
+### Artifact-cave floor-entry alert (2026-11-18 ~9:13 PM CT)
+- On arriving at a floor that has the U-shaped metal fortress, a unique gold-brass "SEALED VAULT" plate
+  appears (centered, rivets, bevel, iridescent gleam) with a screen-edge glow, a compass hint, and a
+  minimap ping. The line names the prize: a Resplendent Chest or an Artifact, "lies sealed behind lava nearby!"
+- The sound is a ceremonial brass vault-horn (`artVault`): a struck-metal ring and low G drone, a three-note
+  horn call (G3–D4–G4) with detuned sawtooth brass voices, then a slow iridescent sine shimmer (~1.8s).
+  It is unlike the rising `chime`, the Eternum `nkChime` run, loot fanfares, portal sweeps, sparkle
+  arpeggios, or the descending stairs tones. The game mute setting silences it; music-off does not.
+- Fires once per floor arrival, including the first play load after a continue. A packed `al` flag stops
+  it from repeating on save-reloads of the same floor. ART_CH stays 0.02; loot is unchanged.

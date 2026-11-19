@@ -176,6 +176,7 @@ interface Game {
   muted: boolean; notify: () => void; sfx: (n: string, v?: number) => void;
   wallBreak?: boolean; cracks?: number[]; digAt?: { x: number; y: number }; digClock?: number; wallVer?: number;
   warn?: { txt: string; sub: string; c: string; t: number; max: number }; warnGobs?: number[]; warnPort?: string;
+  artAlert?: { txt: string; sub: string; t: number; max: number; rc: number; dx: number; dy: number } | null;
 }
 
 // ---------- data ----------
@@ -2417,7 +2418,7 @@ function applySideStash(g: Game, raw: string): boolean {
 }
 function clearToSideRoom(g: Game, x: number, y: number, w: number, h: number): void {
   setMapSize(BASE_MAP);
-  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
   const map = new Uint8Array(MW * MH);
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) map[yy * MW + xx] = 1;
   g.map = map;
@@ -5171,7 +5172,7 @@ function genFloor(g: Game): void {
   g.splats = [];
   g.wxs = (R() * 4294967296) >>> 0;
   setMapSize(FLOOR_SIZES[FLOOR_TIER_FORCE !== null ? Math.max(0, Math.min(FLOOR_SIZES.length - 1, FLOOR_TIER_FORCE)) : floorTierFor(g.depth, g.wxs, isActFloor(g.depth))]);
-  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
   clearCracks(g);
   const areaK = (MW * MH) / (BASE_MAP * BASE_MAP);
   const map = new Uint8Array(MW * MH);
@@ -6886,7 +6887,7 @@ function enterVault(g: Game): void {
   const sup = !!(ent && ent.sup), cs = ent ? ent.cs : undefined;
   const stash = { map: u8s(g.map), seen: u8s(g.seen), en: g.en.filter((e: En) => e.hp > 0).concat(g.pend), chests: g.chests, drops: g.drops, trader: g.trader, hx: g.hero.x, hy: g.hero.y, ft: g.floorTurn, ground: g.ground, gobT: g.gobT, portal: ent, ws: g.wxs, xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p), sh: packShrine(g.shrine), hz: packHz(g), ac: packArtCave(g.artCave) };
   setMapSize(BASE_MAP);
-  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
   g.vault = JSON.stringify(stash);
   const map = new Uint8Array(MW * MH);
   for (let y = VR.y; y < VR.y + VR.h; y++) for (let x = VR.x; x < VR.x + VR.w; x++) map[y * MW + x] = 1;
@@ -8291,7 +8292,7 @@ function restAtCamp(g: Game): void {
 }
 function genCamp(g: Game): void {
   setMapSize(BASE_MAP);
-  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null;
+  g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
   g.splats = [];
   clearCracks(g);
   const map = new Uint8Array(MW * MH);
@@ -9271,7 +9272,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
   return {
     v: 2, d: g.depth, l: g.lvl, x: Math.round(g.xp), g: g.gold, p: g.potions, b: g.best, bl: g.bestLvl, k: g.kills, dt: g.deaths || 0,
     u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), pa: Math.max(0, Math.round((g.paraAt ?? 0) - Date.now())), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
-    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0,
+    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0, aal: g.artCave && g.artCave.al ? 1 : 0,
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
     ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
     hx: g.hero.x, hy: g.hero.y, hp: g.hero.hp, dir: heroDir(g.hero), tn: g.turn,
@@ -9648,6 +9649,8 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     else if (s.ar === "goblin" && applySideInterior(g, s.gi)) g.area = "goblin";
     else if (g.vault && typeof s.vi === "string") applySideInterior(g, s.vi); // back inside the loot cave room itself
     g.mode = "play";
+    if (s.aal === 1 && g.artCave) g.artCave.al = 1;
+    maybeFireArtCaveAlert(g);
     repairCampBossHybrid(g);
     expandFeaturesOnLoad(g);
     const packed = Array.isArray(s.stsh) ? s.stsh : [];
@@ -15448,7 +15451,7 @@ function drawSwarmHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
   ctx.restore();
 }
 // ---------- Item 16: hidden artifact caves + trophy case ----------
-type ArtCave = { dx: number; dy: number; cx: number; cy: number; ox?: number; oy?: number; sx?: number; sy?: number; rc?: number; open?: number; taken?: number };
+type ArtCave = { dx: number; dy: number; cx: number; cy: number; ox?: number; oy?: number; sx?: number; sy?: number; rc?: number; open?: number; taken?: number; al?: number };
 const ARTIFACTS: { t: string; n: string; l: string }[] = [
   { t: "Idol", n: "Sunken Jade Idol", l: "A squat river-god carved from jade; its eyes were once pearls." },
   { t: "Idol", n: "Idol of the Hollow King", l: "Its belly is hollow; something used to rattle inside." },
@@ -15524,9 +15527,124 @@ function packArtCave(a: ArtCave | null | undefined): ArtCave | null {
   if (!a || !inb(a.dx, a.dy) || !inb(a.cx, a.cy)) return null;
   const o: ArtCave = { dx: a.dx | 0, dy: a.dy | 0, cx: a.cx | 0, cy: a.cy | 0 };
   if (typeof a.ox === "number" && typeof a.oy === "number" && inb(a.ox, a.oy) && Math.abs(a.sx ?? 0) + Math.abs(a.sy ?? 0) === 1) { o.ox = a.ox | 0; o.oy = a.oy | 0; o.sx = a.sx | 0; o.sy = a.sy | 0; }
-  if (a.rc) o.rc = 1; if (a.open) o.open = 1; if (a.taken) o.taken = 1;
+  if (a.rc) o.rc = 1; if (a.open) o.open = 1; if (a.taken) o.taken = 1; if (a.al) o.al = 1;
   return o;
 }
+const ART_ALERT_SEC = 5.2;
+const ART_ALERT_CHEST = "A Resplendent Chest lies sealed behind lava nearby!";
+const ART_ALERT_ART = "An Artifact lies sealed behind lava nearby!";
+const ART_ALERT_SFX_NAME = "artVault";
+const ART_ALERT_LOG: string[] = [];
+function artAlertDir(g: Game): { name: string; dx: number; dy: number } {
+  const a = g.artCave;
+  const tx = a && (a.ox !== undefined ? a.ox : a.cx);
+  const ty = a && (a.oy !== undefined ? a.oy : a.cy);
+  if (tx === undefined || ty === undefined) return { name: "nearby", dx: 0, dy: 0 };
+  const dx = tx - g.hero.x, dy = ty - g.hero.y;
+  if (dx === 0 && dy === 0) return { name: "here", dx: 0, dy: 0 };
+  if (Math.abs(dx) >= Math.abs(dy)) return { name: dx > 0 ? "east" : "west", dx: dx > 0 ? 1 : -1, dy: 0 };
+  return { name: dy > 0 ? "south" : "north", dx: 0, dy: dy > 0 ? 1 : -1 };
+}
+// Floor-entry vault alert: once per arrival on a cave floor (including the first
+// play frame after a continue). The packed `al` flag stops save-reloads of the
+// same floor from firing again. Does not use msg() or setBanner().
+function maybeFireArtCaveAlert(g: Game): boolean {
+  if (g.mode === "title" || g.mode === "dead") return false;
+  if ((g.area ?? "dungeon") !== "dungeon" || g.vault || g.arena || g.gobCave) return false;
+  const a = g.artCave;
+  if (!a || a.taken) return false;
+  if (a.al) return false;
+  a.al = 1;
+  const d = artAlertDir(g);
+  const rc = a.rc ? 1 : 0;
+  const txt = rc ? ART_ALERT_CHEST : ART_ALERT_ART;
+  const sub = d.name === "here" ? "Cross the lava to claim it" : ("To the " + d.name + "  ·  Cross the lava to claim it");
+  g.artAlert = { txt, sub, t: ART_ALERT_SEC, max: ART_ALERT_SEC, rc, dx: d.dx, dy: d.dy };
+  ART_ALERT_LOG.push(ART_ALERT_SFX_NAME);
+  if (ART_ALERT_LOG.length > 16) ART_ALERT_LOG.shift();
+  g.sfx(ART_ALERT_SFX_NAME);
+  announce(txt + (sub ? " — " + sub : ""));
+  return true;
+}
+function artAlertSnap(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false };
+  const a = g.artAlert;
+  return {
+    ok: true, show: !!(a && a.t > 0), txt: a ? a.txt : "", sub: a ? a.sub : "",
+    t: a ? a.t : 0, rc: a ? a.rc : 0, dir: a ? [a.dx, a.dy] : null,
+    al: g.artCave && g.artCave.al ? 1 : 0, art: !!g.artCave,
+    prize: g.artCave ? (g.artCave.rc ? "chest" : "art") : "",
+    banner: g.banner ? g.banner.txt : "", warn: g.warn ? g.warn.txt : "",
+    msgs: (g.msgs || []).map((m: { t: string }) => m.t),
+    muted: !!g.muted, sfx: ART_ALERT_LOG.slice(), sfxName: ART_ALERT_SFX_NAME,
+  };
+}
+// Ornate gold-brass vault plate, screen-edge glow, and a compass chevron. Not the top banner.
+function drawArtCaveAlert(ctx: CanvasRenderingContext2D, g: Game, time: number): void {
+  const a = g.artAlert; if (!a || a.t <= 0) return;
+  const fade = Math.min(1, a.t * 2.2, (a.max - a.t) < 0.55 ? a.t / 0.55 : 1);
+  const pulse = 0.72 + 0.28 * Math.abs(Math.sin((a.max - a.t) * 6.2));
+  const age = a.max - a.t;
+  // Screen-edge gold-brass glow (play view only, not a full-screen wash)
+  const x0 = 0, y0 = HUD, w = VW, h = VIEWH;
+  const glow = fade * (0.42 + 0.38 * pulse);
+  const bands = [10, 6, 3];
+  const cols = ["rgba(232,196,72,", "rgba(180,130,48,", "rgba(255,236,170,"];
+  for (let i = 0; i < bands.length; i++) {
+    const t = bands[i], c = cols[i] + (glow * (0.28 - i * 0.06)).toFixed(3) + ")";
+    ctx.fillStyle = c;
+    ctx.fillRect(x0, y0, w, t); ctx.fillRect(x0, y0 + h - t, w, t);
+    ctx.fillRect(x0, y0, t, h); ctx.fillRect(x0 + w - t, y0, t, h);
+  }
+  // Centered riveted alloy plate
+  const bw = Math.min(VW - 12, 228), bh = 62;
+  const bx = Math.round((VW - bw) / 2), by = HUD + Math.round(VIEWH * 0.16);
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.fillStyle = "#10141c"; ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = "#2c3548"; ctx.fillRect(bx + 2, by + 2, bw - 4, bh - 4);
+  ctx.fillStyle = "#1a2030"; ctx.fillRect(bx + 4, by + 4, bw - 8, bh - 8);
+  // brass bevel
+  ctx.fillStyle = "#e8c448"; ctx.fillRect(bx, by, bw, 2); ctx.fillRect(bx, by + bh - 2, bw, 2); ctx.fillRect(bx, by, 2, bh); ctx.fillRect(bx + bw - 2, by, 2, bh);
+  ctx.fillStyle = "#8a6a28"; ctx.fillRect(bx + 2, by + 2, bw - 4, 1); ctx.fillRect(bx + 2, by + bh - 3, bw - 4, 1);
+  ctx.fillStyle = "rgba(90,220,255," + (0.22 + 0.16 * Math.sin(time * 5)).toFixed(3) + ")"; ctx.fillRect(bx + 3, by + 3, bw - 6, 1);
+  ctx.fillStyle = "rgba(255,190,80," + (0.20 + 0.14 * Math.sin(time * 5 + 1.2)).toFixed(3) + ")"; ctx.fillRect(bx + 3, by + 4, bw - 6, 1);
+  const rivet = (rx: number, ry: number): void => {
+    ctx.fillStyle = "#3a2a10"; ctx.fillRect(rx - 1, ry - 1, 4, 4);
+    ctx.fillStyle = "#e8c448"; ctx.fillRect(rx, ry, 3, 3);
+    ctx.fillStyle = "#fff4b0"; ctx.fillRect(rx, ry, 1, 1);
+  };
+  rivet(bx + 5, by + 5); rivet(bx + bw - 9, by + 5); rivet(bx + 5, by + bh - 9); rivet(bx + bw - 9, by + bh - 9);
+  // sliding gleam
+  const gx = bx + 4 + Math.floor(((time * 42) % (bw + 20)) - 10);
+  ctx.fillStyle = "rgba(255,236,180," + (0.10 * fade).toFixed(3) + ")";
+  ctx.fillRect(Math.max(bx + 4, gx), by + 6, 10, bh - 12);
+  ctx.font = "bold 7px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#000000"; ctx.fillText("SEALED VAULT", bx + bw / 2 + 1, by + 13 + 1);
+  ctx.fillStyle = "#ffe08a"; ctx.fillText("SEALED VAULT", bx + bw / 2, by + 13);
+  const main = a.txt;
+  let sz = 7;
+  ctx.font = "bold " + sz + "px monospace";
+  while (sz > 5 && ctx.measureText(main).width > bw - 14) { sz--; ctx.font = "bold " + sz + "px monospace"; }
+  ctx.fillStyle = "#000000"; ctx.fillText(main, bx + bw / 2 + 1, by + 30 + 1);
+  ctx.fillStyle = a.rc ? "#ffe8a0" : "#e8d8b0"; ctx.fillText(main, bx + bw / 2, by + 30);
+  ctx.font = "bold 6px monospace";
+  ctx.fillStyle = "#000000"; ctx.fillText(a.sub, bx + bw / 2 + 1, by + 46 + 1);
+  ctx.fillStyle = "#c8b878"; ctx.fillText(a.sub, bx + bw / 2, by + 46);
+  // compass chevron under the plate, pointing toward the cave
+  if (a.dx || a.dy) {
+    const cx = bx + bw / 2 + a.dx * 18, cy = by + bh + 9 + a.dy * 2;
+    ctx.globalAlpha = fade * (0.7 + 0.3 * pulse);
+    ctx.fillStyle = "#e8c448";
+    const s2 = 5;
+    if (a.dy < 0) { ctx.beginPath(); ctx.moveTo(cx, cy - s2); ctx.lineTo(cx - s2, cy + 3); ctx.lineTo(cx + s2, cy + 3); ctx.fill(); }
+    else if (a.dy > 0) { ctx.beginPath(); ctx.moveTo(cx, cy + s2); ctx.lineTo(cx - s2, cy - 3); ctx.lineTo(cx + s2, cy - 3); ctx.fill(); }
+    else if (a.dx < 0) { ctx.beginPath(); ctx.moveTo(cx - s2, cy); ctx.lineTo(cx + 3, cy - s2); ctx.lineTo(cx + 3, cy + s2); ctx.fill(); }
+    else { ctx.beginPath(); ctx.moveTo(cx + s2, cy); ctx.lineTo(cx - 3, cy - s2); ctx.lineTo(cx - 3, cy + s2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
 // (s, q) of a tile in the artifact pocket's frame, or null if there is no pocket.
 function artSQ(g: Game, x: number, y: number): { s: number; q: number } | null {
   const a = g.artCave; if (!a || a.ox === undefined || a.oy === undefined || a.sx === undefined || a.sy === undefined) return null;
@@ -17269,6 +17387,7 @@ function descend(g: Game): void {
   g.flash = 0;
   saveGame(g);
   g.sfx("stairs");
+  maybeFireArtCaveAlert(g);
   g.notify();
 }
 function goBack(g: Game, fromStairs = false): void {
@@ -17288,6 +17407,7 @@ function goBack(g: Game, fromStairs = false): void {
   g.flash = 0;
   saveGame(g);
   g.sfx("stairs");
+  maybeFireArtCaveAlert(g);
   g.notify();
 }
 
@@ -18613,6 +18733,11 @@ try {
     },
     state: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; return { hz: hzCounts(g), art: g.artCave ? { ...g.artCave } : null, arts: artsOf(g).length, hero: [g.hero.x, g.hero.y], ww: heroWW(g), slide: g.slide ? { ...g.slide } : null, onHz: hzAt(g, g.hero.x, g.hero.y), swarm: g.swarm ? { t: g.swarm.t, kills: g.swarm.kills, live: g.en.filter((e: En) => e.sw && e.hp > 0).length } : null, shrine: g.shrine ? { ...g.shrine } : null, chests: g.chests.length, buried: g.chests.filter((c: Chest) => c.bur).length, gems: ensureGemBag(g).length, bag: g.bag.length, drops: g.drops.length, gold: g.gold, size: MW }; },
     artAccess: (): Record<string, unknown> => { const g = LIVE; return g ? artAccessTest(g) : { ok: false }; },
+    artAlert: (): Record<string, unknown> => artAlertSnap(LIVE),
+    artAlertFire: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const fired = maybeFireArtCaveAlert(g); g.notify && g.notify(); return { ...artAlertSnap(g), fired }; },
+    artAlertReset: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (g.artCave) g.artCave.al = 0; g.artAlert = null; ART_ALERT_LOG.length = 0; return { ok: true }; },
+    mute: (on?: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (on === true || on === false) g.muted = on; return { ok: true, muted: !!g.muted }; },
+    saveCode: (): string => { const g = LIVE; return g ? saveCodeOf(g) : ""; },
     goto: (x: number, y: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.slide = null; IP.camOk = false; computeVis(g); return { ok: true }; },
     gotoFront: (back = 1): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a || a.ox === undefined) return { ok: false }; const x = a.ox - a.sx! * back, y = a.oy - a.sy! * back; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); return { ok: true, x, y, dir: [a.sx, a.sy] }; },
     ww: (on: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (!g.eq.chest) g.eq.chest = makeItem(g.depth, 3, "chest" as Kind); if (on) g.eq.chest.ww = 1; else { for (const k of EQK) { const it = g.eq[k]; if (it) delete it.ww; } } bustIcon(g.eq.chest); return { ok: true, ww: heroWW(g) }; },
@@ -18847,7 +18972,7 @@ try {
     ultNames: (): string[] => ULTS.map((u: Ult) => u.n),
     revealArt: (on = true): number => { SHOT_ART_VIS = !!on; const g = LIVE; if (!g || !g.artCave) return 0; let n = 0; for (let k = 0; k < MW * MH; k++) if (artInBlock(g, k % MW, (k / MW) | 0)) { g.seen[k] = 1; g.vis[k] = 1; n++; } return n; },
     cam: (x: number | null, y?: number): void => { CAM_FOCUS = x === null ? null : [x, y ?? 0]; IP.camOk = false; },
-    clean: (keep?: string): void => { const g = LIVE; if (!g) return; g.en = g.en.filter((e: En) => Math.abs(e.x - g.hero.x) + Math.abs(e.y - g.hero.y) > 14 && !e.sw); if (g.mode === "dead") g.mode = "play"; g.hero.hp = calc(g.lvl, g.eq).maxHp; HZFX.length = 0; if (keep !== "reveal") ART_REVEAL.t = 0; if (keep !== "banner" && keep !== "reveal") g.banner = null; g.msgs = []; g.warn = undefined; g.para = null; IP.camOk = false; g.notify && g.notify(); },
+    clean: (keep?: string): void => { const g = LIVE; if (!g) return; g.en = g.en.filter((e: En) => Math.abs(e.x - g.hero.x) + Math.abs(e.y - g.hero.y) > 14 && !e.sw); if (g.mode === "dead") g.mode = "play"; g.hero.hp = calc(g.lvl, g.eq).maxHp; HZFX.length = 0; if (keep !== "reveal") ART_REVEAL.t = 0; if (keep !== "banner" && keep !== "reveal" && keep !== "artAlert") g.banner = null; g.msgs = []; g.warn = undefined; if (keep !== "artAlert") g.artAlert = null; g.para = null; IP.camOk = false; g.notify && g.notify(); },
     lootSim: (n: number, depth: number): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };
       const ae = g.autoEq, ac = g.autoCombine; g.autoEq = false; g.autoCombine = false;
@@ -20877,6 +21002,7 @@ export default function App() {
         mutedRef.current = n.muted; setMuted(n.muted);
         musicRef.current = n.music; setMusicOn(n.music);
         gRef.current = n; LIVE = n;
+        maybeFireArtCaveAlert(n);
         setBanner(n, "WELCOME BACK", (PROFILES[id - 1] ? PROFILES[id - 1].name : "Profile") + " · Depth " + n.depth + " · Level " + n.lvl, "#80ff80", 2, 2);
         n.sfx("start");
         bump();
@@ -21501,6 +21627,25 @@ export default function App() {
         case "gob": [1319, 1568, 1976, 2637].forEach((f: number, i: number) => tone(f, f, 0.18, "sine", 0.035, i * 0.07)); break;
         case "sparkle": for (let i = 0; i < 8; i++) tone(1800 + i * 220, 2400 + i * 260, 0.07, "triangle", 0.018, i * 0.045); break;
         case "chime": tone(660, 990, 0.18, "sine", 0.05); tone(880, 1320, 0.22, "triangle", 0.04, 0.08); tone(1320, 1760, 0.28, "sine", 0.035, 0.16); break;
+        case "artVault": {
+          // Ceremonial brass vault-horn, used only for the artifact-cave floor alert.
+          // Low struck-metal ring + held G drone, a three-note horn call (G3-D4-G4) with
+          // slightly detuned sawtooth "brass" voices, then a slow iridescent sine shimmer.
+          // ~1.8s. Distinct from chime (rising sine), nkChime (rapid 11-note run), loot
+          // fanfares, portal sweeps, sparkle arpeggios, and the descending stairs tones.
+          nz(0.18, 0.06, "bandpass", 1800, 700);
+          tone(98, 92, 0.55, "triangle", 0.06, 0);
+          tone(196, 196, 0.35, "sawtooth", 0.045, 0.04);
+          tone(196 * 1.005, 196, 0.35, "sawtooth", 0.02, 0.05);
+          tone(294, 294, 0.4, "sawtooth", 0.05, 0.28);
+          tone(294 * 1.004, 294, 0.38, "triangle", 0.025, 0.3);
+          tone(392, 392, 0.7, "sawtooth", 0.055, 0.58);
+          tone(392 * 1.003, 392, 0.65, "triangle", 0.03, 0.6);
+          tone(196, 196, 0.8, "sine", 0.03, 0.58);
+          for (let i = 0; i < 6; i++) { const f = 784 * Math.pow(2, i / 12); tone(f, f * 1.01, 0.28, "sine", 0.018, 0.85 + i * 0.12); }
+          tone(1175, 1175, 0.6, "sine", 0.02, 1.4);
+          break;
+        }
         case "gamble": nz(0.18, 0.05, "bandpass", 900, 400); tone(220, 440, 0.12, "square", 0.03); tone(330, 660, 0.12, "triangle", 0.025, 0.08); [392, 523, 659, 784, 1047].forEach((f: number, i: number) => tone(f, f * 1.01, 0.1, i % 2 ? "triangle" : "sine", 0.03, 0.16 + i * 0.05)); break;
         case "portal": tone(220, 880, 0.6, "sine", 0.05); tone(330, 1320, 0.6, "triangle", 0.03, 0.05); nz(0.5, 0.04, "bandpass", 1200, 400); break;
         case "chest": {
@@ -21816,6 +21961,7 @@ export default function App() {
       mutedRef.current = n.muted; setMuted(n.muted);
       musicRef.current = n.music; setMusicOn(n.music);
       gRef.current = n; LIVE = n;
+      maybeFireArtCaveAlert(n);
       setBanner(n, "WELCOME BACK", "Depth " + n.depth + " \u00b7 Level " + n.lvl, "#80ff80", 2, 2);
       return true;
     };
@@ -21876,9 +22022,10 @@ export default function App() {
       for (const s of g.shots) { s.t -= dt; if (s.t <= 0 && s.dmg) resolveShot(g, s); }
       if (g.shots.length) g.shots = g.shots.filter((s: Shot) => s.t > 0);
       if (SCSH.t > 0) SCSH.t = Math.max(0, SCSH.t - dt);
-      if (g.mode === "play") scanScreenAlerts(g);
+      if (g.mode === "play") { scanScreenAlerts(g); maybeFireArtCaveAlert(g); }
       if (g.warn) { if (!paused) { g.warn.t -= dt; if (g.warn.t <= 0) g.warn = undefined; } }
       if (g.banner) { g.banner.t -= dt; if (g.banner.t <= 0) g.banner = null; }
+      if (g.artAlert) { if (!paused) { g.artAlert.t -= dt; if (g.artAlert.t <= 0) g.artAlert = null; } }
       g.flash = Math.max(0, g.flash - dt);
       g.shake = g.shake > 0.2 ? g.shake * Math.pow(0.02, dt) : 0;
       g.lvlFx = Math.max(0, g.lvlFx - dt);
@@ -22283,6 +22430,20 @@ export default function App() {
             const xx = ax + s0 * asx - q0 * asy, yy = ay + s0 * asy + q0 * asx;
             if (artLocked(g, xx, yy) && g.seen[yy * MW + xx]) ctx.fillRect(mx0 + xx * ms2, my0 + yy * ms2, Math.max(1, ms2), Math.max(1, ms2));
           }
+          if (g.artAlert && g.artAlert.t > 0) {
+            const px = mx0 + ax * ms2 + ms2 / 2, py = my0 + ay * ms2 + ms2 / 2;
+            const life = 1 - (g.artAlert.t / g.artAlert.max);
+            ctx.save();
+            for (let r = 0; r < 3; r++) {
+              const k = (life * 1.6 + r * 0.28) % 1;
+              const rad = (2 + k * 9) * (big ? 1.4 : 1);
+              ctx.globalAlpha = (1 - k) * 0.85;
+              ctx.strokeStyle = k < 0.5 ? "#fff4b0" : ART_MM;
+              ctx.lineWidth = big ? 2 : 1;
+              ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2); ctx.stroke();
+            }
+            ctx.restore();
+          }
         }
         const dot = (x: number, y: number, c: string, s: number): void => { ctx.fillStyle = c; ctx.fillRect(mx0 + x * ms2 + Math.floor((ms2 - s) / 2), my0 + y * ms2 + Math.floor((ms2 - s) / 2), s, s); };
         const ds = big ? 4 : 2;
@@ -22428,6 +22589,7 @@ export default function App() {
         if (bn.rar >= 3) for (let i = 0; i < (bn.rar >= 6 ? 14 : 6); i++) { ctx.fillStyle = i % 2 ? "#ffffff" : bn.c; ctx.fillRect(nb.x + Math.random() * nb.w, nb.y + Math.random() * nb.h, 1, 1); }
         ctx.globalAlpha = 1;
       }
+      drawArtCaveAlert(ctx, g, t);
       if (g.mode === "dead") {
         ctx.fillStyle = "rgba(20,0,0," + Math.min(0.75, g.deadT * 0.6).toFixed(2) + ")"; ctx.fillRect(0, 0, VW, VH);
         text("YOU DIED", VW / 2, 100, "#ff3030", "center", 22);
