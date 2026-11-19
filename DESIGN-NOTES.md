@@ -712,3 +712,13 @@ Larger floors already existed (item 13): from depth 25, every 25 depths unlocks 
 - **Applied to:** initial spawn (`enBaseOf` in `genFloor` / `spawnMonstersOnMap`), room-pack attempts (`rollPacksOf`), the cap that stops more packs (`enCapOf` in `spawnRarePack`), and the trickle / respawn cap (`trickleSpawn`). Unique one-offs (act boss, hunter, goblin, champion / brutes / roaming) stay a chance-of-one and are not multiplied.
 - **Depth and time ramps are kept:** scale sits on top of `enBase(d)` / `enCap(d)` / pack expectation, so later depths and mid-floor trickle still get denser the way they already did.
 - **Tests:** `tests/floor-density.mjs` forces each size at depth 200 and checks that enemies-per-walkable-tile is within 18% of a standard layer, that standard floors stay on the unscaled formula, and that counts and caps rise with size. Typical ratios vs Normal were ~0.95–1.00 (slightly under 1 because uniques are not scaled).
+
+## Gems and socket bonuses (queue item 3) — IMPLEMENTED
+
+Parked WIP from `wip/gem-sockets` (`d667a13`) plus the remaining wiring, rebased onto the density deploy.
+
+- **Exact gem tooltips:** every type and quality now shows the real numbers (HP, aura damage at the current depth, gold/ goblin / portal multipliers, Magic Find chance, etc.). Formulas are unchanged; see `gem-audit.md` for the before/after list.
+- **Socket bonus:** a piece with every socket filled by a proper-color gem gains one bonus, scaled by rarity and stars. Regular gear uses a 14-bonus pool; Prismatic gear uses a **separate** 14-bonus pool. Details and scaling are in `socket-bonus-design.md`.
+- **Prismatic sockets:** all sockets on Prismatic gear are Prismatic-colored. Only a Prismatic gem completes one. 2★+ Prismatic items always have 4 sockets on drop and on combine. Combine never reduces socket count; gems are kept. Combining a Prismatic piece into a new star value re-rolls the Prismatic-pool bonus (hash of seed + stars); magnitude rises with stars.
+- **Retroactive:** `validItem` / load migration apply the layout; packed color 7 is no longer clamped away. Existing gems stay put, even if a migrated non-Prismatic gem does not activate the bonus.
+- **TTK:** bonus procs are modest at 10★ (magnitude 1.80). Per-hit weapon damage is unchanged.

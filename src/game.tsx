@@ -3102,6 +3102,7 @@ function calc(lvl: number, eq: Eq): Stats {
   applySetsToStats(s, eq);
   applyStarStats(s, eq);
   applyGemStats(s, eq);
+  applySockBonuses(s, eq);
   const pet = eq.pet;
   if (pet && pet.kind === "pet" && pet.rar >= 7) {
     ensurePetAbi(pet);
@@ -3973,7 +3974,7 @@ function drawSocketPips(x: CanvasRenderingContext2D, ox: number, oy: number, it:
     x.beginPath();
     x.arc(cx, cy, Math.max(1.2, r - 1.6), 0, Math.PI * 2);
     x.lineWidth = 1.6;
-    x.strokeStyle = GEMT[z.c].c;
+    x.strokeStyle = sockCol(z.c);
     x.stroke();
     if (z.g && z.g.rar >= 3) {
       // the socketed gem's rarity: a rarity-coloured core (gold for a Golden gem), white glint from Ethereal up
@@ -6022,6 +6023,8 @@ function applyHeroDmg(g: Game, dmg: number, shake: number): void {
   const st = calc(g.lvl, g.eq);
   const lattice = petAbiOf(g, 7);
   if (lattice) dmg = Math.max(1, safeRound(dmg * (1 - Math.min(0.35, 0.18 * petAbiMul(lattice)))));
+  dmg = sockIncoming(g, dmg, st);
+  if (dmg <= 0) return;
   const emberHp = g.petEmberHp ?? 0;
   if (emberHp > 0 && petRareOf(g, PRT_EMBER)) {
     const soak = Math.min(emberHp, dmg);
@@ -6246,7 +6249,10 @@ function petAbiTick(g: Game, dt: number): void {
 }
 function ultCdLen(g: Game): number {
   const it = petRareOf(g, PRT_CHRONOS);
-  return it ? Math.round(ULT_CD * (1 - Math.min(0.5, 0.4 * petAbiMul(it)))) : ULT_CD;
+  let cd = it ? Math.round(ULT_CD * (1 - Math.min(0.5, 0.4 * petAbiMul(it)))) : ULT_CD;
+  const cdr = sockCdrFrac(g.eq);
+  if (cdr > 0) cd = Math.max(1, Math.round(cd * (1 - cdr)));
+  return cd;
 }
 function petAbiTitle(it: Item): string {
   ensurePetAbi(it);
@@ -9566,7 +9572,7 @@ function unpackItem(a: unknown): Item | null {
   const o = { id: NID++, seed: n(a[3]) || 1, kind: KINDS[n(a[0])], rar: n(a[1]), ilvl: n(a[2]), name: String(a[9] ?? ""), atk: n(a[4]), def: n(a[5]), block: n(a[6]), bonus,
     d: String(a[8] ?? "").split("").map((c: string) => Number(c)), spells: sp, pas: pa, ult: n(a[12]) >= 0 ? n(a[12]) : undefined,
     ef: Array.isArray(a[13]) ? (a[13] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, pt: n(a[14]) >= 0 ? n(a[14]) : undefined, set: n(a[15]) >= 0 ? n(a[15]) : undefined, st: Array.isArray(a[16]) ? (a[16] as unknown[]).filter((e: unknown) => Array.isArray(e)).map((e: unknown) => (e as unknown[]).map((v: unknown) => n(v))) : undefined, wel: (ELS as string[]).includes(ELS[n(a[17])]) ? ELS[n(a[17])] : undefined,
-    sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); const zs = row.length > 3 ? n(row[3]) : 0; return { c: Math.max(0, Math.min(6, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? (zs >= 1 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)), s: Math.floor(zs) } : { typ: typ, rar: Math.max(0, Math.min(7, rr)) }) : undefined }; }) : undefined,
+    sk: Array.isArray(a[18]) ? (a[18] as unknown[]).filter((z: unknown) => Array.isArray(z)).map((z: unknown) => { const row = z as unknown[]; const c = n(row[0]); const typ = n(row[1]); const rr = n(row[2]); const zs = row.length > 3 ? n(row[3]) : 0; return { c: Math.max(0, Math.min(SOCK_COL_MAX, c)), g: typ >= 0 && typ <= 6 && rr >= 0 ? (zs >= 1 ? { typ: typ, rar: Math.max(0, Math.min(7, rr)), s: Math.floor(zs) } : { typ: typ, rar: Math.max(0, Math.min(7, rr)) }) : undefined }; }) : undefined,
     gt: n(a[19]) >= 0 && n(a[19]) <= 6 ? Math.floor(n(a[19])) : undefined, golden: n(a[20]) === 1 || undefined, pab: n(a[21]) >= 0 && n(a[21]) <= 15 ? Math.floor(n(a[21])) : undefined, prt: a.length > 22 && n(a[22]) >= 0 && n(a[22]) <= 7 ? Math.floor(n(a[22])) : undefined, gs: a.length > 23 && n(a[23]) >= 1 && n(a[23]) <= 10 ? Math.floor(n(a[23])) : undefined, ww: a.length > 24 && n(a[24]) === 1 ? 1 : undefined, mvv: a.length > 25 && n(a[25]) > 0 ? Math.floor(n(a[25])) : undefined };
   if ([o.rar, o.ilvl, o.atk, o.def, o.block].some((v: number) => !isFinite(v))) return null;
   return validItem(o);
@@ -9752,7 +9758,7 @@ function validItem(o: unknown): Item | null {
       if (!it.st.length) delete it.st;
     } else delete it.st;
     if (Array.isArray(it.sk)) {
-      it.sk = it.sk.filter((z: { c?: number; g?: { typ?: number; rar?: number } }) => z && typeof z.c === "number" && z.c >= 0 && z.c <= 6).map((z: { c: number; g?: { typ?: number; rar?: number } }) => {
+      it.sk = it.sk.filter((z: { c?: number; g?: { typ?: number; rar?: number } }) => z && typeof z.c === "number" && z.c >= 0 && z.c <= SOCK_COL_MAX).map((z: { c: number; g?: { typ?: number; rar?: number } }) => {
         const sock: { c: number; g?: { typ: number; rar: number; s?: number } } = { c: Math.floor(z.c) };
         if (z.g && typeof z.g.typ === "number" && z.g.typ >= 0 && z.g.typ <= 6 && typeof z.g.rar === "number" && z.g.rar >= 0 && z.g.rar <= 7) {
           sock.g = { typ: Math.floor(z.g.typ), rar: Math.floor(z.g.rar) };
@@ -9775,6 +9781,7 @@ function validItem(o: unknown): Item | null {
       }
     } else it.sk = undefined;
     ensureSockets(it);
+    ensurePrisSocketLayout(it);
     if (it.golden || (it.rar >= 7 && it.st && it.st.length >= 10)) markGolden(it); else delete it.golden;
     if (wepNeedsEl(it.kind)) {
       if (it.wel && !(ELS as string[]).includes(it.wel)) delete it.wel;
@@ -9813,13 +9820,14 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
           const x = Math.floor(s.hx as number), y = Math.floor(s.hy as number);
           g.hero.x = x; g.hero.y = y; g.hero.ax = x; g.hero.ay = y;
         }
+        migrateGameSockets(g);
         optimizeEquipped(g);
         return g;
       }
     }
     if (s.compact === 1 && typeof s.code === "string") {
       const g = decodeCode(s.code, prev);
-      if (g) { optimizeEquipped(g); return g; }
+      if (g) { migrateGameSockets(g); optimizeEquipped(g); return g; }
     }
     const num = (k: string, min: number): number => { const v = s[k]; if (typeof v !== "number" || !isFinite(v) || v < min) throw new Error("bad " + k); return v; };
     if (typeof s.map === "string") setMapSize(sizeFromLen(s.map.length));
@@ -9937,6 +9945,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     repairCampBossHybrid(g);
     expandFeaturesOnLoad(g);
     if (fromBak && raw) { memSave = raw; lsSet(activeSaveKey(), raw); ssSet(activeSaveKey(), raw); idbPut(activeSaveKey(), raw); saveFlag = true; }
+    migrateGameSockets(g);
     optimizeEquipped(g);
     return g;
   } catch { return null; }
@@ -10521,6 +10530,7 @@ function kill(g: Game, e: En): void {
   const d = g.depth;
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
   g.kills++;
+  sockOnKill(g, e);
   petHarvestOnKill(g);
   const gm = efGoldMul(g, e);
   const okR = overkillOf(e);
@@ -11844,6 +11854,7 @@ function worldTick(g: Game, st: Stats): void {
   efTurn(g, st);
   if (st.ward > 0) g.ward = Math.min(Math.max(st.ward, efP(g, 42) + efP(g, 78) > 0 ? st.maxHp * 0.15 : 0), g.ward + st.ward * 0.08); else g.ward = Math.max(0, g.ward - st.maxHp * 0.03);
   gemTick(g, st);
+  sockTick(g, st);
 }
 function findTarget(g: Game, st: Stats): En | null {
   const h = g.hero;
@@ -11967,6 +11978,8 @@ function starCount(it: Item | null | undefined): number { return !it ? 0 : it.ki
 const starBadge = (it: Item): string => (starCount(it) > 0 ? "\u2605" + starCount(it) : "");
 
 const SOCK_MAX = 4;
+const SOCK_PRIS = 7; // Prismatic socket color; only Prismatic gems complete it
+const SOCK_COL_MAX = 7;
 const SOCK_W: number[][] = [
   [55, 35, 8, 1.5, 0.5],
   [40, 42, 14, 3, 1],
@@ -12017,21 +12030,334 @@ function rollSocketCount(rar: number, d: number = 1): number {
   for (let i = 0; i <= SOCK_MAX; i++) { r -= w[i]; if (r <= 0) return i; }
   return SOCK_MAX;
 }
+function sockCol(c: number): string { return c === SOCK_PRIS ? "#ff60e0" : (GEMT[c] ? GEMT[c].c : "#c0c0c0"); }
+function sockName(c: number): string { return c === SOCK_PRIS ? "Prismatic" : (GEMT[c] ? GEMT[c].n : "Socket"); }
+function copySockGem(g: { typ: number; rar: number; s?: number } | undefined): { typ: number; rar: number; s?: number } | undefined {
+  if (!g) return undefined;
+  const o: { typ: number; rar: number; s?: number } = { typ: g.typ, rar: g.rar };
+  if (g.s && g.s >= 1) o.s = g.s;
+  return o;
+}
+// Prismatic gear: every socket is Prismatic-colored. 2★+ always has SOCK_MAX sockets. Existing gems stay put.
+function ensurePrisSocketLayout(it: Item | null | undefined): void {
+  if (!it || it.kind === "pet" || it.kind === "gem") { if (it) delete it.sk; return; }
+  if (it.rar < 7) return;
+  const want = starCount(it) >= 2 ? SOCK_MAX : Math.max(it.sk ? it.sk.length : 0, 0);
+  const cur = it.sk ? it.sk.slice() : [];
+  const sk: { c: number; g?: { typ: number; rar: number; s?: number } }[] = [];
+  const n = Math.min(SOCK_MAX, Math.max(cur.length, want));
+  for (let i = 0; i < n; i++) {
+    const z = cur[i];
+    sk.push({ c: SOCK_PRIS, g: z ? copySockGem(z.g) : undefined });
+  }
+  it.sk = sk.length ? sk : undefined;
+}
 function rollSockets(it: Item, d: number = 1): void {
   if (!it || it.kind === "pet" || it.kind === "gem") { delete it.sk; return; }
+  if (it.rar >= 7) {
+    const n = starCount(it) >= 2 ? SOCK_MAX : rollSocketCount(it.rar, d);
+    const sk: { c: number; g?: { typ: number; rar: number; s?: number } }[] = [];
+    for (let i = 0; i < n; i++) sk.push({ c: SOCK_PRIS });
+    it.sk = sk.length ? sk : undefined;
+    return;
+  }
   const n = rollSocketCount(it.rar, d);
-  const sk: { c: number; g?: { typ: number; rar: number } }[] = [];
+  const sk: { c: number; g?: { typ: number; rar: number; s?: number } }[] = [];
   for (let i = 0; i < n; i++) sk.push({ c: ri(7) });
-  it.sk = sk;
+  it.sk = sk.length ? sk : undefined;
 }
 function ensureSockets(it: Item): void {
   if (!it || it.kind === "pet" || it.kind === "gem") { if (it) delete it.sk; return; }
+  if (it.rar >= 7) { ensurePrisSocketLayout(it); if (it.sk === undefined) rollSockets(it); return; }
   if (it.sk === undefined) rollSockets(it);
 }
+// Prismatic gems are wild and fit every socket, including Prismatic. Prismatic sockets accept ONLY Prismatic gems.
+// A non-Prismatic gem already sitting in a migrated Prismatic socket is kept, but does not "fit" if re-inserted,
+// and does not count toward the socket bonus.
 function gemFitsSocket(gem: Item, color: number): boolean {
   if (!isGem(gem) || gem.gt === undefined) return false;
+  if (color === SOCK_PRIS) return gem.rar >= 7;
   if (gem.rar >= 7) return true;
   return gem.gt === color;
+}
+function gemEffectText(it: Item, depth?: number): string {
+  if (!isGem(it) || it.gt === undefined) return "";
+  const p = gemQ(it.rar) * gemStarMul(it.rar, gemStarsOf(it));
+  const d = depth ?? (STAT_G && STAT_G.depth > 0 ? STAT_G.depth : (LIVE && LIVE.depth > 0 ? LIVE.depth : 1));
+  const typ = it.gt;
+  if (typ === 0) return "+" + Math.round(4 * p) + " Max HP, +" + Math.round(p) + " Atk, +" + Math.round(p) + " Def.";
+  if (typ === 1) {
+    const aura = Math.max(1, Math.round((1 + p) * 0.85 + d * 0.06 * p));
+    return "Aura: " + aura + " damage to adjacent foes each turn (at depth " + d + "; scales with depth).";
+  }
+  if (typ === 2) {
+    const n = p >= 2.5 ? 2 : 1;
+    return "+" + Math.round(1.2 * p) + " Def. Every 3 turns, " + n + " frost patch" + (n > 1 ? "es" : "") + " (power " + Math.round(0.6 * p) + ", lasts 3 turns).";
+  }
+  if (typ === 3) return "+" + Math.round(8 * p) + " Max HP, +" + (Math.round(0.2 * p * 10) / 10) + " Regen / turn.";
+  if (typ === 4) {
+    const ch = Math.min(0.6, 0.06 * p);
+    return "+" + fmtUltMul(p) + " Magic Find. This gem adds a " + (Math.round(ch * 1000) / 10) + "% chance to raise a drop's rarity (below Ethereal; combined Citrine chance is capped at 60%).";
+  }
+  if (typ === 5) {
+    const gold = Math.min(8, 1 + 0.12 * p);
+    const gob = Math.min(2.5, 1 + 0.18 * p);
+    return "Gold gains \u00d7" + fmtUltMul(gold) + " (this gem; combined cap \u00d78). Goblin spawns \u00d7" + fmtUltMul(gob) + " (combined cap \u00d72.5).";
+  }
+  if (typ === 6) {
+    const port = Math.min(2.5, 1 + 0.18 * p);
+    const rare = Math.min(2.5, 1 + 0.15 * p);
+    return "Portal chance \u00d7" + fmtUltMul(port) + " (cap \u00d72.5). Rare and elite encounters \u00d7" + fmtUltMul(rare) + " (cap \u00d72.5).";
+  }
+  return "";
+}
+
+// ---- Socket bonus system (2026-11-18) ----
+// A piece with EVERY socket filled by a proper-color gem gains one bonus. Identity is hashed from item.seed
+// (and Prismatic star count). Magnitude scales with rarity and stars. Prismatic gear uses a separate pool.
+function sockGemFitsColor(g: { typ: number; rar: number } | undefined, color: number): boolean {
+  if (!g) return false;
+  if (g.rar >= 7) return true;
+  if (color === SOCK_PRIS) return false;
+  return g.typ === color;
+}
+function sockBonusReady(it: Item | null | undefined): boolean {
+  if (!it || !it.sk || !it.sk.length || it.kind === "pet" || it.kind === "gem") return false;
+  for (const z of it.sk) if (!sockGemFitsColor(z.g, z.c)) return false;
+  return true;
+}
+function sockHash(it: Item, salt: number = 0x50c2): number {
+  const starSalt = it.rar >= 7 ? Math.imul((starCount(it) + 1), 0x85ebca6b) : 0;
+  let h = ((it.seed >>> 0) ^ (salt >>> 0) ^ Math.imul(it.rar + 1, 0x9e3779b9) ^ (starSalt >>> 0)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function sockStarMul(stars: number): number { return 1 + 0.10 * Math.max(0, Math.min(10, stars | 0)); }
+function sockRarMul(rar: number): number { return 0.40 + 0.10 * Math.max(0, Math.min(6, rar | 0)); }
+function sockBonusMag(it: Item): number {
+  const stars = starCount(it);
+  if (it.rar >= 7) return 0.90 * sockStarMul(stars); // 0.90 / 1.35 / 1.80 at 0★ / 5★ / 10★
+  return sockRarMul(it.rar) * sockStarMul(stars);
+}
+type SockBonusDef = { id: string; name: string; pris: boolean; kind: string; desc: (m: number) => string; stat?: (s: Stats, m: number) => void };
+const SOCK_BONUS_REG: SockBonusDef[] = [
+  { id: "hp", name: "Vital Core", pris: false, kind: "hp", desc: (m) => "+" + Math.round(10 * m) + " Max HP", stat: (s, m) => { s.maxHp += Math.round(10 * m); } },
+  { id: "atk", name: "Keen Edge", pris: false, kind: "atk", desc: (m) => "+" + Math.round(3 * m) + " Atk", stat: (s, m) => { s.atk += Math.round(3 * m); } },
+  { id: "def", name: "Hardened Plate", pris: false, kind: "def", desc: (m) => "+" + Math.round(4 * m) + " Def", stat: (s, m) => { s.def += Math.round(4 * m); } },
+  { id: "crit", name: "Precision", pris: false, kind: "crit", desc: (m) => "+" + (Math.round(1.2 * m * 10) / 10) + "% Crit", stat: (s, m) => { s.crit += 1.2 * m; } },
+  { id: "spd", name: "Swift Hands", pris: false, kind: "spd", desc: (m) => "+" + (Math.round(1.1 * m * 10) / 10) + " Attack Speed", stat: (s, m) => { s.spd += 1.1 * m; } },
+  { id: "regen", name: "Mending", pris: false, kind: "regen", desc: (m) => "+" + (Math.round(0.25 * m * 10) / 10) + " Regen / turn", stat: (s, m) => { s.regen = Math.round((s.regen + 0.25 * m) * 10) / 10; } },
+  { id: "mv", name: "Light Step", pris: false, kind: "mv", desc: (m) => "+" + Math.round(3 * m) + " Move", stat: (s, m) => { s.mv += 3 * m; } },
+  { id: "block", name: "Guard", pris: false, kind: "block", desc: (m) => "+" + Math.round(2 * m) + "% Block", stat: (s, m) => { s.block += 2 * m; } },
+  { id: "ward", name: "Aegis", pris: false, kind: "ward", desc: (m) => "+" + Math.round(6 * m) + " Ward", stat: (s, m) => { s.ward += Math.round(6 * m); } },
+  { id: "ls", name: "Bloodletting", pris: false, kind: "ls", desc: (m) => (Math.round(1.6 * m * 10) / 10) + "% lifesteal" },
+  { id: "gold", name: "Gilded", pris: false, kind: "gold", desc: (m) => "+" + Math.round(8 * m) + "% gold find" },
+  { id: "mf", name: "Fortune", pris: false, kind: "mf", desc: (m) => "+" + (Math.round(0.35 * m * 100) / 100) + " Magic Find" },
+  { id: "cdr", name: "Quickening", pris: false, kind: "cdr", desc: (m) => (Math.round(2.2 * m * 10) / 10) + "% ultimate cooldown" },
+  { id: "dr", name: "Bulwark Veil", pris: false, kind: "dr", desc: (m) => (Math.round(1.8 * m * 10) / 10) + "% damage reduction" },
+];
+const SOCK_BONUS_PRIS: SockBonusDef[] = [
+  { id: "chain", name: "Chain Lightning", pris: true, kind: "chain", desc: (m) => (Math.round((7 + 0.8 * m) * 10) / 10) + "% chance on hit to arc " + Math.round(22 * m) + "% of the blow to a nearby foe" },
+  { id: "overshield", name: "Prism Ward", pris: true, kind: "overshield", desc: (m) => "Every 8 turns, gain " + Math.round(8 * m) + " overshield (Ward)" },
+  { id: "ultRefund", name: "Time Fracture", pris: true, kind: "ultRefund", desc: (m) => "On kill, refund " + (Math.round((4 + 1.2 * m) * 10) / 10) + "% of remaining ultimate cooldown" },
+  { id: "goldRain", name: "Gold Rain", pris: true, kind: "goldRain", desc: (m) => "On kill, a gold shower worth " + Math.round(8 + 4 * m) + " + depth-scaled gold" },
+  { id: "doublestrike", name: "Double Strike", pris: true, kind: "doublestrike", desc: (m) => (Math.round((2.2 + 0.6 * m) * 10) / 10) + "% chance to strike a second time for 70% damage" },
+  { id: "aura", name: "Prismatic Aura", pris: true, kind: "aura", desc: (m) => "Aura: " + Math.max(1, Math.round(2 + 3 * m)) + " Prismatic damage to adjacent foes each turn" },
+  { id: "nova", name: "Crit Nova", pris: true, kind: "nova", desc: (m) => "On crit, a nova deals " + Math.round(16 * m) + "% of the blow to nearby foes" },
+  { id: "lifebloom", name: "Lifebloom", pris: true, kind: "lifebloom", desc: (m) => "On kill, heal " + (Math.round((1.4 + 0.5 * m) * 10) / 10) + "% of Max HP" },
+  { id: "starfall", name: "Starfall", pris: true, kind: "starfall", desc: (m) => "Every 6 turns, a star falls for " + Math.round(8 * m) + "% of Atk on a nearby foe" },
+  { id: "mirrorward", name: "Mirror Ward", pris: true, kind: "mirrorward", desc: (m) => (Math.round(2.0 * m * 10) / 10) + "% chance to ignore a hit" },
+  { id: "fortunestorm", name: "Fortune Storm", pris: true, kind: "fortunestorm", desc: (m) => "+" + Math.round(10 * m) + "% gold find and +" + (Math.round(0.4 * m * 100) / 100) + " Magic Find" },
+  { id: "bloodprism", name: "Blood Prism", pris: true, kind: "bloodprism", desc: (m) => (Math.round(1.8 * m * 10) / 10) + "% lifesteal" },
+  { id: "arcaneecho", name: "Arcane Echo", pris: true, kind: "arcaneecho", desc: (m) => (Math.round((6 + 0.6 * m) * 10) / 10) + "% chance on hit to echo " + Math.round(18 * m) + "% of the blow" },
+  { id: "aegiscycle", name: "Aegis Cycle", pris: true, kind: "aegiscycle", desc: (m) => "+" + Math.round(8 * m) + " Ward and +" + (Math.round(0.2 * m * 10) / 10) + " Regen / turn", stat: (s, m) => { s.ward += Math.round(8 * m); s.regen = Math.round((s.regen + 0.2 * m) * 10) / 10; } },
+];
+function sockBonusPool(it: Item): SockBonusDef[] { return it.rar >= 7 ? SOCK_BONUS_PRIS : SOCK_BONUS_REG; }
+function sockBonusDefOf(it: Item): SockBonusDef {
+  const pool = sockBonusPool(it);
+  return pool[sockHash(it) % pool.length];
+}
+type SockBonusView = { id: string; name: string; desc: string; on: boolean; pris: boolean; mag: number; stars: number; filled: number; need: number };
+function sockBonusOf(it: Item | null | undefined): SockBonusView | null {
+  if (!it || it.kind === "pet" || it.kind === "gem" || !it.sk || !it.sk.length) return null;
+  const def = sockBonusDefOf(it);
+  const mag = sockBonusMag(it);
+  const on = sockBonusReady(it);
+  const filled = it.sk.filter((z: { g?: unknown }) => !!z.g).length;
+  return { id: def.id, name: def.name, desc: def.desc(mag), on, pris: def.pris, mag, stars: starCount(it), filled, need: it.sk.length };
+}
+function sockBonusLine(it: Item | null | undefined): string {
+  const b = sockBonusOf(it);
+  if (!b) return "";
+  return (b.on ? "Socket bonus: " : "Socket bonus (inactive): ") + b.name + " \u2014 " + b.desc;
+}
+function eachActiveSockBonus(eq: Eq, fn: (def: SockBonusDef, mag: number, it: Item) => void): void {
+  for (const k of EQK) {
+    const it = eq[k];
+    if (!it || !sockBonusReady(it)) continue;
+    fn(sockBonusDefOf(it), sockBonusMag(it), it);
+  }
+}
+function applySockBonuses(s: Stats, eq: Eq): void {
+  eachActiveSockBonus(eq, (def, mag) => { if (def.stat) def.stat(s, mag); });
+}
+function sockGoldBonusMul(eq: Eq): number {
+  let add = 0;
+  eachActiveSockBonus(eq, (def, mag) => {
+    if (def.kind === "gold") add += 0.08 * mag;
+    if (def.kind === "fortunestorm") add += 0.10 * mag;
+  });
+  return add;
+}
+function sockMagicFindBonus(eq: Eq): number {
+  let add = 0;
+  eachActiveSockBonus(eq, (def, mag) => {
+    if (def.kind === "mf") add += 0.35 * mag;
+    if (def.kind === "fortunestorm") add += 0.40 * mag;
+  });
+  return add;
+}
+function sockCdrFrac(eq: Eq): number {
+  let t = 0;
+  eachActiveSockBonus(eq, (def, mag) => { if (def.kind === "cdr") t += 0.022 * mag; });
+  return Math.min(0.20, t);
+}
+function sockDrFrac(eq: Eq): number {
+  let t = 0;
+  eachActiveSockBonus(eq, (def, mag) => { if (def.kind === "dr") t += 0.018 * mag; });
+  return Math.min(0.15, t);
+}
+function sockLsFrac(eq: Eq): number {
+  let t = 0;
+  eachActiveSockBonus(eq, (def, mag) => {
+    if (def.kind === "ls") t += 0.016 * mag;
+    if (def.kind === "bloodprism") t += 0.018 * mag;
+  });
+  return Math.min(0.12, t);
+}
+function sockOnHit(g: Game, tg: En, dmg: number, crit: boolean, st: Stats, died: boolean): void {
+  const eq = g.eq;
+  eachActiveSockBonus(eq, (def, mag) => {
+    const kind = def.kind;
+    if (kind === "chain" && tg.hp > 0 && R() * 100 < (7 + 0.8 * mag)) {
+      const n = nearFoe(g, tg);
+      if (n) { const sp = Math.max(1, Math.round(dmg * 0.22 * mag)); hurtEn(g, n, sp, { n: "Chain Lightning", t: ELN.elec, c: ELC.elec }); floatTxt(g, n.x, n.y, String(sp), ELC.elec); if (n.hp <= 0) kill(g, n); }
+    }
+    if (kind === "doublestrike" && tg.hp > 0 && R() * 100 < (2.2 + 0.6 * mag)) {
+      const sp = Math.max(1, Math.round(dmg * 0.70));
+      hurtEn(g, tg, sp, { n: "Double Strike", t: "Physical", c: "#ffe080" });
+      floatTxt(g, tg.x, tg.y - 0.35, String(sp), "#ffe080");
+    }
+    if (kind === "nova" && crit) {
+      for (const o of g.en) {
+        if (o === tg || o.hp <= 0) continue;
+        if (Math.abs(o.x - tg.x) + Math.abs(o.y - tg.y) > 2) continue;
+        const sp = Math.max(1, Math.round(dmg * 0.16 * mag));
+        hurtEn(g, o, sp, { n: "Crit Nova", t: "Prismatic", c: "#ff60e0" });
+        if (o.hp <= 0) kill(g, o);
+      }
+    }
+    if (kind === "arcaneecho" && tg.hp > 0 && R() * 100 < (6 + 0.6 * mag)) {
+      const sp = Math.max(1, Math.round(dmg * 0.18 * mag));
+      hurtEn(g, tg, sp, { n: "Arcane Echo", t: "Prismatic", c: "#d080ff" });
+      floatTxt(g, tg.x, tg.y - 0.2, String(sp), "#d080ff");
+    }
+  });
+  const ls = sockLsFrac(eq);
+  if (ls > 0 && dmg > 0) heal(g, dmg * ls, false);
+  if (tg.hp <= 0 && !died) kill(g, tg);
+}
+function sockOnKill(g: Game, e: En, st?: Stats): void {
+  const stats = st || calc(g.lvl, g.eq);
+  eachActiveSockBonus(g.eq, (def, mag) => {
+    if (def.kind === "goldRain") {
+      const n = Math.max(1, Math.round((8 + 4 * mag) + g.depth * (0.4 + 0.15 * mag)));
+      g.gold += n; floatTxt(g, e.x, e.y - 1.15, "RAIN +" + n + "g", GOLD);
+    }
+    if (def.kind === "ultRefund") {
+      const frac = Math.min(0.20, (4 + 1.2 * mag) / 100);
+      const now = Date.now();
+      if (g.ultAts) for (const k of EQK) {
+        const t = g.ultAts[k];
+        if (t && t > now) g.ultAts[k] = now + Math.max(0, (t - now) * (1 - frac));
+      }
+    }
+    if (def.kind === "lifebloom") heal(g, stats.maxHp * (0.014 + 0.005 * mag), true);
+  });
+}
+function sockTick(g: Game, st: Stats): void {
+  if (g.mode !== "play" || g.area === "camp") return;
+  const h = g.hero;
+  eachActiveSockBonus(g.eq, (def, mag) => {
+    if (def.kind === "aura") {
+      const dmg = Math.max(1, Math.round(2 + 3 * mag));
+      for (const e of g.en) {
+        if (e.hp <= 0) continue;
+        const md = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y));
+        if (md > 2 || md < 1) continue;
+        markHitDir(g, e);
+        applyHpDmg(e, dmg, g, { n: "Prismatic Aura", t: "Prismatic", c: "#ff60e0" }); e.hit = 0.12; e.awake = true;
+        floatTxt(g, e.x, e.y - 0.15, String(dmg), "#ff60e0");
+        if (e.hp <= 0) kill(g, e);
+      }
+    }
+    if (def.kind === "overshield" && (g.turn % 8 === 0)) {
+      const add = Math.max(1, Math.round(8 * mag));
+      const cap = Math.max(st.ward, st.maxHp * 0.2) + add * 2;
+      g.ward = Math.min(cap, g.ward + add);
+      if (add > 0) floatTxt(g, h.x, h.y - 0.5, "WARD +" + add, "#9ae8ff");
+    }
+    if (def.kind === "starfall" && (g.turn % 6 === 0)) {
+      let best: En | null = null, bd = 5;
+      for (const e of g.en) {
+        if (e.hp <= 0) continue;
+        const d = Math.abs(e.x - h.x) + Math.abs(e.y - h.y);
+        if (d > 0 && d < bd) { bd = d; best = e; }
+      }
+      if (best) {
+        const dmg = Math.max(1, Math.round(st.atk * 0.08 * mag));
+        hurtEn(g, best, dmg, { n: "Starfall", t: "Prismatic", c: GOLD });
+        floatTxt(g, best.x, best.y - 0.2, String(dmg), GOLD);
+        if (best.hp <= 0) kill(g, best);
+      }
+    }
+  });
+}
+function sockIncoming(g: Game, dmg: number, st: Stats): number {
+  let d = dmg;
+  const dr = sockDrFrac(g.eq);
+  if (dr > 0) d = Math.max(1, Math.round(d * (1 - dr)));
+  let dodge = 0;
+  eachActiveSockBonus(g.eq, (def, mag) => { if (def.kind === "mirrorward") dodge += 0.020 * mag; });
+  if (dodge > 0 && R() < Math.min(0.12, dodge)) { floatTxt(g, g.hero.x, g.hero.y - 0.5, "MIRROR", "#80ffc0"); return 0; }
+  return d;
+}
+function walkSnapItems(snap: FloorSnap | null | undefined, fn: (it: Item) => void): void {
+  if (!snap) return;
+  for (const d of snap.drops || []) if (d && d.item) fn(d.item);
+}
+function walkGameItems(g: Game, fn: (it: Item) => void): void {
+  for (const k of EQK) { const it = g.eq[k]; if (it) fn(it); }
+  for (const it of g.bag || []) if (it) fn(it);
+  for (const it of g.stash || []) if (it) fn(it);
+  for (const it of ensureGemBag(g)) if (it) fn(it);
+  for (const d of g.drops || []) if (d && d.item) fn(d.item);
+  if (g.merchant && Array.isArray((g.merchant as { items?: Item[] }).items)) {
+    for (const it of (g.merchant as { items: Item[] }).items) if (it) fn(it);
+  }
+  walkSnapItems(g.snapCur, fn);
+  walkSnapItems(g.snapPrev, fn);
+}
+function migrateGameSockets(g: Game): number {
+  let n = 0;
+  walkGameItems(g, (it: Item) => {
+    const before = it.sk ? JSON.stringify(it.sk.map((z: { c: number; g?: unknown }) => [z.c, !!z.g])) : "";
+    ensurePrisSocketLayout(it);
+    const after = it.sk ? JSON.stringify(it.sk.map((z: { c: number; g?: unknown }) => [z.c, !!z.g])) : "";
+    if (before !== after) n++;
+  });
+  return n;
 }
 function makeGem(rar: number, typ?: number, ilvl: number = 1, stars: number = 0): Item {
   const r = Math.max(0, Math.min(7, rar | 0));
@@ -12136,8 +12462,8 @@ function applyGemStats(s: Stats, eq: Eq): void {
   const sap = gemTypePower(eq, 2);
   if (sap > 0) s.def += Math.round(1.2 * sap);
 }
-function gemMagicFind(g: Game): number { return gemTypePower(g.eq, 4); }
-function gemGoldMul(g: Game): number { return Math.min(8, 1 + 0.12 * gemTypePower(g.eq, 5)); }
+function gemMagicFind(g: Game): number { return gemTypePower(g.eq, 4) + sockMagicFindBonus(g.eq); }
+function gemGoldMul(g: Game): number { return Math.min(8, 1 + 0.12 * gemTypePower(g.eq, 5) + sockGoldBonusMul(g.eq)); }
 function gemGobMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 5)); }
 function gemPortalMul(g: Game): number { return Math.min(2.5, 1 + 0.18 * gemTypePower(g.eq, 6)); }
 function gemRareMul(g: Game): number { return Math.min(2.5, 1 + 0.15 * gemTypePower(g.eq, 6)); }
@@ -12186,7 +12512,7 @@ function socketGem(it: Item, si: number, gem: Item): string {
   ensureSockets(it);
   if (!it.sk || si < 0 || si >= it.sk.length) return "That item has no such socket.";
   if (!isGem(gem) || gem.gt === undefined) return "That is not a gemstone.";
-  if (!gemFitsSocket(gem, it.sk[si].c)) return "That gem does not fit this " + GEMT[it.sk[si].c].n + " socket.";
+  if (!gemFitsSocket(gem, it.sk[si].c)) return "That gem does not fit this " + sockName(it.sk[si].c) + " socket.";
   if (it.sk[si].g) return "That socket is already filled. Unsocket it first.";
   it.sk[si].g = gemSockOf(gem);
   bustIcon(it);
@@ -12396,10 +12722,17 @@ function carryCombineSockets(out: Item, primary: Item | null | undefined): void 
   if (!out || out.kind === "pet" || out.kind === "gem") { if (out) delete out.sk; return; }
   const sk = (primary && primary.sk && primary.sk.length) ? primary.sk.map(copySocket) : [];
   if (sk.length > SOCK_MAX) sk.length = SOCK_MAX;
+  if (out.rar >= 7) {
+    const want = starCount(out) >= 2 ? SOCK_MAX : Math.min(SOCK_MAX, Math.max(sk.length, rollSocketCount(out.rar)));
+    while (sk.length < want) sk.push({ c: SOCK_PRIS });
+    for (const z of sk) z.c = SOCK_PRIS;
+    out.sk = sk.length ? sk : undefined;
+    return;
+  }
   const rolled = rollSocketCount(out.rar);
   const want = Math.min(SOCK_MAX, Math.max(sk.length, rolled));
   while (sk.length < want) sk.push({ c: ri(7) });
-  out.sk = sk;
+  out.sk = sk.length ? sk : undefined;
 }
 function combinePrimary(g: Game, inputs: Item[]): Item {
   for (const k of EQK) {
@@ -14173,6 +14506,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     efOnHit(g, tg, dmg, crit || scrit, st, died);
     starOnHit(g, tg, dmg, crit || scrit, st, died);
     setOnHit(g, tg, dmg, crit || scrit, st, died);
+    sockOnHit(g, tg, dmg, crit || scrit, st, died);
   };
   const main = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
   const wk = main ? main.kind : "";
@@ -20988,6 +21322,93 @@ try {
         return { ok: true, x, y, id: e.id, range: calc(g.lvl, g.eq).range };
       },
     },
+    gems: {
+      SOCK_PRIS: SOCK_PRIS,
+      SOCK_MAX: SOCK_MAX,
+      effect: (rar: number, typ: number, stars: number, depth?: number): string => gemEffectText(makeGem(rar, typ, 1, stars), depth ?? 1),
+      q: (rar: number): number => gemQ(rar),
+      starMul: (rar: number, stars: number): number => gemStarMul(rar, stars),
+      names: GEMT.map((t: { n: string; c: string; d: string }) => ({ n: t.n, d: t.d })),
+      fits: (gemRar: number, gemTyp: number, sockC: number): boolean => gemFitsSocket(makeGem(gemRar, gemTyp, 1, 0), sockC),
+      dropSockets: (kind: string, rar: number, stars: number): Record<string, unknown> => {
+        const it = makeItem(200, rar, kind as Kind, 200);
+        forceStars(it, stars);
+        rollSockets(it, 200);
+        return { kind: it.kind, rar: it.rar, stars: starCount(it), n: it.sk ? it.sk.length : 0, colors: it.sk ? it.sk.map((z: { c: number }) => z.c) : [] };
+      },
+      layout: (kind: string, rar: number, stars: number, colors?: number[], gems?: { typ: number; rar: number; s?: number }[]): Record<string, unknown> => {
+        const it = makeItem(200, rar, kind as Kind, 200);
+        forceStars(it, stars);
+        if (colors) it.sk = colors.map((c: number, i: number) => ({ c, g: gems && gems[i] ? { typ: gems[i].typ, rar: gems[i].rar, s: gems[i].s } : undefined }));
+        ensureSockets(it);
+        ensurePrisSocketLayout(it);
+        const b = sockBonusOf(it);
+        return { kind: it.kind, rar: it.rar, stars: starCount(it), n: it.sk ? it.sk.length : 0, colors: it.sk ? it.sk.map((z: { c: number }) => z.c) : [], filled: it.sk ? it.sk.map((z: { g?: unknown }) => !!z.g) : [], ready: sockBonusReady(it), bonus: b, line: sockBonusLine(it), mag: sockBonusMag(it) };
+      },
+      bonusMag: (rar: number, stars: number): number => {
+        const it = makeItem(80, rar, "chest", 80);
+        forceStars(it, stars);
+        return sockBonusMag(it);
+      },
+      pools: (): Record<string, unknown> => ({ reg: SOCK_BONUS_REG.map((d: SockBonusDef) => d.id), pris: SOCK_BONUS_PRIS.map((d: SockBonusDef) => d.id) }),
+      packRoundtrip: (): Record<string, unknown> => {
+        const it = makeItem(200, 7, "sword", 200);
+        forceStars(it, 3);
+        ensurePrisSocketLayout(it);
+        it.sk = [{ c: SOCK_PRIS, g: { typ: 0, rar: 7, s: 2 } }, { c: SOCK_PRIS }, { c: SOCK_PRIS }, { c: SOCK_PRIS }];
+        const back = unpackItem(packItem(it));
+        return { ok: !!back, n: back && back.sk ? back.sk.length : 0, colors: back && back.sk ? back.sk.map((z: { c: number }) => z.c) : [], gem: back && back.sk && back.sk[0].g ? back.sk[0].g : null };
+      },
+      combine: (priStars: number, priSocks: number): Record<string, unknown> => {
+        const mk = (stars: number, nSock: number): Item => {
+          const it = makeItem(200, 7, "sword", 200);
+          forceStars(it, stars);
+          const sk: { c: number; g?: { typ: number; rar: number } }[] = [];
+          for (let i = 0; i < nSock; i++) sk.push({ c: i % 7, g: i === 0 ? { typ: 1, rar: 6 } : undefined });
+          it.sk = sk;
+          return it;
+        };
+        const a = mk(priStars, priSocks), b = mk(priStars, 1), c = mk(priStars, 1);
+        const out = makeCombined([a, b, c], 200, a);
+        return { ok: !!out, inN: priSocks, outN: out && out.sk ? out.sk.length : 0, outStars: out ? starCount(out) : 0, colors: out && out.sk ? out.sk.map((z: { c: number }) => z.c) : [], keptGem: !!(out && out.sk && out.sk[0] && out.sk[0].g && out.sk[0].g.typ === 1), reduced: !!(out && out.sk && out.sk.length < priSocks) };
+      },
+      reroll: (): Record<string, unknown> => {
+        const a = makeItem(200, 7, "chest", 200); forceStars(a, 2); a.seed = 424242;
+        const b = makeItem(200, 7, "chest", 200); forceStars(b, 3); b.seed = 424242;
+        return { sameSeed2: sockBonusDefOf(a).id, sameSeed3: sockBonusDefOf(b).id, changed: sockBonusDefOf(a).id !== sockBonusDefOf(b).id, mag2: +sockBonusMag(a).toFixed(3), mag3: +sockBonusMag(b).toFixed(3) };
+      },
+      stats: (ready: boolean): Record<string, unknown> => {
+        const it = makeItem(80, 5, "chest", 80);
+        forceStars(it, 2);
+        it.sk = [{ c: 0, g: ready ? { typ: 0, rar: 5 } : undefined }, { c: 3, g: ready ? { typ: 3, rar: 5 } : undefined }];
+        const empty: Eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+        const eq: Eq = { ...empty, chest: it };
+        const s0 = calc(10, empty);
+        const s1 = calc(10, eq);
+        return { ready: sockBonusReady(it), bonus: sockBonusOf(it), hp0: s0.maxHp, hp1: s1.maxHp, atk0: s0.atk, atk1: s1.atk, def0: s0.def, def1: s1.def };
+      },
+      setupShot: (kind: string): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE;
+        if (!g) return { ok: false };
+        g.bag = [];
+        g.gemBag = [];
+        if (kind === "tooltip") {
+          const gem = makeGem(6, 1, 200, 2);
+          ensureGemBag(g).push(gem);
+          if (openTestInvFn) openTestInvFn(true);
+          if (g.notify) g.notify();
+          return { ok: true, kind, id: gem.id, name: gemFullName(gem), text: gemEffectText(gem, g.depth), sel: "gb#" + gem.id };
+        }
+        const it = makeItem(200, 7, "chest", 200);
+        forceStars(it, 5);
+        ensurePrisSocketLayout(it);
+        it.sk = [0, 1, 2, 3].map((t: number) => ({ c: SOCK_PRIS, g: { typ: t, rar: 7, s: 2 } }));
+        g.eq.chest = it;
+        if (openTestInvFn) openTestInvFn(true);
+        if (g.notify) g.notify();
+        return { ok: true, kind, id: it.id, name: it.name, line: sockBonusLine(it), bonus: sockBonusOf(it), sel: "e:chest" };
+      },
+    },
   };
 } catch { /* ignore */ }
 
@@ -23402,7 +23823,7 @@ export default function App() {
       {it && isPrisWep(it) ? prisArcOverlay() : null}
       {it && it.kind === "pet" && (it.prt ?? 0) >= 1 && <span className="dc-rarepet">RARE</span>}
       {it && starCount(it) > 0 && <span className="dc-stars">{"\u2605" + starCount(it)}</span>}
-      {it && it.sk && it.sk.length > 0 && <span className="dc-pips">{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <i key={"p" + i} style={{ background: z.g ? GEMT[z.g.typ].c : "transparent", borderColor: GEMT[z.c].c }} />)}</span>}
+      {it && it.sk && it.sk.length > 0 && <span className="dc-pips">{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <i key={"p" + i} style={{ background: z.g ? GEMT[z.g.typ].c : "transparent", borderColor: sockCol(z.c) }} />)}</span>}
       {it && g && <span className="dc-pl">{itemPower(it, g.lvl)}{!equipped && dlt !== 0 ? <span className={dlt > 0 ? "up" : "dn"}>{" " + (dlt > 0 ? "+" : "") + dlt}</span> : null}</span>}
     </button>
     );
@@ -23413,8 +23834,9 @@ export default function App() {
       <div style={{ width: 46, flex: "none" }}>{cell(it, "ih", "", false, () => undefined)}</div>
       <div>
         <div className={it.golden ? "gn" : it.rar >= 7 ? "pn" : ""} style={{ color: it.golden ? GOLD : it.set !== undefined ? SET_COL : RC[it.rar], fontWeight: 700, fontSize: 13 }}>{it.name + (starCount(it) ? " " + (starCount(it) > 5 ? "\u2605" + starCount(it) : "\u2605".repeat(starCount(it))) : "")}</div>
-        {it.sk && it.sk.length > 0 && <div style={{ display: "flex", gap: 3, marginTop: 3 }}>{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <span key={"sk" + i} title={GEMT[z.c].n + (z.g ? " · " + gemFullName(gemFromSock(z.g, 1)) : " (empty)")} style={{ width: 9, height: 9, borderRadius: "50%", background: z.g ? GEMT[z.g.typ].c : "transparent", border: "2px solid " + GEMT[z.c].c, boxShadow: z.g ? "0 0 4px " + RC[z.g.rar] : undefined, display: "inline-block" }} />)}</div>}
-        {isGem(it) && it.gt !== undefined && <div style={{ color: GEMT[it.gt].c, fontSize: 11, marginTop: 2 }}>{GEMT[it.gt].d}{it.rar >= 7 ? " Fits any socket." : ""}{" Socket power " + fmtUltMul(gemQ(it.rar) * gemStarMul(it.rar, gemStarsOf(it))) + (gemStarsOf(it) ? " (stars x" + fmtUltMul(gemStarMul(it.rar, gemStarsOf(it))) + ")" : "") + " \u00b7 stars " + gemStarsOf(it) + "/" + gemStarMax(it.rar) + (gemStarMax(it.rar) ? " (combine 3 with the same stars)" : "")}</div>}
+        {it.sk && it.sk.length > 0 && <div style={{ display: "flex", gap: 3, marginTop: 3 }}>{it.sk.map((z: { c: number; g?: { typ: number; rar: number } }, i: number) => <span key={"sk" + i} title={sockName(z.c) + (z.g ? " · " + gemFullName(gemFromSock(z.g, 1)) : " (empty)")} style={{ width: 9, height: 9, borderRadius: "50%", background: z.g ? GEMT[z.g.typ].c : "transparent", border: "2px solid " + sockCol(z.c), boxShadow: z.g ? "0 0 4px " + RC[z.g.rar] : undefined, display: "inline-block" }} />)}</div>}
+        {isGem(it) && it.gt !== undefined && <div style={{ color: GEMT[it.gt].c, fontSize: 11, marginTop: 2 }}>{gemEffectText(it)}{it.rar >= 7 ? " Fits any socket." : " Fits " + GEMT[it.gt].n + " sockets only."}{"  \u00b7  stars " + gemStarsOf(it) + "/" + gemStarMax(it.rar) + (gemStarMax(it.rar) ? " (combine 3 with the same stars)" : "")}</div>}
+        {it.sk && it.sk.length > 0 && sockBonusLine(it) ? <div className="dc-sockbonus" style={{ color: sockBonusReady(it) ? "#ffd070" : "#9080a8", fontSize: 11, marginTop: 2, fontWeight: sockBonusReady(it) ? 700 : 400 }}>{sockBonusLine(it)}</div> : null}
         <div className="dc-sm">{RT[it.rar] + " \u00b7 " + kindLabel(it.kind) + " \u00b7 item level " + it.ilvl}</div>
         {it.set !== undefined && SETS[it.set] && <div style={{ color: SET_COL, fontWeight: 700 }}>{SETS[it.set].n + " set"}</div>}
         {g && <div style={{ color: GOLD, fontWeight: 700, marginTop: 2 }}>{"Power Level " + itemPower(it, g.lvl) + (powerDelta(g.lvl, g.eq, it) ? "  (" + (powerDelta(g.lvl, g.eq, it) > 0 ? "+" : "") + powerDelta(g.lvl, g.eq, it) + " vs equipped)" : "")}</div>}
@@ -23854,9 +24276,9 @@ export default function App() {
                     <div className="dc-sm">Sockets (color must match; Prismatic gems fit any):</div>
                     {selItem.sk.map((z: { c: number; g?: { typ: number; rar: number } }, si: number) => (
                       <div key={"skui" + si} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                        {z.g ? <img src={sockGemIconURL(z.g)} alt="" width={26} height={26} draggable={false} style={{ imageRendering: "pixelated", border: "2px solid " + ((z.g.rar >= 7 && ((z.g as { s?: number }).s ?? 0) >= 10) ? GOLD : RC[z.g.rar]), borderRadius: 5, background: "#1a1028", flex: "none", outline: "1px solid " + GEMT[z.c].c, outlineOffset: 1 }} />
-                          : <span style={{ width: 12, height: 12, borderRadius: "50%", background: "transparent", border: "2px solid " + GEMT[z.c].c, flex: "none" }} />}
-                        <span style={{ color: z.g ? RC[z.g.rar] : GEMT[z.c].c, fontSize: 11, flex: 1 }}>{z.g ? (gemFullName(gemFromSock(z.g, 1))) : (GEMT[z.c].n + " socket (empty)")}</span>
+                        {z.g ? <img src={sockGemIconURL(z.g)} alt="" width={26} height={26} draggable={false} style={{ imageRendering: "pixelated", border: "2px solid " + ((z.g.rar >= 7 && ((z.g as { s?: number }).s ?? 0) >= 10) ? GOLD : RC[z.g.rar]), borderRadius: 5, background: "#1a1028", flex: "none", outline: "1px solid " + sockCol(z.c), outlineOffset: 1 }} />
+                          : <span style={{ width: 12, height: 12, borderRadius: "50%", background: "transparent", border: "2px solid " + sockCol(z.c), flex: "none" }} />}
+                        <span style={{ color: z.g ? RC[z.g.rar] : sockCol(z.c), fontSize: 11, flex: 1 }}>{z.g ? (gemFullName(gemFromSock(z.g, 1))) : (sockName(z.c) + " socket (empty)")}</span>
                         {z.g && <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11, padding: "0 8px" }} onClick={() => doAct(() => unsocketGem(g, selItem, si))}>Unsocket</button>}
                         {!z.g && ensureGemBag(g).some((it: Item) => isGem(it) && gemFitsSocket(it, z.c)) && (
                           <select defaultValue="" style={{ minHeight: 32, fontSize: 11, background: "#1a1626", color: "#fff", border: "1px solid #555", borderRadius: 6 }} onChange={(ev: { target: { value: string } }) => { const id = Number(ev.target.value); ev.target.value = ""; if (!isFinite(id)) return; doAct(() => { const gb = ensureGemBag(g); const bi = bagIndexById(gb, id); const gem = bi >= 0 ? gb[bi] : undefined; if (!gem) return ""; const r = socketGem(selItem, si, gem); if (r.indexOf("Socketed") === 0) gb.splice(bi, 1); return r; }); }}>
@@ -23867,7 +24289,8 @@ export default function App() {
                       </div>
                     ))}
                   </div>}
-                  {isGem(selItem) && selItem.gt !== undefined && <div style={{ color: GEMT[selItem.gt].c, marginTop: 4 }}>{GEMT[selItem.gt].d}{selItem.rar >= 7 ? " Fits any socket color." : " Fits " + GEMT[selItem.gt].n + " sockets only."}</div>}
+                  {isGem(selItem) && selItem.gt !== undefined && <div style={{ color: GEMT[selItem.gt].c, marginTop: 4 }}>{gemEffectText(selItem)}{selItem.rar >= 7 ? " Fits any socket color." : " Fits " + GEMT[selItem.gt].n + " sockets only."}</div>}
+                  {sockBonusLine(selItem) ? <div className="dc-sockbonus" style={{ color: sockBonusReady(selItem) ? "#ffd070" : "#9080a8", marginTop: 4, fontWeight: sockBonusReady(selItem) ? 700 : 400 }}>{sockBonusLine(selItem)}</div> : null}
                   {selItem.set !== undefined && SETS[selItem.set] && setBonusUI(g.eq, selItem.set)}
                   {(selItem.spells ?? []).map((sp: Spell, i: number) => <div key={"sp" + i} style={{ color: ELC[sp.el], marginTop: 2 }}>{"\u2726 " + spellDesc(sp)}</div>)}
                   {(selItem.pas ?? []).map((p: Passive, i: number) => <div key={"pa" + i} style={{ color: ELC[p.el], marginTop: 2 }}>{"\u25c8 " + pasDesc(p)}</div>)}
