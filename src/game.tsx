@@ -159,7 +159,7 @@ interface Game {
   trader: Trader | null; merchant?: Merchant | null; shopOpen: boolean; gambOpen?: boolean; chestShop?: Partial<Record<MerchId, ChestDeal>>; chestTypes?: Record<string, ChestDeal>; chestTypeMig?: boolean; chestReveal?: { it: Item; t: number; phase: "open" | "show"; sku?: string } | null; merchSub?: { oneHand?: WT; twoHand?: WT }; ultAt: number; ultAtA?: number; ultAts?: Partial<Record<EqKey, number>>; paraAt?: number; para?: ParaFx | null; mmBig: boolean; toast: number; saveT: number; floorTurn: number; deaths: number; spT?: number;
   portal: PortalSpot | null; vault: string | null; secret?: PortalSpot | null; gobPort?: PortalSpot | null; arena?: string | null; gobCave?: string | null; gobT: number; locked: boolean;
   torches: Torch[];
-  area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
+  area?: "dungeon" | "camp" | "vault" | "arena" | "goblin"; actCleared?: number; bkd?: number[]; stash: Item[]; stashGold: number; bankGold?: number; stashOpen?: boolean;
   campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null; bpm?: { k: string; v: number[] } | null;
   gambler?: { x: number; y: number } | null; gambPity?: number;
   mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean; wxs?: number; mw?: number; mh?: number; xps?: PortalSpot[]; shrine?: Shrine | null; swarm?: Swarm | null; arts?: number[]; artCave?: ArtCave | null; shrUsedD?: number; trophyOpen?: boolean; hz?: Uint8Array | null; slide?: { dx: number; dy: number; t: number } | null; trophyAt?: { x: number; y: number };
@@ -1004,6 +1004,31 @@ function floorFront(g: Game): number {
 }
 function actEverCleared(g: Game, d: number = g.depth): boolean {
   return (g.actCleared ?? 0) >= d;
+}
+// ---- Boss-lair farming rule (2026-11-19) ----
+// Once the boss at a dungeon depth has been KILLED, every later visit there spawns one plain boss: no double/triple
+// copies, no xN power roll, no overshields. Until it is killed, the normal spawn rules apply on every visit.
+// Act floors: the act boss must die to clear the act, so actCleared already records every killed act lair (old saves
+// included). Other boss depths are recorded in g.bkd (saved as "bkd"; old saves have none, so they start empty).
+function bossLairKilled(g: Game, d: number = g.depth): boolean {
+  if ((g.area ?? "dungeon") !== "dungeon" || g.vault) return false;
+  if (isActFloor(d)) return actEverCleared(g, d);
+  return !!g.bkd && g.bkd.indexOf(d) >= 0;
+}
+function markBossLairKilled(g: Game): void {
+  if ((g.area ?? "dungeon") !== "dungeon" || g.vault || isActFloor(g.depth)) return;
+  if (!g.bkd) g.bkd = [];
+  if (g.bkd.indexOf(g.depth) >= 0) return;
+  g.bkd.push(g.depth);
+  g.bkd.sort((a: number, b: number) => a - b);
+  if (g.bkd.length > 20000) g.bkd.splice(0, g.bkd.length - 20000);
+}
+function cleanBkd(x: unknown): number[] {
+  if (!Array.isArray(x)) return [];
+  const out: number[] = [];
+  for (const v of x) if (typeof v === "number" && isFinite(v) && v >= 1 && out.indexOf(Math.floor(v)) < 0) out.push(Math.floor(v));
+  out.sort((a: number, b: number) => a - b);
+  return out.slice(-20000);
 }
 function needReturnStairs(g: Game): boolean {
   return g.depth === floorFront(g) - 1;
@@ -2167,6 +2192,7 @@ function rollBossPower(g: Game, list: En[], fresh = false): number[] {
 }
 function rollActFloorBossPower(g: Game): void {
   if (!isActFloor(g.depth) || g.area === "camp" || g.vault) return;
+  if (bossLairKilled(g)) return; // killed lair: the returning boss is plain x1
   rollBossPower(g, g.en.filter((e: En) => e.hp > 0 && isBossFoe(e)));
 }
 function bossPowerLine(list: En[]): string {
@@ -9344,7 +9370,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), pa: Math.max(0, Math.round((g.paraAt ?? 0) - Date.now())), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
     e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0, aal: g.artCave && g.artCave.al ? 1 : 0,
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
-    ad: g.actCleared ?? 0, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
+    ad: g.actCleared ?? 0, bkd: g.bkd && g.bkd.length ? g.bkd : undefined, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
     hx: g.hero.x, hy: g.hero.y, hp: g.hero.hp, dir: heroDir(g.hero), tn: g.turn,
     ar: g.area ?? "dungeon", vt: vault,
     av: (g.arena && g.arena.length <= SAVE_VAULT_MAX) ? g.arena : null,
@@ -9372,7 +9398,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     turn: g.turn, kills: g.kills, regenAcc: g.regenAcc, muted: g.muted,
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, paraAt: g.paraAt ?? 0, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
-    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
+    area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, bkd: g.bkd ?? [], actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
     wallBreak: !!g.wallBreak, cracks: packCracks(g), arts: artsOf(g).slice(), shrUsedD: g.shrUsedD ?? 0,
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
     nk: nkPackSt(g),
@@ -9677,6 +9703,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.thSeen = thSeenParse(s.ts);
     g.arts = unpackArts(s.afx); g.shrUsedD = typeof s.sud === "number" && isFinite(s.sud) ? Math.floor(s.sud) : 0;
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
+    g.bkd = cleanBkd(s.bkd);
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
     g.bpm = cleanBpm(s.bpm); // before the floor is restored, so respawned bosses reuse their rolls
     g.snapPrev = unpackFloorSnap(s.fp);
@@ -9957,6 +9984,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.arena = typeof s.arena === "string" && s.arena.length < 600000 ? s.arena : null;
     g.gobCave = typeof s.gobCave === "string" && s.gobCave.length < 600000 ? s.gobCave : null;
     g.actCleared = typeof s.actCleared === "number" && isFinite(s.actCleared) ? Math.max(0, Math.floor(s.actCleared)) : 0;
+    g.bkd = cleanBkd(s.bkd);
     g.actCampAt = typeof s.actCampAt === "number" && isFinite(s.actCampAt) ? Math.max(0, Math.floor(s.actCampAt)) : 0;
     g.front = typeof s.front === "number" && isFinite(s.front) ? Math.max(g.depth, Math.floor(s.front)) : g.depth;
     g.snapPrev = unpackFloorSnap(s.snapPrev);
@@ -10010,7 +10038,7 @@ function newGame(prev: Game | null): Game {
     fx: [], ground: [], allies: [], echo: [], ward: 0, autoEq: prev ? prev.autoEq : true, music: prev ? prev.music : true, autoCombine: prev ? prev.autoCombine !== false : true,
     trader: null, merchant: null, shopOpen: false, gambOpen: false, chestShop: emptyChestShop(), chestTypes: emptyChestTypes(), chestTypeMig: true, merchSub: {}, ultAt: prev ? prev.ultAt : 0, ultAtA: prev ? (prev.ultAtA ?? 0) : 0, ultAts: prev && prev.ultAts ? { ...prev.ultAts } : {}, mmBig: false, toast: 0, saveT: 0, floorTurn: 0, deaths: prev ? prev.deaths || 0 : 0,
     portal: null, vault: null, secret: null, gobPort: null, arena: null, gobCave: null, gobT: 0, locked: prev ? prev.locked : lockDefault(), torches: [], shards: [], splats: [],
-    area: "dungeon", actCleared: 0, actCampAt: 0, gemBag: [], bagCap: BAG, gemCap: GEM_BAG, stash: [], stashGold: 0, bankGold: 0, stashOpen: false, gambler: null, gambPity: 0,
+    area: "dungeon", actCleared: 0, bkd: [], actCampAt: 0, gemBag: [], bagCap: BAG, gemCap: GEM_BAG, stash: [], stashGold: 0, bankGold: 0, stashOpen: false, gambler: null, gambPity: 0,
     front: 1, snapPrev: null, snapCur: null,
     muted: prev ? prev.muted : false, notify: prev ? prev.notify : () => undefined, sfx: prev ? prev.sfx : () => undefined,
     wallBreak: false, cracks: new Array(MW * MH).fill(0),
@@ -10673,6 +10701,8 @@ function killLoot(g: Game, e: En): void {
       openCampPortal(g);
     }
   } else {
+    // Boss-lair farming rule: the lair counts as killed once no boss of this pack is left alive.
+    if (isPackBoss(e) && !g.en.some((o: En) => o !== e && o.hp > 0 && isPackBoss(o) && e.packId !== undefined && o.packId === e.packId)) markBossLairKilled(g);
     // Boss power xN: the normal boss loot rolled N times (items, extra-boss loot, potions, gold), spread around the boss.
     const lm = bossPowerOf(e);
     const d0 = g.drops.length;
@@ -14259,8 +14289,10 @@ function maybeSpawnPrisThreats(g: Game): void {
   occUsed(g, used);
   const d = g.depth;
   const bosses = g.en.filter((e: En) => e.hp > 0 && isPackBoss(e) && e.packId === undefined);
+  const farmed = bossLairKilled(g);
   for (const b of bosses) {
-    const want = rollBossCopies(d);
+    const rolled = rollBossCopies(d);
+    const want = farmed ? 1 : rolled; // killed lair: one boss only
     let n = 1;
     if (want > 1) {
       const packId = b.id;
@@ -14288,7 +14320,7 @@ function maybeSpawnPrisThreats(g: Game): void {
       g.en.push(mkSuperElite(g, c[0], c[1]));
     }
   }
-  if (deepPrisGated(g)) for (const e of g.en) if (e.hp > 0 && isBossFoe(e)) applyOvershields(g, e);
+  if (deepPrisGated(g)) for (const e of g.en) if (e.hp > 0 && isBossFoe(e)) applyOvershields(g, e, farmed ? 0 : undefined);
   rollActFloorBossPower(g);
   if (!earlySafeDepth(d) && R() < seFloorChance(d)) {
     const n = 1 + (R() < 0.20 + 0.35 * rampT(d) ? 1 : 0);
