@@ -1953,6 +1953,17 @@ function ownsPrismatic(g: Game): boolean {
   return false;
 }
 function lootBonusMult(g: Game): number { return ownsPrismatic(g) ? 1 : LOOT_BONUS; }
+// Same trigger for walking (2026-11-19): base walk step speed x1.5 while no Prismatic gear is owned anywhere. It multiplies
+// MVMUL (1 + Movement Speed / 100), so gear/pet Movement Speed stacks exactly as before and the swing penalty still applies.
+// Only the normal walk step (and its animation / hold-to-walk / key-repeat timing, which share MVMUL) speeds up; steps stay
+// one tile each with the usual collision checks, so no tunnelling. The ownership scan is cached for 0.5 s.
+const WALK_BONUS = 1.5;
+let WALK_PC: { g: Game | null; t: number; v: boolean } = { g: null, t: -1e9, v: true };
+function walkBoost(g: Game): number {
+  const now = Date.now();
+  if (WALK_PC.g !== g || now - WALK_PC.t >= 500 || now < WALK_PC.t) WALK_PC = { g, t: now, v: ownsPrismatic(g) };
+  return WALK_PC.v ? 1 : WALK_BONUS;
+}
 function lootQW(w: number[]): number[] { return LOOT_Q === 1 ? w : w.map((v: number, i: number) => (i >= 1 ? v * LOOT_Q : v)); }
 function lootQCh(p: number): number { return LOOT_Q === 1 ? p : Math.min(1, p * LOOT_Q); }
 function lootQN(n: number): number { if (LOOT_Q === 1) return n; const x = n * LOOT_Q, f = Math.floor(x); return f + (R() < x - f ? 1 : 0); }
@@ -15687,7 +15698,7 @@ function ipMove(p: IPol | null, x: number, y: number, ax: number, ay: number, dt
   return { p, ax: p.fx + (p.tx - p.fx) * p.u, ay: p.fy + (p.ty - p.fy) * p.u };
 }
 function heroStepDur(g: Game): number {
-  MVMUL = 1 + calc(g.lvl, g.eq).mv / 100;
+  MVMUL = (1 + calc(g.lvl, g.eq).mv / 100) * walkBoost(g);
   let d = RT_MV / MVMUL;
   if (g.rt && (g.swT ?? 0) > Date.now()) d *= SWING_MOVE_MUL;
   return d;
@@ -18791,7 +18802,7 @@ function act(g: Game, dx: number, dy: number): void {
   if (g.rt && (g.pcd ?? 0) > 1e-6) { g.qd = [dx, dy]; return; } // still recovering: remember the newest input
   const h = g.hero;
   const st = calc(g.lvl, g.eq);
-  MVMUL = 1 + st.mv / 100;
+  MVMUL = (1 + st.mv / 100) * walkBoost(g);
   const es = esOf(g);
   es.still = true; es.moved = 0;
   if (dx === 0 && dy === 0) { if (!autoTurnSt(g, st)) endTurn(g); return; }
