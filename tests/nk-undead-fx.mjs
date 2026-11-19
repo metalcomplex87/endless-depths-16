@@ -65,21 +65,31 @@ async function main() {
     // ---- Phalanx of the Dead: skeletons claw out of cracked earth ----
     await NK("nkvReset");
     rec("equip Phalanx of the Dead", /worn/.test(await NK("equip", 2)));
-    let w = await waitFreeze(page, "(s) => s.sk && s.sk.filter(k => k.alive && k.rise > 0.38 && k.rise < 0.62).length >= 4");
+    let w = await waitFreeze(page, "(s) => s.sk && s.sk.filter(k => k.alive && k.rise > 0.2 && k.rise < 0.45).length >= 4");
     rec("skeletons rise from the ground (mid-rise, crack decals out)", w.ok && w.s.cracks >= 4, w.s && { cracks: w.s.cracks, rise: w.s.sk.map((k) => k.rise) });
     await NK("quietHud");
     rec("wrote skeleton-fx-rise.png", await canvasShot(page, path.join(SHOTS, "skeleton-fx-rise.png")));
     await NK("nkvFreeze", false); await NK("holdFx", false);
     await sleep(1200);
-    rec("wrote skeleton-fx-ranks.png (risen, guard pose)", await canvasShot(page, path.join(SHOTS, "skeleton-fx-ranks.png")));
+    // no enemies: they hold a loose formation behind the hero instead of orbiting him
+    const p0 = await NK("nkvState"); await sleep(1000); const p1 = await NK("nkvState");
+    const drift = Math.max(...p0.sk.map((k, i) => Math.hypot(k.x - p1.sk[i].x, k.y - p1.sk[i].y)));
+    const near = p1.sk.every((k) => Math.hypot(k.x - p1.hero.x, k.y - p1.hero.y) < 3.5);
+    rec("idle skeletons hold formation near the hero and do not circle (max drift over 1 s < 0.3 tiles)", drift < 0.3 && near, { drift: +drift.toFixed(3), pos: p1.sk.map((k) => [k.x - p1.hero.x, k.y - p1.hero.y].map((v) => +v.toFixed(2))) });
+    rec("wrote skeleton-fx-ranks.png (risen, formation)", await canvasShot(page, path.join(SHOTS, "skeleton-fx-ranks.png")));
     let heroRange = 0;
-    for (const [dx, dy] of [[2, 0], [-2, 1], [1, -2]]) heroRange = (await FOE(dx, dy)).range || heroRange;
-    w = await waitFreeze(page, "(s) => s.sk.some(k => k.alive && k.swing > 0.08 && k.swing < 0.3 && Math.hypot(k.ox, k.oy) > 0.25)");
+    for (const [dx, dy] of [[5, 0], [-5, 1], [1, -5], [-3, 4]]) heroRange = (await FOE(dx, dy)).range || heroRange;
+    w = await waitFreeze(page, "(s) => new Set(s.sk.filter(k => k.tg !== null).map(k => k.tg)).size >= 3 && s.sk.filter(k => k.alive && Math.hypot(k.x - s.hero.x, k.y - s.hero.y) > 2.5).length >= 3 && s.sk.some(k => k.swing > 0.03 && k.swing < 0.17)");
+    rec("skeletons split up: 3+ different targets, 3+ soldiers out at the enemies (army, not an orbit)", w.ok, w.s && w.s.sk.map((k) => ({ tg: k.tg, d: +Math.hypot(k.x - w.s.hero.x, k.y - w.s.hero.y).toFixed(2), sw: k.swing })));
+    await NK("quietHud");
+    rec("wrote skeleton-fx-army.png", await canvasShot(page, path.join(SHOTS, "skeleton-fx-army.png")));
+    await NK("nkvFreeze", false); await NK("holdFx", false);
+    w = await waitFreeze(page, "(s) => s.sk.some(k => k.alive && k.swing > 0.04 && k.swing < 0.17 && Math.hypot(k.x - s.hero.x, k.y - s.hero.y) > 2)");
     rec("skeletons stride toward the enemy and wind up the greatsword", w.ok, w.s && w.s.sk);
     await NK("quietHud");
     rec("wrote skeleton-fx-windup.png", await canvasShot(page, path.join(SHOTS, "skeleton-fx-windup.png")));
     await NK("nkvFreeze", false); await NK("holdFx", false);
-    w = await waitFreeze(page, "(s) => s.imps.some(p => p > 0.04 && p < 0.2) && s.sk.some(k => k.swing > 0.36 && k.swing < 0.46)");
+    w = await waitFreeze(page, "(s) => s.imps.some(p => p > 0.04 && p < 0.2) && s.sk.some(k => k.swing > 0.25 && k.swing < 0.33)");
     rec("greatsword impact: shockwave + debris on the hit", w.ok && w.s.parts > 10, w.s && { imps: w.s.imps, parts: w.s.parts });
     await NK("quietHud");
     rec("wrote skeleton-fx-impact.png", await canvasShot(page, path.join(SHOTS, "skeleton-fx-impact.png")));
@@ -115,7 +125,8 @@ async function main() {
     await NK("nkvFreeze", false); await NK("holdFx", false);
     await sleep(4500);
     const ghLog = await NK("sfxLog");
-    for (const n of ["nkGrave", "nkGhostHit", "nkGhostAmb"]) rec("ghost sound " + n + " played", ghLog.some((x) => x.startsWith(n)), [...new Set(ghLog)].join(","));
+    for (const n of ["nkGrave", "nkGhostHit"]) rec("ghost sound " + n + " played", ghLog.some((x) => x.startsWith(n)), [...new Set(ghLog)].join(","));
+    rec("no ghost ambient voice bed any more (nkGhostAmb never fires)", !ghLog.some((x) => x.startsWith("nkGhostAmb")));
     rec("no page errors", errors.length === 0, errors);
   } finally {
     rec("official Richard save md5 still untouched after the run", md5(RICHARD) === RICHARD_MD5);
