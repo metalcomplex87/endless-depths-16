@@ -1192,13 +1192,13 @@ function spawnMonstersOnMap(g: Game): void {
     }
     return pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
   };
-  const nEn = enBase(d);
+  const nEn = enBaseOf(g);
   const eliteCh = eliteChance(d);
   for (let i = 0; i < nEn; i++) {
     const c = pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
     if (c) g.en.push(mkEnemy(g, c[0], c[1], R() < eliteCh ? 1 : 0));
   }
-  const nPacks = rollPacks(d);
+  const nPacks = rollPacksOf(g);
   for (let i = 0; i < nPacks; i++) spawnRarePack(g, used, g.hero.x, g.hero.y);
   if (actFl) {
     const c = cell(rooms.length ? rooms.length - 1 : 0) || pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
@@ -5295,13 +5295,13 @@ function genFloor(g: Game): void {
     return pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
   };
   const d = g.depth;
-  const nEn = enBase(d);
+  const nEn = enBaseOf(g);
   const eliteCh = eliteChance(d);
   for (let i = 0; i < nEn; i++) {
     const c = pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
     if (c) g.en.push(mkEnemy(g, c[0], c[1], R() < eliteCh ? 1 : 0));
   }
-  const nPacks = rollPacks(d);
+  const nPacks = rollPacksOf(g);
   for (let i = 0; i < nPacks; i++) spawnRarePack(g, used, g.hero.x, g.hero.y);
   const bossFloor = !actFl && d > EARLY_SAFE_MAX && R() < 0.07;
   if (actFl) {
@@ -12859,6 +12859,26 @@ function enCap(d: number): number {
   if (d <= EARLY_SAFE_MAX) return Math.min(EN_CAP_MAX, enBase(d) + 16 + Math.floor(d * 0.8) + 8);
   return Math.round(EN_CAP_D6 + (EN_CAP_MAX - EN_CAP_D6) * rampT(d));
 }
+// Enemy counts on larger layers scale with walkable area so density matches a standard floor at that depth.
+// Depth/time ramps in enBase/enCap/trickleSpawn stay; this multiplier sits on top.
+function floorWalk(g: Game): number {
+  if (!g.map) return NORMAL_WALK;
+  let w = 0; for (let i = 0; i < g.map.length; i++) if (g.map[i] !== 0) w++;
+  return Math.max(1, w);
+}
+// Typical walkable tiles on a standard 44x44 floor (measured; used only for enemy density, not portal odds).
+const ENEMY_NORMAL_WALK = 794;
+function floorEnemyScale(g: Game): number {
+  if (floorTierOf(g) === 0) return 1; // standard layers keep the existing depth formula
+  return Math.max(1, floorWalk(g) / ENEMY_NORMAL_WALK);
+}
+function enBaseOf(g: Game): number { return Math.max(1, Math.round(enBase(g.depth) * floorEnemyScale(g))); }
+function enCapOf(g: Game): number { return Math.max(enBaseOf(g) + 1, Math.round(enCap(g.depth) * floorEnemyScale(g))); }
+function rollPacksOf(g: Game): number {
+  const e = expectedPacks(g.depth) * floorEnemyScale(g);
+  const n = Math.floor(e);
+  return n + (R() < (e - n) ? 1 : 0);
+}
 function livEn(g: Game): number { return g.en.filter((e: En) => e.hp > 0 && !e.gob && !e.hunt).length; }
 function occUsed(g: Game, used: Set<number>): void {
   used.add(g.hero.y * MW + g.hero.x);
@@ -13298,7 +13318,7 @@ function neighborsOf(g: Game, x: number, y: number, used: Set<number>, n: number
   return out;
 }
 function spawnRarePack(g: Game, used: Set<number>, hx: number, hy: number): number {
-  const room = Math.max(0, enCap(g.depth) - livEn(g));
+  const room = Math.max(0, enCapOf(g) - livEn(g));
   if (room < 3) return 0;
   const size = Math.min(room, R() < 0.3 ? 5 : 3);
   for (let t = 0; t < 8; t++) {
@@ -13319,7 +13339,7 @@ function spawnRarePack(g: Game, used: Set<number>, hx: number, hy: number): numb
 }
 function trickleSpawn(g: Game): void {
   if (g.mode !== "play" || g.vault || uiBlocked(g) || g.area === "camp" || isActFloor(g.depth)) return;
-  if (livEn(g) >= enCap(g.depth)) return;
+  if (livEn(g) >= enCapOf(g)) return;
   const used = new Set<number>(); occUsed(g, used);
   if (!earlySafeDepth(g.depth) && R() < 0.28 * gemRareMul(g)) { spawnRarePack(g, used, g.hero.x, g.hero.y); return; }
   const c = pickWalk(g, used, g.hero.x, g.hero.y, 8, 5);
@@ -19152,6 +19172,34 @@ try {
       const sk = { maxSockets: 0, over4: 0 };
       for (const it of [...Object.values(g.eq), ...g.bag, ...(g.stash || [])] as (Item | null)[]) { if (it && it.sk) { sk.maxSockets = Math.max(sk.maxSockets, it.sk.length); if (it.sk.length > SOCK_MAX) sk.over4++; } }
       return { ok: true, lvl: g.lvl, depth: g.depth, pris: out, sockFixed: { ...SOCK_FIXED }, sk, gemBag: ensureGemBag(g).length, arts: artsOf(g).length };
+    },
+    densitySim: (n: number, depth: number): Record<string, unknown> => {
+      const g = LIVE || PRIS_TEST_G; if (!g) return { ok: false };
+      const rows: Record<string, unknown>[] = [];
+      const d0 = Math.max(1, depth | 0);
+      const safeD = isActFloor(d0) ? d0 + 1 : d0;
+      for (let t = 0; t < FLOOR_SIZES.length; t++) {
+        FLOOR_TIER_FORCE = t;
+        let walk = 0, en = 0, dens = 0, base = 0, cap = 0, scale = 0, packs = 0;
+        for (let i = 0; i < n; i++) {
+          g.depth = safeD; genFloor(g);
+          const w = floorWalk(g), sc = floorEnemyScale(g);
+          const nLiv = livEn(g);
+          walk += w; en += nLiv; dens += nLiv / w; scale += sc;
+          base += enBaseOf(g); cap += enCapOf(g); packs += (GENINFO.nPack || 0);
+        }
+        rows.push({
+          tier: t, name: FLOOR_SIZE_NAMES[t], size: FLOOR_SIZES[t],
+          avgWalk: Math.round(walk / n), avgEn: +(en / n).toFixed(2),
+          dens: +(dens / n).toFixed(5), avgScale: +(scale / n).toFixed(3),
+          avgBase: +(base / n).toFixed(2), avgCap: +(cap / n).toFixed(2),
+          unscaledBase: enBase(safeD), unscaledCap: enCap(safeD),
+        });
+      }
+      FLOOR_TIER_FORCE = null;
+      const std = rows[0] as { dens: number };
+      const ratios = rows.map((r: Record<string, unknown>) => ({ tier: r.tier, name: r.name, dens: r.dens, vsNormal: std.dens ? +((r.dens as number) / std.dens).toFixed(3) : null }));
+      return { ok: true, depth: safeD, n, unscaledBase: enBase(safeD), unscaledCap: enCap(safeD), rows, ratios };
     },
     sizeSim: (n: number, depth: number): Record<string, unknown> => {
       const g = LIVE; if (!g) return { ok: false };

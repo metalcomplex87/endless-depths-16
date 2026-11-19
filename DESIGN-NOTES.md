@@ -703,3 +703,12 @@ Only Prismatic weapons whose type is melee gain ranged combat. Regular (non-Pris
 - **Sounds:** `prisThrow` (whoosh out, a tick, whoosh back) and `prisBeam` (rising hum and a thin searing edge); both go through the existing mute path.
 - **TTK:** damage numbers are unchanged, so the 5★ / 10★ deep boss window of about 3.5–5.6 minutes is kept. The change is range and presentation, not raw hit damage.
 
+
+## Larger-layer enemy density (10:47 PM CT) — IMPLEMENTED
+
+Larger floors already existed (item 13): from depth 25, every 25 depths unlocks one more size tier (`FLOOR_SIZES` 44 / 50 / 56 / 61 / 65 / 68 / 70 / 72, names Normal…Titanic). Normal has double weight; act floors stay Normal. Rooms, chests, potions, some hazards, and extra portals already scaled with map area (`areaK`). Enemy **counts** did not — a Titanic floor used the same `enBase` / `enCap` / pack rolls as a 44×44 floor, so density (enemies per walkable tile) dropped as the map grew.
+
+- **Scale:** `floorEnemyScale = 1` on a standard (44×44) layer, so those floors keep the existing depth formula unchanged. On a larger layer, scale = walkable tiles / 794 (`ENEMY_NORMAL_WALK`, the measured typical walkable area of a standard floor). That constant is only for enemy density; portal odds still use `NORMAL_WALK = 640`.
+- **Applied to:** initial spawn (`enBaseOf` in `genFloor` / `spawnMonstersOnMap`), room-pack attempts (`rollPacksOf`), the cap that stops more packs (`enCapOf` in `spawnRarePack`), and the trickle / respawn cap (`trickleSpawn`). Unique one-offs (act boss, hunter, goblin, champion / brutes / roaming) stay a chance-of-one and are not multiplied.
+- **Depth and time ramps are kept:** scale sits on top of `enBase(d)` / `enCap(d)` / pack expectation, so later depths and mid-floor trickle still get denser the way they already did.
+- **Tests:** `tests/floor-density.mjs` forces each size at depth 200 and checks that enemies-per-walkable-tile is within 18% of a standard layer, that standard floors stay on the unscaled formula, and that counts and caps rise with size. Typical ratios vs Normal were ~0.95–1.00 (slightly under 1 because uniques are not scaled).
