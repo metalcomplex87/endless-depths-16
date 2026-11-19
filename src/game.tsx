@@ -131,7 +131,7 @@ interface Part { x: number; y: number; vx: number; vy: number; life: number; max
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
-interface Shot { x0: number; y0: number; x1: number; y1: number; t: number; c: string; max?: number; dmg?: number; tx?: number; ty?: number; from?: number; typ?: number }
+interface Shot { x0: number; y0: number; x1: number; y1: number; t: number; c: string; max?: number; dmg?: number; tx?: number; ty?: number; from?: number; typ?: number; wep?: Item; path?: number }
 interface Banner { txt: string; sub: string; c: string; rar: number; t: number; nk?: number }
 // sup: 1 = the rare "super" variant (Celestial Treasury loot cave / Royal Goblin Warren). cs: what is left inside a cave
 // the player already visited (the portal stays open for good, and the cave keeps its state so loot never refills).
@@ -451,6 +451,20 @@ function isPrisWep(it: Item | null | undefined): boolean {
   if (isArmor(it.kind) || it.kind === "pet" || it.kind === "gem" || it.kind === "shield") return false;
   return !!WI[it.kind as WT];
 }
+const NATIVE_RANGED: Record<string, true> = { bow: true, crossbow: true, handxbow: true, staff: true, wand: true };
+const PRIS_MELEE_RANGE = 5; // same feel as a bow: auto-target, LoS, move-while-attacking
+function isNativeRanged(k: Kind | string | undefined): boolean { return !!k && !!NATIVE_RANGED[k]; }
+function isPrisMeleeWep(it: Item | null | undefined): boolean { return isPrisWep(it) && !isNativeRanged(it!.kind); }
+function isPrisBeamWep(it: Item | null | undefined): boolean { return isPrisMeleeWep(it) && it!.kind === "beamsword"; }
+function isPrisThrownWep(it: Item | null | undefined): boolean { return isPrisMeleeWep(it) && it!.kind !== "beamsword"; }
+function wepNote(it: Item): string {
+  const base = (WI[it.kind as WT] && WI[it.kind as WT].note) || "";
+  if (isPrisBeamWep(it)) return base + " Prismatic: fires a ranging laser (range " + PRIS_MELEE_RANGE + "). You can move while it attacks.";
+  if (isPrisThrownWep(it)) return base + " Prismatic: thrown at range " + PRIS_MELEE_RANGE + " and returns to your hand. You can move while attacking.";
+  return base;
+}
+let IN_FLIGHT_WEP = new Set<number>();
+let SHOT_HOLD = false;
 const isTwo = (it: Item | null): boolean => !!it && !isArmor(it.kind) && it.kind !== "pet" && !!(WI[it.kind as WT] && WI[it.kind as WT].two);
 const isOneHand = (it: Item | null): boolean => !!it && !isArmor(it.kind) && it.kind !== "pet" && it.kind !== "shield" && !!(WI[it.kind as WT] && !WI[it.kind as WT].two);
 // 8-direction facing: 0=S, 1=SE, 2=E, 3=NE, 4=N, 5=NW, 6=W, 7=SW
@@ -3066,6 +3080,7 @@ function calc(lvl: number, eq: Eq): Stats {
   if (main) {
     const w = WI[main.kind as WT];
     s.crit += w.crit; s.spd += w.spd; s.reach = w.reach; s.range = w.range; s.magic = w.magic; s.cleave = w.cleave; s.pierce = w.pierce; s.stun = w.stun;
+    if (isPrisMeleeWep(main) && s.range <= 0) s.range = PRIS_MELEE_RANGE;
   }
   if (rh) s.atk += itemAtk(rh);
   if (lh) {
@@ -4171,6 +4186,7 @@ function drawHero(ctx: CanvasRenderingContext2D, sx: number, sy: number, s: numb
   const wepGrip = (it: Item): number => (WI[it.kind as WT] && WI[it.kind as WT].grip) || 4;
   const drawOffWep = (behind: boolean): void => {
     if (lh && lh.kind !== "shield") {
+      if (IN_FLIGHT_WEP.has(lh.id)) return;
       const ox = behind ? 16 : (side ? 7 : 2);
       drawPrisPiece(o(ox, 16 - wepGrip(lh) + b), lh, (q: Pt) => drawWeapon(q, lh));
     }
@@ -4235,6 +4251,7 @@ function drawHero(ctx: CanvasRenderingContext2D, sx: number, sy: number, s: numb
     const hx = (side ? 16 : 17) + swing + wx;
     const fsign = flip ? -1 : 1;
     const px = flip ? sx + (24 - hx) * s : sx + hx * s, py = sy + (16 + b + wy) * s;
+    if (IN_FLIGHT_WEP.has(rh.id)) return;
     if (!q.wa && q.pull < 0.5) drawPrisPiece(o((back ? 8 : 13) + swing + wx, 16 - gr + b + wy), rh, (q2: Pt) => drawWeapon(q2, rh));
     else { BOWPULL = q.pull; drawWeaponAt(ctx, rh, px, py, s, fsign, q.wa); BOWPULL = 0; }
     const L = (gr - 1) * s;
@@ -14034,8 +14051,41 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
   g.sfx("swing", swingClass(g.eq));
   const atkEl = weaponEl(g.eq);
   if (dist > 1 || st.range > 0) {
-    const sc = atkEl && st.magic ? ELC[atkEl] : st.magic ? "#d080ff" : st.range > 0 ? "#f0e0b0" : "#d0d8e0";
-    g.shots.push({ x0: h.ax * TS + 12, y0: h.ay * TS + 10, x1: e.ax * TS + 12, y1: e.ay * TS + 12, t: 0.14, max: 0.14, c: sc, typ: heroShotTyp(g.eq, st.magic) });
+    const x0 = h.ax * TS + 12, y0 = h.ay * TS + 10, x1 = e.ax * TS + 12, y1 = e.ay * TS + 12;
+    const mainW = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
+    const offW = g.eq.rh && g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null;
+    const pushThrown = (it: Item, ox: number, oy: number): void => {
+      const c = it.rar >= 7 ? RC[it.rar] : "#f0e0b0";
+      g.shots.push({ x0: x0 + ox, y0: y0 + oy, x1: x1 + ox * 0.3, y1: y1 + oy * 0.3, t: 0.42, max: 0.42, c, typ: 10, wep: it, path: 1 });
+    };
+    const pushBeam = (it: Item, ox: number, oy: number, spread: number): void => {
+      const wel = itemWepEl(it);
+      const c = wel ? ELC[wel] : "#80fff0";
+      const ang = Math.atan2(y1 - y0, x1 - x0) + spread;
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      g.shots.push({ x0: x0 + ox, y0: y0 + oy, x1: x0 + Math.cos(ang) * len, y1: y0 + Math.sin(ang) * len, t: 0.32, max: 0.32, c, typ: 11, wep: it, path: 2 });
+    };
+    if (isPrisThrownWep(mainW)) {
+      pushThrown(mainW!, 0, 0);
+      if (isPrisThrownWep(offW)) pushThrown(offW!, 4, -3);
+      g.sfx("prisThrow");
+    } else if (isPrisBeamWep(mainW) || isPrisBeamWep(offW)) {
+      if (isPrisBeamWep(mainW)) pushBeam(mainW!, 0, 0, 0);
+      if (isPrisBeamWep(offW)) pushBeam(offW!, 3, -2, 0.12);
+      // a few short flickering lasers around the hero
+      const n = 3;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * 6.2832 + (g.time || 0) * 3;
+        const len = TS * (1.6 + (i % 2) * 0.5);
+        const it = isPrisBeamWep(mainW) ? mainW! : offW!;
+        const wel = itemWepEl(it);
+        g.shots.push({ x0, y0, x1: x0 + Math.cos(a) * len, y1: y0 + Math.sin(a) * len, t: 0.18, max: 0.18, c: wel ? ELC[wel] : "#80fff0", typ: 11, wep: it, path: 2 });
+      }
+      g.sfx("prisBeam");
+    } else {
+      const sc = atkEl && st.magic ? ELC[atkEl] : st.magic ? "#d080ff" : st.range > 0 ? "#f0e0b0" : "#d0d8e0";
+      g.shots.push({ x0, y0, x1, y1, t: 0.14, max: 0.14, c: sc, typ: heroShotTyp(g.eq, st.magic) });
+    }
   }
   const hitIds = new Set<number>();
   const bwPctDone = new Set<number>();
@@ -20834,6 +20884,62 @@ try {
     ui: prisUi,
     cdLen: (): number => (PRIS_TEST_G ? ultCdLen(PRIS_TEST_G) : ULT_CD),
     ultCd: (): number => ULT_CD,
+    melee: {
+      range: (): number => { const g = PRIS_TEST_G || LIVE; return g ? calc(g.lvl, g.eq).range : 0; },
+      flags: (): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false };
+        const rh = g.eq.rh, lh = g.eq.lh;
+        const st = calc(g.lvl, g.eq);
+        return { ok: true, range: st.range, reach: st.reach, kind: rh ? rh.kind : (lh && lh.kind !== "shield" ? lh.kind : null), rar: rh ? rh.rar : (lh ? lh.rar : null), prisMelee: isPrisMeleeWep(rh) || isPrisMeleeWep(lh && lh.kind !== "shield" ? lh : null), prisThrown: isPrisThrownWep(rh), prisBeam: isPrisBeamWep(rh), note: rh ? wepNote(rh) : "" };
+      },
+      setRar: (rar: number): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false };
+        const it = g.eq.rh ?? (g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null);
+        if (!it) return { ok: false, error: "no wep" };
+        it.rar = Math.max(0, Math.min(7, rar | 0));
+        if (it.rar < 7) delete it.golden;
+        return { ok: true, kind: it.kind, rar: it.rar, range: calc(g.lvl, g.eq).range };
+      },
+      holdShots: (on?: boolean): boolean => { SHOT_HOLD = on === undefined ? !SHOT_HOLD : !!on; return SHOT_HOLD; },
+      shots: (): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false, n: 0, shots: [] };
+        return { ok: true, n: g.shots.length, shots: g.shots.map((s: Shot) => ({ typ: s.typ ?? 0, path: s.path ?? 0, kind: s.wep ? s.wep.kind : null, t: +s.t.toFixed(3), max: s.max ?? 0 })) };
+      },
+      clearShots: (): void => { const g = PRIS_TEST_G || LIVE; if (g) g.shots = []; IN_FLIGHT_WEP = new Set(); },
+      midFlight: (frac?: number): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false, n: 0 };
+        const f = Math.max(0.05, Math.min(0.95, frac == null ? 0.35 : frac));
+        for (const s of g.shots) { const max = s.max && s.max > 0 ? s.max : 0.15; s.t = max * (1 - f); }
+        g.floats = []; g.parts = []; g.shards = []; g.fx = [];
+        return { ok: true, n: g.shots.length, frac: f };
+      },
+      fire: (): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false };
+        const st = calc(g.lvl, g.eq);
+        const tg = findTarget(g, st);
+        if (!tg) return { ok: false, error: "no target", range: st.range };
+        g.shots = [];
+        attackTarget(g, tg, st);
+        return { ok: true, range: st.range, dist: Math.abs(tg.x - g.hero.x) + Math.abs(tg.y - g.hero.y), hops: g.shots.length, typ: g.shots.map((s: Shot) => s.typ ?? 0), kinds: g.shots.map((s: Shot) => s.wep ? s.wep.kind : null) };
+      },
+      placeFoe: (dx: number, dy: number): Record<string, unknown> => {
+        const g = PRIS_TEST_G || LIVE; if (!g) return { ok: false };
+        const x = g.hero.x + dx, y = g.hero.y + dy;
+        if (!inb(x, y)) return { ok: false, error: "oob" };
+        g.map[y * MW + x] = 1;
+        // clear LoS so range targeting works
+        const sx = Math.sign(dx), sy = Math.sign(dy);
+        let cx = g.hero.x, cy = g.hero.y;
+        while (cx !== x || cy !== y) { if (cx !== x) cx += sx; if (cy !== y) cy += sy; if (inb(cx, cy)) g.map[cy * MW + cx] = 1; }
+        g.en = g.en.filter((e: En) => e.hp > 0);
+        const e = mkEnemy(g, x, y, 0);
+        e.awake = true; e.hp = e.mhp = 1e15;
+        g.en.push(e);
+        if (g.vis) g.vis.fill(1);
+        if (g.seen) g.seen.fill(1);
+        return { ok: true, x, y, id: e.id, range: calc(g.lvl, g.eq).range };
+      },
+    },
   };
 } catch { /* ignore */ }
 
@@ -21775,6 +21881,21 @@ export default function App() {
           else nz(0.06, 0.05, "lowpass", 900, 200);
           break;
         case "ehit": nz(0.08, 0.05, "bandpass", 900, 300); tone(200, 110, 0.06, "square", 0.02); break;
+        case "prisThrow": { // spinning returning weapon: a sharp whoosh out, a tick at the apex, a softer whoosh back
+          nz(0.1, 0.07, "bandpass", 1800, 500);
+          tone(520, 280, 0.12, "triangle", 0.04);
+          tone(180, 90, 0.08, "sine", 0.03, 0.08);
+          nz(0.08, 0.05, "lowpass", 900, 200, 0.22);
+          tone(360, 520, 0.1, "triangle", 0.03, 0.22);
+          break;
+        }
+        case "prisBeam": { // prismatic beam sword: a bright rising hum and a thin searing edge
+          tone(420, 980, 0.22, "sine", 0.045);
+          tone(840, 1600, 0.18, "triangle", 0.02, 0.02);
+          nz(0.16, 0.035, "bandpass", 3200, 1400);
+          tone(160, 160, 0.2, "sine", 0.02);
+          break;
+        }
         case "nkChime": { // Eternum necklace: a rapid 11-note "da-da-da..." run used for nothing else
           if (v === 7) { // Prismatic Eternum: grand ~3 s fanfare - double-speed run over two octaves, a held shimmering chord, then rising sparkle pings
             const run = [523, 659, 784, 1047, 1319, 1568, 2093, 1568, 1319, 1568, 2093, 2637, 2093, 2637, 3136, 4186];
@@ -22361,7 +22482,7 @@ export default function App() {
       tickParts(g, dt);
       for (const f of g.floats) { f.y -= dt * 22; f.life -= dt; }
       if (g.floats.length) g.floats = g.floats.filter((f: Float) => f.life > 0);
-      for (const s of g.shots) { s.t -= dt; if (s.t <= 0 && s.dmg) resolveShot(g, s); }
+      if (!SHOT_HOLD) for (const s of g.shots) { s.t -= dt; if (s.t <= 0 && s.dmg) resolveShot(g, s); }
       if (g.shots.length) g.shots = g.shots.filter((s: Shot) => s.t > 0);
       if (SCSH.t > 0) SCSH.t = Math.max(0, SCSH.t - dt);
       if (g.mode === "play") { scanScreenAlerts(g); maybeFireArtCaveAlert(g); }
@@ -22658,12 +22779,43 @@ export default function App() {
       }
       for (const f of g.fx) drawFx(ctx, f, camX, camY, t);
       drawPetShots(ctx, g, camX, camY, t);
+      IN_FLIGHT_WEP = new Set<number>();
+      for (const s of g.shots) if (s.typ === 10 && s.wep) IN_FLIGHT_WEP.add(s.wep.id);
       for (const s of g.shots) {
         const maxT = s.max && s.max > 0 ? s.max : 0.15;
         const pr = 1 - s.t / maxT;
+        const typ = s.typ ?? 0;
+        if (typ === 10 && s.wep) {
+          const u = Math.min(1, Math.max(0, pr));
+          const f = u < 0.55 ? (u / 0.55) : (1 - (u - 0.55) / 0.45);
+          const x = s.x0 + (s.x1 - s.x0) * f - camX, y = s.y0 + (s.y1 - s.y0) * f - camY;
+          const spin = (1 - s.t) * 22;
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = 0.45;
+          ctx.fillStyle = s.c;
+          ctx.beginPath(); ctx.arc(x, y, 14, 0, 6.2832); ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "source-over";
+          drawWeaponAt(ctx, s.wep, x, y, 1.35, 1, spin);
+          ctx.restore();
+          continue;
+        }
+        if (typ === 11) {
+          const x0 = s.x0 - camX, y0 = s.y0 - camY, x1 = s.x1 - camX, y1 = s.y1 - camY;
+          const fade = Math.max(0.25, Math.min(1, s.t / maxT + 0.2));
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = s.c;
+          ctx.globalAlpha = 0.28 * fade; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.globalAlpha = 0.7 * fade; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.strokeStyle = "#ffffff"; ctx.globalAlpha = 0.9 * fade; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.beginPath(); ctx.arc(x1, y1, 3.5, 0, 6.2832); ctx.globalAlpha = 0.6 * fade; ctx.fillStyle = "#ffffff"; ctx.fill();
+          ctx.restore();
+          continue;
+        }
         const x = s.x0 + (s.x1 - s.x0) * Math.min(1, pr) - camX, y = s.y0 + (s.y1 - s.y0) * Math.min(1, pr) - camY;
         const ang = Math.atan2(s.y1 - s.y0, s.x1 - s.x0);
-        const typ = s.typ ?? 0;
         ctx.save();
         ctx.translate(Math.round(x), Math.round(y));
         ctx.rotate(ang);
@@ -23674,7 +23826,7 @@ export default function App() {
                   {(selItem.ef ?? []).map((e: number[], i: number) => <div key={"ef" + i} style={{ color: EFX[e[0]] ? EFX[e[0]].c : "#ffffff", marginTop: 2 }}>{"\u2727 " + efDesc(e)}</div>)}
                   {selItem.ww ? <div style={{ color: "#ff9a40", marginTop: 2, fontWeight: "bold" }}>{"\u2727 " + WW_NAME + ": " + WW_DESC}</div> : null}
                   {selItem.ult !== undefined && <div className="dc-ultl">{ultDesc(selItem.ult)}</div>}
-                  {!isArmor(selItem.kind) && selItem.kind !== "pet" && selItem.kind !== "gem" && <div className="dc-sm" style={{ marginTop: 3 }}>{WI[selItem.kind as WT].note}</div>}
+                  {!isArmor(selItem.kind) && selItem.kind !== "pet" && selItem.kind !== "gem" && <div className="dc-sm" style={{ marginTop: 3 }}>{wepNote(selItem)}</div>}
                   {selBag >= 0 && (() => {
                     const it = selItem;
                     if (!it) return null;

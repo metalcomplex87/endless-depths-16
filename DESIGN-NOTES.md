@@ -693,3 +693,13 @@ Chance is still `min(0.9, NK_BASE × weight)` for any of the seven (picked evenl
 | vault chest r3 | 67.32 | 0.08078% | 0.04039% | 0.005991% | 0.002996% |
 | vault chest r4 | 133.71 | 0.1605% | 0.08023% | 0.01190% | 0.005950% |
 
+## Prismatic melee weapons become ranged (Metal Complex, 2026-11-18 10:36 PM CT) — IMPLEMENTED
+
+Only Prismatic weapons whose type is melee gain ranged combat. Regular (non-Prismatic) melee is unchanged. Bows, heavy crossbows, hand crossbows, wands and 2H staffs keep their existing ranged behavior even when Prismatic.
+
+- **Thrown (swords, axes, spears, and every other melee type except beam swords):** the weapon is thrown as a spinning projectile that uses its own item art, then returns to the hand. Range 5 (same auto-target, line-of-sight, and move-while-attacking feel as a bow). Off-hand Prismatic melee, if worn, throws as well. Per-hit damage, cleave-when-adjacent, stun, and other weapon rules are unchanged.
+- **Beam swords:** fire a steady ranging laser at the target plus a few short lasers around the hero, in the blade's element color. Same range 5 and move-while-attacking rules.
+- **Retroactive:** no save rewrite. `calc()` grants range 5 whenever an equipped weapon is Prismatic melee (`rar >= 7`).
+- **Sounds:** `prisThrow` (whoosh out, a tick, whoosh back) and `prisBeam` (rising hum and a thin searing edge); both go through the existing mute path.
+- **TTK:** damage numbers are unchanged, so the 5★ / 10★ deep boss window of about 3.5–5.6 minutes is kept. The change is range and presentation, not raw hit damage.
+
