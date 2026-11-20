@@ -10879,7 +10879,9 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
           if (!st.lvl) continue; // not a decodable code
           const rank = runProgressRank(st.lvl, st.depth, 0);
           // A relay file name only has whole seconds, so allow 1.5 s when comparing times.
-          const older = !cur || curT + 1500 < c.t;
+          // Never trade progress away silently: a newer-in-time copy only heals a readable slot if it is at least
+          // as far (level/depth). Empty or unreadable slots always heal. Lower-progress copies stay in Recover from backup.
+          const older = !cur || (curT + 1500 < c.t && rank >= curRank);
           const sameTimeBehind = cur && Math.abs(curT - c.t) <= 1500 && curRank < rank;
           if (!older && !sameTimeBehind) break;
           // Re-read right before writing: a save may have landed while the relay was answering.
