@@ -140,7 +140,7 @@ async function main() {
       taxidermy: (m) => m.foe && m.foe.fear > 0 && (!m.boss || m.boss.fear === 0) && m.used === 1 && m.gold > 0,
       organum: (m) => m.wrong === 0 && m.solved && m.gold > 0,
       greenhouse: (m) => m.foe && m.foe.stun > 0 && (!m.boss || m.boss.stun === 0) && m.healed > 0,
-      mercury: (m) => m.decoy === 5 && m.foeDist[1] < m.foeDist[0] && (!m.boss || m.boss.stun === 0),
+      mercury: (m) => m.decoy === 5 && m.foe && (m.foeDist[1] < m.foeDist[0] || m.foe.stun > 0) && (!m.boss || m.boss.stun === 0),
       kaleido: (m) => m.bright === 25 && m.dark === 0,
       levity: (m) => m.tested && m.armed && m.moved === 1,
       banquet: (m) => m.healed > 0 && m.track >= 5,
