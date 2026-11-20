@@ -164,10 +164,11 @@ await NK("moveHero", pk.x, pk.y);
 await NK("tick", 0.05);
 const st2 = await NK("st"), ban2 = await NK("banner"), sfx2 = await NK("sfxLog");
 rec("stepping on it picks it up (pickup alert + chime), never auto-equipped", st2.own[3] === 1 && st2.gd.length === 0 && st2.eq.length === 0 && /ETERNUM NECKLACE!/.test(ban2.txt) && sfx2.some((x) => x.startsWith("nkChime")), JSON.stringify({ own: st2.own, eq: st2.eq, ban2, sfx2 }));
-// duplicates melt into gold
-await NK("drop", 3, 0, 0); await NK("tick", 0.05);
+// owned necklaces must not drop again (no duplicate, no gold melt)
+await NK("resetLog"); await NK("clearGround"); await NK("clearBanner");
+const rDup = await NK("rollFrom", "act33", 80);
 const st3 = await NK("st"), ban3 = await NK("banner");
-rec("duplicate melts into gold", st3.own[3] === 1 && /DUPLICATE/.test(ban3.txt), JSON.stringify(ban3));
+rec("owned necklace never drops again (no duplicate, no gold melt)", rDup.drops[3] === 0 && st3.own[3] === 1 && !(ban3 && /DUPLICATE/.test(String(ban3.txt || ""))), JSON.stringify({ drops: rDup.drops, own: st3.own, ban3 }));
 // equip rules
 await NK("setOwn", [1, 1, 1, 1, 1, 1, 1, 0]);
 let m = [await NK("equip", 0), await NK("equip", 4)]; let s4 = await NK("st");

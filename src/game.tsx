@@ -8396,53 +8396,53 @@ function restAtCamp(g: Game): void {
 // turned into the NATURAL expected haul of playing that long at that rate: measured encounters per hour x the game's real
 // drop tables at the measured depth, with the real odds of boss copies (double / triple), boss power (x1..x3 when 5+
 // Prismatics are equipped) and overshields (depth 51+ with Prismatic gear) applied as expectations, so a long absence
-// carries its share of triple bosses etc. Each working pet earns 20% of that haul and the crew is hard-capped at 100%
-// (5 pets reach the cap; extra pets only help through better quality). Pet rarity steers each pet toward its own tier,
-// but every tier is budgeted: the crew can never find more of a tier (Prismatic included) than natural play would.
+// carries its share of triple bosses etc. (creator, Nov 19 7:10 / 7:11 PM) A Prismatic pet earns exactly 1% of that
+// haul; lower rarities earn 1% x MINE_YIELD_RAR[rarity]. Crew share = 1% x (equivalent Prismatic count) with no cap:
+// 20 Prismatic = 20%, 100 Prismatic = 100%, and every pet past 20 keeps adding (slot 20 is the pricing anchor only).
+// Pet rarity steers each pet toward its own tier; each tier is budgeted at crew share x its natural expectation, so a
+// crew's mix of rarities always matches natural play's proportions (no tier, Prismatic included, is over-represented).
 // Fractions carry over between absences, so a rare tier arrives once its natural expectation adds up to one.
 // No x1.5 no-Prismatic loot boost, and stars / sets / golden keep their natural rolls. All tuning lives in this block.
-// Pricing (creator, Nov 19 5:39 / 5:49 PM): a serious gold sink scaling with crew size (steep), pet rarity and depth.
-// Anchor: at Richard's depth (MINE_ANCHOR_DEPTH) opening slot 20 and hiring a Prismatic pet into it costs exactly
-// MINE_ANCHOR_GOLD (slot fee + hire fee). Everything scales with expected gold income per hour at the current depth,
-// so the 20th Prismatic is always the same ~84 hours of natural gold income, and costs more the deeper you are.
-//   income(d)  = campIntervalGold(d) x MINE_FLOORS_PER_HOUR / 5      (expected gold per hour at the reference pace)
-//   A(d)       = MINE_ANCHOR_GOLD x income(d) / income(MINE_ANCHOR_DEPTH)
-//   slot fee   = A(d) x MINE_SLOT_SHARE x GROWTH^(slot# - 20)                          (slot 1 free; permanent unlocks)
-//   hire fee   = A(d) x (1 - MINE_SLOT_SHARE) x RAR_MULT[r] / RAR_MULT[Prismatic] x GROWTH^(pets already working - 19)
-//   swap       = a better pet replacing the weakest worker pays only the difference of the two hire fees (never < 0)
-//   recall     = free, no refund (re-hiring later pays again). First hire is free at depth <= MINE_FREE_HIRE_DEPTH.
-// No hard cap: slots and hires past 20 keep escalating by GROWTH each.
-// ---- TUNABLE PRICING BLOCK (approved by the creator Nov 19, 5:58 PM): change only the constants below ----
-// Reference prices (slot fee + hire fee for that slot; hire = pets already working = slot# - 1):
-//   depth | income/h | slot 20 + 20th Prismatic (= ~83.7 h of income) | first hire Normal / Prismatic
-//      1  |    23.5K |   1,962,700                                    | free / free
-//     25  |   128.0K |  10,710,000                                    | 1,950 / 58,600
-//     50  |   260.6K |  21,810,000                                    | 3,980 / 119,400
-//    100  |   543.6K |  45,500,000                                    | 8,300 / 249,000
-//    200  |   1.195M | 100,000,000  (anchor: Richard's depth)         | 18,200 / 547,200
-//    300  |   1.921M | 160,780,000                                    | 29,300 / 879,800
-//    500  |   3.679M | 307,960,000                                    | 56,200 / 1,690,000
-//   depth 200, slot fee / Normal hire / Prismatic hire: slot 5 390,700 / 52,100 / 1,560,000;
-//   slot 10 1,450,000 / 193,400 / 5,800,000; slot 15 5,390,000 / 718,200 / 21,550,000;
-//   slot 20 20,000,000 / 2,670,000 / 80,000,000; slot 25 74,260,000 / 9,900,000 / 297,030,000.
+// ---- TUNABLE PRICING BLOCK (creator, Nov 19 7:23 PM): change only the constants below ----
+// One fixed point: opening slot 100 and hiring a Prismatic pet into it costs exactly MINE_TOP_GOLD (1B) at every depth.
+// Everything else is worked back from it with one smooth geometric curve (no depth scaling):
+//   T(k)      = MINE_TOP_GOLD x MINE_GROWTH^(k - MINE_TOP_SLOT)          (k = slot number = pet number, 1-based)
+//   slot fee  = T(k) x MINE_SLOT_SHARE                                    (slot 1 free; slots are permanent unlocks)
+//   hire fee  = T(k) x (1 - MINE_SLOT_SHARE) x RAR_MULT[r] / RAR_MULT[Prismatic]   (k = pets already working + 1)
+//   swap      = a better pet replacing the weakest worker pays only the difference of the two hire fees (never < 0)
+//   recall    = free, no refund (re-hiring later pays again). First hire is free at depth <= MINE_FREE_HIRE_DEPTH.
+// No hard cap: past slot 100 prices keep growing by MINE_GROWTH per slot.
+// Reference ladder (slot fee + hire fee for pet #k, any depth):   Normal      | Prismatic
+//   #1  (slot free; hire free at depth <= 20, else)               150         | 4,450
+//   #2  (first paid slot)                                         1,430       | 6,290
+//   #5                                                            2,050       | 9,070
+//   #10                                                           3,790       | 16,740
+//   #20                                                           12,810      | 56,700
+//   #30                                                           43,630      | 192,500
+//   #50                                                           502,900     | 2,213,700
+//   #75                                                           10,680,000  | 47,100,000
+//   #100                                                          226,670,000 | 1,000,000,000
+//   #101                                                          256,130,000 | 1,130,000,000
+// Filling a crew (slots + hires): 10 / 50 / 100 all-Prismatic ~101K / 19.2M / 8.69B; even rarity mix ~42K / 8.5M / 3.56B.
 const MINE_FREE_SLOTS = 1;             // the first working slot is free
-const MINE_ANCHOR_DEPTH = 200;         // Richard's depth (p1 save richard-boss-2026-11-17)
-const MINE_ANCHOR_GOLD = 100_000_000;  // slot 20 + 20th hire (Prismatic) at the anchor depth
-const MINE_ANCHOR_SLOT = 20;
-const MINE_SLOT_SHARE = 0.2;           // 20M of the 100M is the slot, 80M the Prismatic hire
-const MINE_GROWTH = 1.30;              // x1.3 per slot / per pet already working
-const MINE_RAR_MULT = [1, 1.5, 2.5, 4, 6.5, 10, 16, 30]; // Normal..Prismatic (Prismatic = 30x a Normal pet)
+const MINE_TOP_SLOT = 100;             // the fixed point: pet / slot #100...
+const MINE_TOP_GOLD = 1_000_000_000;   // ...slot fee + Prismatic hire = exactly 1B, at every depth
+const MINE_GROWTH = 1.13;              // x1.13 per slot / pet (first paid Normal pet, #2, ~1.4K; #100 Prismatic 1B)
+const MINE_SLOT_SHARE = 0.2;           // 20% of T(k) is the slot fee, 80% the Prismatic hire fee
+const MINE_RAR_MULT = [1, 1.5, 2.5, 4, 6.5, 10, 16, 30]; // Normal..Prismatic hire fee ratio (Prismatic = 30x a Normal pet)
 const MINE_FREE_HIRE_DEPTH = 20;       // first hire (empty crew) is free at depth 20 and above ground
 const MINE_PRICE_MIN = 100;            // floor for any paid fee
-const MINE_PER_PET_SHARE = 0.20;       // each working pet earns 20% of the natural expected haul...
-const MINE_CREW_CAP = 1.0;             // ...and the whole crew never exceeds 100% of it
+const MINE_PER_PET_SHARE = 0.01;       // a Prismatic pet earns 1% of the natural expected haul...
+const MINE_YIELD_RAR = [0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.85, 1.00]; // ...a pet of rarity r earns 1% x this (Normal..Prismatic; no star bonus)
+const MINE_CREW_CAP = Infinity;        // no crew cap: 20 Prismatic = 20%, 100 Prismatic = 100%, and so on
 const MINE_CAP_HOURS = 72;             // at most 72 h (a long weekend) credited per absence
 const MINE_AWAY_MIN_SEC = 60;          // gaps shorter than this count as still playing (no credit)
 const MINE_ROLLBACK_TOL_SEC = 300;     // clock moved back more than this: no credit, timer restarts from now
 const MINE_BOX_MAX = 400;              // gear + gems kept in the chest; lower-tier extras are salvaged into the chest's gold
 const MINE_TIER_DOWN = 0.45;           // a pet of tier r wants tier i<r with weight DOWN^(r-i) ...
-const MINE_TIER_UP = 0.08;             // ... and tier i>r with UP^(i-r) (+5% per pet star); unmet share spills DOWN only
-const MINE_NK_Q = 1;                   // necklaces: natural expectation x crew share (no quality bonus)
+const MINE_TIER_UP = 0.08;             // ... and tier i>r with UP^(i-r) (+5% per pet star); unmet share spills DOWN only, then any leftover becomes Normal finds
+const MINE_NK_Q = 1;                   // necklaces: natural expectation x crew share (no quality bonus); regular 7 only,
+                                       // never Eternum necklaces, and never artifacts (artifacts are not in the item pool)
 // clear-rate tracker: exponential window over active play time, plus a prior (the default pace) so a fresh save is sane
 const MINE_RATE_TAU_H = 3;             // ~ the last 3 hours of active play dominate the rate
 const MINE_PRIOR_SEC = 900;            // the default pace counts as 15 minutes of play until real play replaces it
@@ -8491,7 +8491,7 @@ function mineUnpack(v: unknown): MineSt | undefined {
   const p = items(o.p).filter((it: Item) => it.kind === "pet");
   const q = new Array(17).fill(0);
   if (Array.isArray(o.q)) for (let i = 0; i < 17; i++) q[i] = Math.max(0, Math.min(1, num(o.q[i], 0)));
-  const nk = Array.isArray(o.nk) ? (o.nk as unknown[]).filter((x: unknown): x is number => typeof x === "number" && x >= 0 && x < 8).map((x: number) => x | 0).slice(0, 16) : [];
+  const nk = Array.isArray(o.nk) ? (o.nk as unknown[]).filter((x: unknown): x is number => typeof x === "number" && x >= 0 && x < NK_REG).map((x: number) => x | 0).slice(0, 16) : [];
   return {
     p, sl: Math.max(MINE_FREE_SLOTS, p.length, Math.floor(num(o.s, MINE_FREE_SLOTS))), t: Math.max(0, num(o.t, Date.now())), q,
     box: items(o.b).slice(0, MINE_BOX_MAX), gd: Math.max(0, Math.floor(num(o.gd, 0))), nk, h: Math.max(0, num(o.h, 0)), a: Math.max(0, num(o.a, 0)), ov: Math.max(0, Math.floor(num(o.ov, 0))), rb: Math.max(0, Math.floor(num(o.rb, 0))),
@@ -8618,17 +8618,20 @@ function mineNatural(g: Game, hours: number): { gear: number[]; gems: number[]; 
   };
 }
 function mineQual(it: Item): number { return Math.max(0, Math.min(7, it.rar | 0)) * 1e6 + petStars(it) * 1e4 + Math.min(9999, Math.max(0, it.ilvl | 0)); }
-function mineCrewFrac(n: number): number { return Math.min(MINE_CREW_CAP, Math.max(0, n) * MINE_PER_PET_SHARE); }
+// equivalent Prismatic count of a crew (sum of each pet's rarity factor)
+function mineEquivPris(pets: Item[]): number { let e = 0; for (const p of pets) e += MINE_YIELD_RAR[Math.max(0, Math.min(7, p.rar | 0))]; return e; }
+function mineCrewFrac(pets: Item[]): number { return Math.min(MINE_CREW_CAP, mineEquivPris(pets) * MINE_PER_PET_SHARE); }
 function mineIncomeHr(d: number): number { return safeNum(campIntervalGold(Math.max(1, Math.floor(d))) * MINE_FLOORS_PER_HOUR / 5); }
-function mineAnchorAt(d: number): number { return MINE_ANCHOR_GOLD * mineIncomeHr(d) / mineIncomeHr(MINE_ANCHOR_DEPTH); }
 function minePriceRound(v: number): number { return v >= 1e6 ? Math.round(v / 1e4) * 1e4 : v >= 1e4 ? Math.round(v / 100) * 100 : Math.max(MINE_PRICE_MIN, Math.round(v / 10) * 10); }
+// T(k): slot fee + Prismatic hire for pet / slot #k (depth-independent)
+function mineCurve(_d: number, k: number): number { return MINE_TOP_GOLD * Math.pow(MINE_GROWTH, k - MINE_TOP_SLOT); }
 function mineSlotPrice(n: number, d: number): number {
   if (n <= MINE_FREE_SLOTS) return 0;
-  return minePriceRound(safeNum(mineAnchorAt(d) * MINE_SLOT_SHARE * Math.pow(MINE_GROWTH, n - MINE_ANCHOR_SLOT)));
+  return minePriceRound(safeNum(MINE_SLOT_SHARE * mineCurve(d, n)));
 }
 function mineHireRaw(d: number, n: number, rar: number, _stars = 0): number {
   const r = Math.max(0, Math.min(7, rar | 0));
-  return mineAnchorAt(d) * (1 - MINE_SLOT_SHARE) * MINE_RAR_MULT[r] / MINE_RAR_MULT[7] * Math.pow(MINE_GROWTH, Math.max(0, n) - (MINE_ANCHOR_SLOT - 1));
+  return (1 - MINE_SLOT_SHARE) * MINE_RAR_MULT[r] / MINE_RAR_MULT[7] * mineCurve(d, Math.max(0, n) + 1);
 }
 // fee to hire this pet when n pets already work (0 = first hire)
 function mineHirePrice(d: number, n: number, rar: number, stars = 0): number {
@@ -8658,7 +8661,7 @@ function mineTierW(pet: Item): number[] {
 }
 // Splits the crew's budget (frac x natural, per tier) between the pets. Each pet wants its quota spread by its tier
 // preference; a tier short on budget is rationed between the pets that want it; unmet quota spills only to tiers at or
-// below the pet's own. Result per tier <= budget <= natural.
+// below the pet's own; any quota still unplaced becomes extra Normal finds. Every tier above Normal stays <= its budget.
 function mineAllocate(pets: Item[], natural: number[], frac: number): { got: number[]; budget: number[]; unmet: number } {
   const budget = natural.map((v: number) => Math.max(0, v) * frac);
   const left = budget.slice();
@@ -8685,7 +8688,11 @@ function mineAllocate(pets: Item[], natural: number[], frac: number): { got: num
     }
     if (moved < 1e-9) break;
   }
-  return { got, budget, unmet: need.reduce((a: number, b: number) => a + Math.max(0, b), 0) };
+  // Quota a low-rarity crew cannot place (the tiers at or below its own are used up) becomes extra Normal-tier finds,
+  // so a crew always brings back its full share in count, and no tier above Normal ever exceeds its natural share.
+  const unmet = need.reduce((a: number, b: number) => a + Math.max(0, b), 0);
+  got[0] += unmet;
+  return { got, budget, unmet };
 }
 // One find of a given tier through the game's own item / gem makers (natural kinds, stars, sets, golden).
 function mineMakeFind(isGem: boolean, tier: number, d: number): Item { return isGem ? makeGem(tier, ri(7), d, rollGemStars(tier, d)) : maybeSet(makeItem(d, tier, undefined, d)); }
@@ -8699,7 +8706,7 @@ function mineCredit(g: Game, hours: number): Record<string, unknown> & { hrs: nu
   out.hrs = hrs;
   const nat = mineNatural(g, hrs);
   nat.gear[7] *= MINE_TEST_PRIS; nat.gems[7] *= MINE_TEST_PRIS;
-  const frac = mineCrewFrac(crew);
+  const frac = mineCrewFrac(m.p);
   out.frac = frac;
   const ag = mineAllocate(m.p, nat.gear, frac), am = mineAllocate(m.p, nat.gems, frac);
   out.gearExp = ag.got.slice(); out.gemExp = am.got.slice();
@@ -8727,9 +8734,11 @@ function mineCredit(g: Game, hours: number): Record<string, unknown> & { hrs: nu
   const xn = nat.nk * frac * MINE_NK_Q + m.q[16];
   const nn = Math.floor(xn + 1e-9); m.q[16] = Math.max(0, xn - nn);
   for (let i = 0; i < nn && m.nk.length < 16; i++) {
-    const s = nkOf(g);
-    const eternum = nkAllSeven(g) && !s.own[NK_PE] && !m.nk.includes(NK_PE) && R() < NK_BASE_E / NK_BASE;
-    m.nk.push(eternum ? NK_PE : ri(NK_REG)); out.nk++;
+    // regular necklaces only (never Eternum, creator rule), and like natural drops never one already owned / on the ground / in this chest
+    const pool: number[] = [];
+    for (let k = 0; k < NK_REG; k++) if (!nkHeld(g, k) && !m.nk.includes(k)) pool.push(k);
+    if (!pool.length) break;
+    m.nk.push(pool[ri(pool.length)]); out.nk++;
   }
   m.ov += out.salv;
   m.h += hrs; m.a = hrs;
@@ -8806,12 +8815,39 @@ function mineBuySlot(g: Game): string {
   g.notify();
   return "Dig slot " + m.sl + " opened for " + fmtg(price) + ".";
 }
+let MINE_SEL = -1; // selected chest item (index into m.box) in the excavation panel
+// Take one chest item into the bag / gem bag (bags grow the same way as for any pickup). No auto-equip or auto-combine.
+function mineTakeOne(g: Game, idx: number): string {
+  const m = g.mine;
+  if (!m || idx < 0 || idx >= m.box.length) return "";
+  const it = m.box[idx];
+  const bag = destBag(g, it);
+  ensureBagCapacity(g, isGem(it), bag.length + 1);
+  bag.push(it);
+  m.box.splice(idx, 1);
+  sortInventory(g);
+  MINE_SEL = -1;
+  g.sfx("loot", it.rar);
+  saveGame(g, true);
+  g.notify();
+  return "Took " + it.name + " (" + RT[it.rar] + ").";
+}
+function mineTakeGold(g: Game): string {
+  const m = g.mine;
+  if (!m || m.gd <= 0) return "";
+  const gold = Math.floor(m.gd);
+  g.gold += gold; m.gd = 0;
+  g.sfx("coin");
+  saveGame(g, true);
+  g.notify();
+  return "Took " + fmtg(gold) + ".";
+}
 function mineHasLoot(g: Game): boolean { const m = g.mine; return !!m && (m.box.length > 0 || m.gd > 0 || m.nk.length > 0); }
 function mineOpenChest(g: Game): string {
   const m = g.mine;
   if (!m || !mineHasLoot(g)) return "The excavation chest is empty. Your crew digs while you are away.";
-  const items = m.box.slice(), gold = Math.floor(m.gd), nks = m.nk.slice();
-  m.box = []; m.gd = 0; m.nk = []; m.h = 0; m.ov = 0;
+  const items = m.box.slice(), gold = Math.floor(m.gd), nks = m.nk.filter((i: number) => i >= 0 && i < NK_REG);
+  m.box = []; m.gd = 0; m.nk = []; m.h = 0; m.ov = 0; MINE_SEL = -1;
   const sfx = g.sfx;
   let best = -1;
   g.sfx = () => undefined;
@@ -11325,7 +11361,8 @@ const NK: NkDef[] = [
 ];
 const NK_REG = 7, NK_PE = 7;
 const NK_MIN_DEPTH = 101;           // nothing drops until depth 100 is completed
-// Per-event weights (relative chance units). Regular chance = NK_BASE x weight (any of the seven, picked evenly);
+// Per-event weights (relative chance units). Regular chance = NK_BASE x weight (any unowned of the seven, picked evenly;
+// if every regular is already owned or sitting on the ground, that roll drops nothing — never a duplicate, never gold).
 // Prismatic Eternum = NK_BASE_E x weight, rolled only once all seven are owned. Spec D weights (2026-11-18 ~6 PM CT)
 // kept as-is; bases were halved 2026-11-18 10:38 PM CT so every source (including Prismatic Eternum) drops at half
 // the previous chance. Act x1 is 1.5%; act x3 + 3 overshields is 10% (was 20%), now also under the 0.5x-vs-Prismatic-item
@@ -11338,7 +11375,6 @@ let NK_W_ACT = 2500; const NK_W_ACT_PM = 0.75, NK_W_OVSH = 0.25;  // act boss: x
 const NK_W_ACT_J = 1.524;                                          // ...x1.524 more only for x3 power + 3 overshields (-> 10% at NK_BASE 6e-6; was 20%)
 const NK_W_CHEST = [11.14, 16.71, 26.06, 34.2, 89.12];                // normal chests by rarity
 const NK_W_VCHEST = [10.65, 19.15, 37.83, 67.32, 133.71];               // vault chests by rarity
-const NK_DUP_GOLD = (d: number): number => Math.min(50000, 4000 + 120 * Math.max(0, d));
 interface NkGround { i: number; k: string; x: number; y: number; t: number }
 interface NkSt { own: number[]; eq: number[]; pe: boolean; gd: NkGround[]; hbAt: number; got: boolean }
 interface NkGhost { x: number; y: number; t: number; cd: number }
@@ -11401,13 +11437,19 @@ function nkChestSrc(g: Game, c: Chest): { s: string; w: number } {
   return { s: (g.vault ? "vault " : "") + "chest r" + cr, w: (g.vault ? NK_W_VCHEST : NK_W_CHEST)[cr] };
 }
 const NK_CAL_REC: Record<string, { n: number; w: number }> = {};
+function nkHeld(g: Game, i: number): boolean { const s = nkOf(g); return !!s.own[i] || s.gd.some((q: NkGround) => q.i === i); }
+function nkPickRegular(g: Game): number {
+  const pool: number[] = [];
+  for (let i = 0; i < NK_REG; i++) if (!nkHeld(g, i)) pool.push(i);
+  return pool.length ? pool[ri(pool.length)] : -1;
+}
 // rolls one necklace drop for an event of weight w at tile x,y
 function nkRoll(g: Game, src: { s: string; w: number }, x: number, y: number): void {
   if (src.w <= 0 || g.depth < NK_MIN_DEPTH) return;
   if (NK_CAL) { const r = NK_CAL_REC[src.s] ?? (NK_CAL_REC[src.s] = { n: 0, w: 0 }); r.n++; r.w += src.w; return; }
   if (NK_REC) { NK_REC.push(src); return; }
   const s = nkOf(g);
-  if (R() < Math.min(0.9, NK_BASE * src.w)) { const i = ri(NK_REG); NK_LOG.src[src.s] = (NK_LOG.src[src.s] ?? 0) + 1; nkDrop(g, i, x, y); }
+  if (R() < Math.min(0.9, NK_BASE * src.w)) { const i = nkPickRegular(g); if (i >= 0) { NK_LOG.src[src.s] = (NK_LOG.src[src.s] ?? 0) + 1; nkDrop(g, i, x, y); } }
   if (nkAllSeven(g) && !s.own[NK_PE] && !s.gd.some((q: NkGround) => q.i === NK_PE) && R() < Math.min(0.5, NK_BASE_E * src.w)) { NK_LOG.srcE[src.s] = (NK_LOG.srcE[src.s] ?? 0) + 1; nkDrop(g, NK_PE, x, y); }
 }
 function nkOnKill(g: Game, e: En): void {
@@ -11425,6 +11467,7 @@ function nkOnKill(g: Game, e: En): void {
 }
 function nkOnChest(g: Game, c: Chest): void { if (!c.starter) nkRoll(g, nkChestSrc(g, c), c.x, c.y); }
 function nkDrop(g: Game, i: number, x: number, y: number): void {
+  if (i < 0 || i > NK_PE || nkHeld(g, i)) return;
   const s = nkOf(g);
   let tx = x, ty = y;
   if (!inb(tx, ty) || g.map[ty * MW + tx] === 0 || s.gd.some((q: NkGround) => q.x === tx && q.y === ty && q.k === nkKey(g))) {
@@ -11456,13 +11499,9 @@ function nkTake(g: Game, q: NkGround): void {
   NK_LOG.picked[q.i]++;
   burst(g, q.x * TS + 12, q.y * TS + 12, 60, [d.c, d.c2, GOLD, "#ffffff"], 120, 30);
   if (s.own[q.i]) {
-    const gg = NK_DUP_GOLD(g.depth);
-    g.gold += gg; NK_LOG.dup++;
-    floatTxt(g, q.x, q.y - 0.8, "+" + gg + "g", GOLD);
-    setBanner(g, "DUPLICATE ETERNUM", d.n + " melts into " + gg + " gold", d.c, 99, 3.2);
-    if (g.banner) g.banner.nk = q.i;
-    msg(g, "You already own " + d.n + " - it melts into " + gg + " gold.", GOLD);
-    g.sfx("coin"); g.sfx("sparkle");
+    // Legacy ground items from before owned necklaces were excluded at roll time: never a second copy, and never gold.
+    NK_LOG.dup++;
+    msg(g, "You already own " + d.n + ".", d.c);
     return;
   }
   s.own[q.i] = 1; s.got = true;
@@ -25898,10 +25937,10 @@ export default function App() {
           })()}
           {g && g.mineOpen && (() => {
             const m = mineOf(g);
-            const close = (): void => { g.mineOpen = false; MINE_NOTE = ""; bump(); };
+            const close = (): void => { g.mineOpen = false; MINE_NOTE = ""; MINE_SEL = -1; bump(); };
             const d = mineDepth(g);
             const price = mineSlotPrice(m.sl + 1, d);
-            const share = mineCrewFrac(m.p.length);
+            const share = mineCrewFrac(m.p);
             const rate = mineRate(g);
             const fph = Math.round(rate.per[MR_FLOOR] * 3600 * 10) / 10, kph = Math.round((rate.per[MR_NORM] + rate.per[MR_RARE] + rate.per[MR_ELITE] + rate.per[MR_SE] + rate.per[MR_UE]) * 3600);
             const lo = mineLowest(m);
@@ -25930,14 +25969,31 @@ export default function App() {
                     <button className="dc-leave" onClick={close} aria-label="Close excavation">{"\u2715 Close"}</button>
                   </div>
                   <div className="dc-shop-bd">
-                    <div className="dc-sm">{"Pets you put to work dig while you are away (closed game or hidden tab, up to " + MINE_CAP_HOURS + " h per absence). Each pet brings back 20% of what you would find playing that long at your own pace, up to 100% for the crew (5 pets fill it; more pets help only by being rarer). Each pet leans toward finds of its own rarity, but the crew never finds more of any rarity than real play would. Their chest sits by the cave. Hiring costs gold: more for deeper camps, rarer pets and every pet already digging. Swapping a better pet in for your weakest worker costs only the difference; recalling is free."}</div>
-                    <div className="dc-sm" style={{ marginTop: 4, color: "#ffd890" }}>{"Crew share: " + Math.round(share * 100) + "% of your natural haul (" + Math.round(MINE_PER_PET_SHARE * 100) + "% per pet, never more than 100%)" + (m.a > 0 ? " \u00b7 last absence " + mineHrsLabel(m.a) : "")}</div>
+                    <div className="dc-sm">{"Pets you put to work dig while you are away (closed game or hidden tab, up to " + MINE_CAP_HOURS + " h per absence). A Prismatic pet brings back 1% of what you would find playing that long at your own pace; lower rarities bring back less (a Normal pet 0.2%). There is no limit: 20 Prismatic pets bring back 20%, 100 bring back 100%. Rarer pets also lean toward rarer finds. Their chest sits by the cave. Hiring costs gold: more for deeper camps, rarer pets and every pet already digging. Swapping a better pet in for your weakest worker costs only the difference; recalling is free."}</div>
+                    <div className="dc-sm" style={{ marginTop: 4, color: "#ffd890" }}>{"Crew share: " + Math.round(share * 1000) / 10 + "% of your natural haul (1% per Prismatic pet, less for lower rarities, no limit)" + (m.a > 0 ? " \u00b7 last absence " + mineHrsLabel(m.a) : "")}</div>
                     <div className="dc-sm" style={{ color: "#b8a888" }}>{"Your pace: ~" + fph + " floors and ~" + kph + " kills per hour at depth " + rate.depth + (rate.sec >= 60 ? " (measured over " + mineHrsLabel(rate.sec / 3600) + " of play)" : " (default pace until you play a while)")}</div>
                     {MINE_NOTE && <div style={{ color: "#ffd080", margin: "6px 0" }}>{MINE_NOTE}</div>}
                     <div className="dc-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
-                      <button className="dc-b go" style={{ ...btn, minHeight: 40 }} disabled={!has} onClick={() => do_(mineOpenChest(g))}>{has ? "Open chest (" + (m.box.length + m.nk.length) + " finds, " + fmtg(m.gd) + ")" : "Chest empty"}</button>
+                      <button className="dc-b go" style={{ ...btn, minHeight: 40 }} disabled={!has} onClick={() => do_(mineOpenChest(g))} aria-label="Take all from the excavation chest">{has ? "Take All (" + (m.box.length + m.nk.length) + " finds, " + fmtg(m.gd) + ")" : "Chest empty"}</button>
                       <button className="dc-b" style={{ ...btn, minHeight: 40 }} disabled={g.gold < price} onClick={() => do_(mineBuySlot(g))}>{"+1 dig slot \u00b7 " + fmtg(price)}</button>
                     </div>
+                    <div className="dc-sm" style={{ marginTop: 8 }} data-mine-chest="1"><b>{"Excavation chest: " + m.box.length + " item" + (m.box.length === 1 ? "" : "s") + (m.nk.length ? " + " + m.nk.length + " necklace" + (m.nk.length > 1 ? "s" : "") : "") + " + " + fmtg(m.gd)}</b>{" \u00b7 tap an item to inspect and take it"}</div>
+                    {m.gd > 0 && <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11, margin: "4px 0" }} onClick={() => do_(mineTakeGold(g))}>{"Take gold \u00b7 " + fmtg(m.gd)}</button>}
+                    {m.nk.length > 0 && <div className="dc-sm" style={{ margin: "4px 0" }} data-mine-nk={m.nk.length}>{"Necklaces: " + m.nk.map((i: number) => (NK[i] ? NK[i].n : "?")).join(", ") + " (taken with Take All)"}</div>}
+                    {m.box.length > 0 && (
+                      <div className="dc-grid6" data-mine-grid={m.box.length}>
+                        {m.box.map((it: Item, i: number) => cell(it, "mc" + it.id, "", MINE_SEL === i, () => { MINE_SEL = MINE_SEL === i ? -1 : i; bump(); }))}
+                      </div>
+                    )}
+                    {MINE_SEL >= 0 && MINE_SEL < m.box.length && (
+                      <div style={{ margin: "6px 0", padding: 6, border: "1px solid #3a3446", borderRadius: 6 }} data-mine-sel="1">
+                        <div className="dc-row" style={{ marginBottom: 6 }}>
+                          <button className="dc-b go" style={{ ...btn, minHeight: 36 }} onClick={() => do_(mineTakeOne(g, MINE_SEL))} aria-label="Take this item">{"Take to " + (isGem(m.box[MINE_SEL]) ? "gem bag" : "bag")}</button>
+                          <button className="dc-b" style={{ ...btn, minHeight: 36 }} onClick={() => { MINE_SEL = -1; bump(); }}>Back</button>
+                        </div>
+                        {info(m.box[MINE_SEL])}
+                      </div>
+                    )}
                     <div className="dc-sm" style={{ marginTop: 8 }}><b>{"Working (" + m.p.length + ")"}</b></div>
                     {m.p.length === 0 && <div className="dc-sm">No pets are digging yet. Send one from your bag below.</div>}
                     {m.p.slice().sort((a: Item, b: Item) => mineQual(b) - mineQual(a)).map((it: Item) => petRow(it, <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11 }} onClick={() => do_(mineDismiss(g, it.id))}>Recall</button>))}
@@ -26224,7 +26280,7 @@ export default function App() {
                         <button className="dc-b go" style={{ ...btn, minHeight: 32, fontSize: 12 }} onClick={() => { const i = nkSel; doAct(() => { const m = nkEquip(g, i); saveGame(g, true); return m; }); }}>{worn(nkSel) ? "Take off" : "Wear"}</button>
                       </div>
                     )}
-                    <div className="dc-sm" style={{ marginTop: 4 }}>Necklaces never auto-equip. Wear one at a time ({"two with Prismatic Eternum"}); swap any time. Duplicates melt into gold.</div>
+                    <div className="dc-sm" style={{ marginTop: 4 }}>Necklaces never auto-equip. Wear one at a time ({"two with Prismatic Eternum"}); swap any time. Drops are always one you do not yet own.</div>
                   </div>
                 );
               })()}
@@ -26399,15 +26455,15 @@ function mineState(g: Game | null): Record<string, unknown> {
   let pris5 = 0;
   if (m) for (const it of m.box) { if (it.kind === "gem") gc[it.rar]++; else { rc[it.rar]++; if (it.rar === 7 && starCount(it) >= 5) pris5++; } }
   return {
-    ok: true, area: g.area, depth: g.depth, gold: g.gold, bagPets: mineBagPets(g).length, bagN: g.bag.length,
+    ok: true, area: g.area, depth: g.depth, gold: g.gold, bagPets: mineBagPets(g).length, bagN: g.bag.length, gemN: ensureGemBag(g).length,
     mine: m ? { crew: m.p.length, slots: m.sl, t: m.t, q: m.q.slice(), box: m.box.length, gearRar: rc, gemRar: gc, pris5, gd: m.gd, nk: m.nk.slice(), h: m.h, a: m.a, ov: m.ov, rb: m.rb, crewRar: m.p.map((p: Item) => p.rar), crewIds: m.p.map((p: Item) => p.id) } : null,
-    open: !!g.mineOpen, owned: ownsPrismatic(g), nkOwn: g.nk ? g.nk.own.slice() : null,
+    open: !!g.mineOpen, owned: ownsPrismatic(g), nkOwn: g.nk ? g.nk.own.slice() : null, nkPe: !!(g.nk && g.nk.pe), arts: artsOf(g).slice(), boxKinds: m ? Array.from(new Set(m.box.map((it: Item) => it.kind))) : [],
   };
 }
 try {
   (window as unknown as { __ED16_MINE?: object }).__ED16_MINE = {
-    consts: (): Record<string, unknown> => ({ MINE_FREE_SLOTS, MINE_ANCHOR_DEPTH, MINE_ANCHOR_GOLD, MINE_ANCHOR_SLOT, MINE_SLOT_SHARE, MINE_GROWTH, MINE_RAR_MULT, MINE_FREE_HIRE_DEPTH, MINE_PRICE_MIN, MINE_PER_PET_SHARE, MINE_CREW_CAP, MINE_CAP_HOURS, MINE_AWAY_MIN_SEC, MINE_ROLLBACK_TOL_SEC, MINE_BOX_MAX, MINE_TIER_DOWN, MINE_TIER_UP, MINE_RATE_TAU_H, MINE_PRIOR_SEC, MINE_FLOORS_PER_HOUR, MINE_CAVE, MINE_RACK, MINE_CHEST }),
-    crewFrac: (n: number): number => mineCrewFrac(n),
+    consts: (): Record<string, unknown> => ({ MINE_FREE_SLOTS, MINE_TOP_SLOT, MINE_TOP_GOLD, MINE_GROWTH, MINE_SLOT_SHARE, MINE_RAR_MULT, MINE_FREE_HIRE_DEPTH, MINE_PRICE_MIN, MINE_PER_PET_SHARE, MINE_YIELD_RAR, MINE_CREW_CAP, MINE_CAP_HOURS, MINE_AWAY_MIN_SEC, MINE_ROLLBACK_TOL_SEC, MINE_BOX_MAX, MINE_TIER_DOWN, MINE_TIER_UP, MINE_RATE_TAU_H, MINE_PRIOR_SEC, MINE_FLOORS_PER_HOUR, MINE_CAVE, MINE_RACK, MINE_CHEST }),
+    crewFrac: (rars: number[]): number => mineCrewFrac(rars.map((r: number) => ({ rar: r } as unknown as Item))),
     // a game from a Save Code (a copy of a real save) or a fresh one; parked at camp with the given carried gold
     setup: (code?: string, opts?: { depth?: number; gold?: number; live?: boolean }): Record<string, unknown> => mineHk(() => {
       let g = code ? decodeCode(code, null) : newGame(null);
@@ -26432,9 +26488,11 @@ try {
     dismiss: (id: number): string => mineHk(() => (MINE_G ? mineDismiss(MINE_G, id) : "")),
     buySlot: (): string => mineHk(() => (MINE_G ? mineBuySlot(MINE_G) : "")),
     incomeHr: (d: number): number => mineIncomeHr(d),
+    topGrowth: (_d: number): number => MINE_GROWTH,
+    crewCost: (d: number, rars: number[]): Record<string, number> => { let slots = 0, hires = 0; rars.forEach((r: number, i: number) => { slots += mineSlotPrice(i + 1, d); hires += mineHirePrice(d, i, r, 0); }); return { slots, hires, total: slots + hires }; },
     hirePrice: (d: number, n: number, rar: number, stars?: number): number => mineHirePrice(d, n, rar, stars ?? 0),
     assignPrice: (id: number): number => { const g = MINE_G; if (!g) return -2; const it = g.bag.find((x: Item) => x.id === id); return it ? mineAssignPrice(g, it) : -2; },
-    priceTable: (): Record<string, unknown> => { const rows: unknown[] = []; const D = [1, 25, 50, 100, MINE_ANCHOR_DEPTH, 300, 500]; for (const d of D) for (const n of [1, 5, 10, 15, 20, 25, 30]) rows.push({ d, slot: n, slotFee: mineSlotPrice(n, d), hire: MINE_RAR_MULT.map((_: number, r: number) => mineHirePrice(d, n - 1, r, 0)) }); return { rows, income: D.map((d: number) => ({ d, incomeHr: mineIncomeHr(d), anchor: mineSlotPrice(20, d) + mineHirePrice(d, 19, 7) })) }; },
+    priceTable: (): Record<string, unknown> => { const rows: unknown[] = []; const D = [1, 25, 50, 100, 200, 300, 500]; for (const d of D) for (const n of [1, 5, 10, 15, 20, 25, 30]) rows.push({ d, slot: n, slotFee: mineSlotPrice(n, d), hire: MINE_RAR_MULT.map((_: number, r: number) => mineHirePrice(d, n - 1, r, 0)) }); return { rows, income: D.map((d: number) => ({ d, incomeHr: mineIncomeHr(d), anchor: mineSlotPrice(20, d) + mineHirePrice(d, 19, 7) })) }; },
     price: (n: number, d?: number): number => mineSlotPrice(n, d ?? (MINE_G ? mineDepth(MINE_G) : 1)),
     credit: (hours: number): Record<string, unknown> => mineHk(() => (MINE_G ? mineCredit(MINE_G, hours) : {})),
     // drive the real per-frame timer: last-seen = t0, then a frame at t1
@@ -26446,7 +26504,7 @@ try {
     // the budget split for a crew of the given pet tiers against a natural per-tier vector
     allocate: (rars: number[], natural: number[], frac?: number): Record<string, unknown> => {
       const pets = rars.map((r: number) => { const p = makePet(100, r, 100); delete p.st; return p; });
-      return mineAllocate(pets, natural, frac ?? mineCrewFrac(pets.length));
+      return mineAllocate(pets, natural, frac ?? mineCrewFrac(pets));
     },
     natural: (hours: number): Record<string, unknown> => (MINE_G ? mineNatural(MINE_G, hours) : {}),
     rate: (): Record<string, unknown> => { const g = MINE_G; if (!g) return {}; const r = mineRate(g); return { perHour: r.per.map((v: number, i: number) => (i === MR_DEPTH ? v : v * 3600)), depth: r.depth, sec: r.sec, raw: g.mr ? { s: g.mr.s, c: g.mr.c.slice() } : null }; },
@@ -26497,6 +26555,7 @@ try {
       return { stars, kinds, golden, set };
     },
     setPrisBoost: (k: number): void => { MINE_TEST_PRIS = k; },
+    ownAllNk: (): void => { const g = MINE_G; if (g) { const st = nkOf(g); for (let i = 0; i < NK_REG; i++) st.own[i] = Math.max(1, st.own[i] | 0); } },
     giveNk: (i: number): void => { const m = MINE_G && MINE_G.mine; if (m) m.nk.push(i); },
     roundTrip: (): Record<string, unknown> => mineHk(() => {
       const g = MINE_G; if (!g) return {};
