@@ -177,6 +177,7 @@ interface Game {
   wallBreak?: boolean; cracks?: number[]; digAt?: { x: number; y: number }; digClock?: number; wallVer?: number;
   warn?: { txt: string; sub: string; c: string; t: number; max: number }; warnGobs?: number[]; warnPort?: string;
   artAlert?: { txt: string; sub: string; t: number; max: number; rc: number; dx: number; dy: number } | null;
+  mine?: MineSt; mineOpen?: boolean; mr?: MineRate; // camp pet excavation (save field "mn"; old saves have none)
 }
 
 // ---------- data ----------
@@ -1975,6 +1976,7 @@ function ownsPrismatic(g: Game): boolean {
   if (prisGated(g)) return true;
   for (const it of g.bag) if (it && it.kind !== "gem" && it.rar >= 7) return true;
   if (Array.isArray(g.stash)) for (const it of g.stash) if (it && it.kind !== "gem" && it.rar >= 7) return true;
+  if (g.mine) for (const it of g.mine.p) if (it && it.rar >= 7) return true; // a Prismatic pet at the excavation is still owned
   return false;
 }
 function lootBonusMult(g: Game): number { return ownsPrismatic(g) ? 1 : LOOT_BONUS; }
@@ -7091,7 +7093,7 @@ function actAddCount(act: number, phase: number): number {
   if (act < 2 || phase < 2) return 0;
   return (phase >= 3 ? 2 : 1) + Math.floor((act - 2) / 2);
 }
-function uiBlocked(g: Game): boolean { return !!(g.shopOpen || g.stashOpen || g.gambOpen || g.trophyOpen); }
+function uiBlocked(g: Game): boolean { return !!(g.shopOpen || g.stashOpen || g.gambOpen || g.trophyOpen || g.mineOpen); }
 function portalKind(g: Game): "vault" | "camp" | "proceed" | "secret" | "goblin" | "" {
   if (!g.portal) {
     if (g.vault) return "vault";
@@ -7117,7 +7119,7 @@ function trophyHit(g: Game, x: number, y: number): boolean {
   return !!t && g.area === "camp" && x >= t.x && x <= t.x + 1 && y >= t.y && y <= t.y + 1;
 }
 function campBlocked(g: Game, x: number, y: number): boolean {
-  return trophyHit(g, x, y) || !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y) || shrineAt(g, x, y) || !!(g.trophyAt && g.trophyAt.x === x && g.trophyAt.y === y);
+  return trophyHit(g, x, y) || !!mineHit(g, x, y) || !!(g.stashAt && g.stashAt.x === x && g.stashAt.y === y) || !!(g.restAt && g.restAt.x === x && g.restAt.y === y) || !!(g.fireAt && g.fireAt.x === x && g.fireAt.y === y) || merchAt(g, x, y) || shrineAt(g, x, y) || !!(g.trophyAt && g.trophyAt.x === x && g.trophyAt.y === y);
 }
 function merchAt(g: Game, x: number, y: number): boolean {
   return !!(g.merchant && g.merchant.x === x && g.merchant.y === y);
@@ -8386,6 +8388,549 @@ function restAtCamp(g: Game): void {
   saveGame(g);
   g.notify();
 }
+// ======================= camp pet excavation (2026-11-19, creator voice 5:17 / 5:20 / 5:22 / 5:25 / 5:28 PM CT) =======================
+// Unused pets from the bag can be put to work in the excavation in the camp's top-right corner. While the player is away
+// (tab hidden or game closed) the crew digs; the chest by the dig site then holds their haul.
+// Yield (5:28 PM, final): the game measures the player's own clear rate while playing (a rolling window of kills by type,
+// boss lairs, act bosses, goblins, chests, gold, floors and depth per real hour of active play, saved as "mr"). Away time is
+// turned into the NATURAL expected haul of playing that long at that rate: measured encounters per hour x the game's real
+// drop tables at the measured depth, with the real odds of boss copies (double / triple), boss power (x1..x3 when 5+
+// Prismatics are equipped) and overshields (depth 51+ with Prismatic gear) applied as expectations, so a long absence
+// carries its share of triple bosses etc. Each working pet earns 20% of that haul and the crew is hard-capped at 100%
+// (5 pets reach the cap; extra pets only help through better quality). Pet rarity steers each pet toward its own tier,
+// but every tier is budgeted: the crew can never find more of a tier (Prismatic included) than natural play would.
+// Fractions carry over between absences, so a rare tier arrives once its natural expectation adds up to one.
+// No x1.5 no-Prismatic loot boost, and stars / sets / golden keep their natural rolls. All tuning lives in this block.
+// Pricing (creator, Nov 19 5:39 / 5:49 PM): a serious gold sink scaling with crew size (steep), pet rarity and depth.
+// Anchor: at Richard's depth (MINE_ANCHOR_DEPTH) opening slot 20 and hiring a Prismatic pet into it costs exactly
+// MINE_ANCHOR_GOLD (slot fee + hire fee). Everything scales with expected gold income per hour at the current depth,
+// so the 20th Prismatic is always the same ~84 hours of natural gold income, and costs more the deeper you are.
+//   income(d)  = campIntervalGold(d) x MINE_FLOORS_PER_HOUR / 5      (expected gold per hour at the reference pace)
+//   A(d)       = MINE_ANCHOR_GOLD x income(d) / income(MINE_ANCHOR_DEPTH)
+//   slot fee   = A(d) x MINE_SLOT_SHARE x GROWTH^(slot# - 20)                          (slot 1 free; permanent unlocks)
+//   hire fee   = A(d) x (1 - MINE_SLOT_SHARE) x RAR_MULT[r] / RAR_MULT[Prismatic] x GROWTH^(pets already working - 19)
+//   swap       = a better pet replacing the weakest worker pays only the difference of the two hire fees (never < 0)
+//   recall     = free, no refund (re-hiring later pays again). First hire is free at depth <= MINE_FREE_HIRE_DEPTH.
+// No hard cap: slots and hires past 20 keep escalating by GROWTH each.
+// ---- TUNABLE PRICING BLOCK (approved by the creator Nov 19, 5:58 PM): change only the constants below ----
+// Reference prices (slot fee + hire fee for that slot; hire = pets already working = slot# - 1):
+//   depth | income/h | slot 20 + 20th Prismatic (= ~83.7 h of income) | first hire Normal / Prismatic
+//      1  |    23.5K |   1,962,700                                    | free / free
+//     25  |   128.0K |  10,710,000                                    | 1,950 / 58,600
+//     50  |   260.6K |  21,810,000                                    | 3,980 / 119,400
+//    100  |   543.6K |  45,500,000                                    | 8,300 / 249,000
+//    200  |   1.195M | 100,000,000  (anchor: Richard's depth)         | 18,200 / 547,200
+//    300  |   1.921M | 160,780,000                                    | 29,300 / 879,800
+//    500  |   3.679M | 307,960,000                                    | 56,200 / 1,690,000
+//   depth 200, slot fee / Normal hire / Prismatic hire: slot 5 390,700 / 52,100 / 1,560,000;
+//   slot 10 1,450,000 / 193,400 / 5,800,000; slot 15 5,390,000 / 718,200 / 21,550,000;
+//   slot 20 20,000,000 / 2,670,000 / 80,000,000; slot 25 74,260,000 / 9,900,000 / 297,030,000.
+const MINE_FREE_SLOTS = 1;             // the first working slot is free
+const MINE_ANCHOR_DEPTH = 200;         // Richard's depth (p1 save richard-boss-2026-11-17)
+const MINE_ANCHOR_GOLD = 100_000_000;  // slot 20 + 20th hire (Prismatic) at the anchor depth
+const MINE_ANCHOR_SLOT = 20;
+const MINE_SLOT_SHARE = 0.2;           // 20M of the 100M is the slot, 80M the Prismatic hire
+const MINE_GROWTH = 1.30;              // x1.3 per slot / per pet already working
+const MINE_RAR_MULT = [1, 1.5, 2.5, 4, 6.5, 10, 16, 30]; // Normal..Prismatic (Prismatic = 30x a Normal pet)
+const MINE_FREE_HIRE_DEPTH = 20;       // first hire (empty crew) is free at depth 20 and above ground
+const MINE_PRICE_MIN = 100;            // floor for any paid fee
+const MINE_PER_PET_SHARE = 0.20;       // each working pet earns 20% of the natural expected haul...
+const MINE_CREW_CAP = 1.0;             // ...and the whole crew never exceeds 100% of it
+const MINE_CAP_HOURS = 72;             // at most 72 h (a long weekend) credited per absence
+const MINE_AWAY_MIN_SEC = 60;          // gaps shorter than this count as still playing (no credit)
+const MINE_ROLLBACK_TOL_SEC = 300;     // clock moved back more than this: no credit, timer restarts from now
+const MINE_BOX_MAX = 400;              // gear + gems kept in the chest; lower-tier extras are salvaged into the chest's gold
+const MINE_TIER_DOWN = 0.45;           // a pet of tier r wants tier i<r with weight DOWN^(r-i) ...
+const MINE_TIER_UP = 0.08;             // ... and tier i>r with UP^(i-r) (+5% per pet star); unmet share spills DOWN only
+const MINE_NK_Q = 1;                   // necklaces: natural expectation x crew share (no quality bonus)
+// clear-rate tracker: exponential window over active play time, plus a prior (the default pace) so a fresh save is sane
+const MINE_RATE_TAU_H = 3;             // ~ the last 3 hours of active play dominate the rate
+const MINE_PRIOR_SEC = 900;            // the default pace counts as 15 minutes of play until real play replaces it
+const MINE_FLOORS_PER_HOUR = 6;        // default pace for the prior (one floor about every 10 minutes)
+// layout (camp room is x 13..30, y 13..30): cave mouth 3x2 in the top-right corner, a tool rack beside it, the loot chest below
+const MINE_CAVE = { x: 28, y: 13, w: 3, h: 2 };
+const MINE_RACK = { x: 27, y: 13 };
+const MINE_CHEST = { x: 29, y: 16 };
+let MINE_TEST_PRIS = 1;                // test hook only (x on the Prismatic natural budget); always 1 in play
+// tracker counters (index -> meaning). All per-active-second after dividing by s.
+const MR_FLOOR = 0, MR_NORM = 1, MR_RARE = 2, MR_ELITE = 3, MR_SE = 4, MR_UE = 5, MR_LAIR = 6, MR_LAIR_RE = 7, MR_ACT = 8,
+  MR_GOB = 9, MR_CHEST = 10, MR_VCHEST = 11, MR_GOLD = 12, MR_ITEMS = 13, MR_GEMS = 14, MR_NK = 15, MR_ROYAL = 16, MR_DEPTH = 17,
+  MR_COPIES = 18, MR_X3 = 19, MR_OVSH = 20, MR_GEMGOB = 21, MR_GOLDGOB = 22, MR_N = 23;
+interface MineRate { s: number; c: number[]; d: number; lg: number }
+interface MineSt { p: Item[]; sl: number; t: number; q: number[]; box: Item[]; gd: number; nk: number[]; h: number; a: number; ov: number; rb: number }
+let MINE_NOTE = "";
+function mineOf(g: Game): MineSt {
+  if (!g.mine) g.mine = { p: [], sl: MINE_FREE_SLOTS, t: Date.now(), q: new Array(17).fill(0), box: [], gd: 0, nk: [], h: 0, a: 0, ov: 0, rb: 0 };
+  if (g.mine.q.length < 17) g.mine.q = g.mine.q.concat(new Array(17 - g.mine.q.length).fill(0));
+  return g.mine;
+}
+function mrOf(g: Game): MineRate { if (!g.mr) g.mr = { s: 0, c: new Array(MR_N).fill(0), d: 0, lg: -1 }; return g.mr; }
+function minePack(g: Game): Record<string, unknown> | undefined {
+  const m = g.mine;
+  if (!m) return undefined;
+  return { p: m.p.map((it: Item) => packItem(it)), s: m.sl, t: Math.round(m.t), q: m.q.map((v: number) => Math.round(v * 1e6) / 1e6), b: m.box.map((it: Item) => packItem(it)), gd: Math.floor(m.gd), nk: m.nk.slice(0, 16), h: Math.round(m.h * 1e4) / 1e4, a: Math.round(m.a * 1e4) / 1e4, ov: m.ov | 0, rb: m.rb | 0 };
+}
+function mrPack(g: Game): Record<string, unknown> | undefined {
+  const r = g.mr;
+  if (!r || !(r.s > 0)) return undefined;
+  return { s: Math.round(r.s * 10) / 10, c: r.c.map((v: number) => Math.round(v * 1e4) / 1e4) };
+}
+function mrUnpack(v: unknown): MineRate | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const s = typeof o.s === "number" && isFinite(o.s) ? Math.max(0, o.s) : 0;
+  const c = new Array(MR_N).fill(0);
+  if (Array.isArray(o.c)) for (let i = 0; i < MR_N; i++) { const x = o.c[i]; c[i] = typeof x === "number" && isFinite(x) ? Math.max(0, x) : 0; }
+  return { s, c, d: 0, lg: -1 };
+}
+function mineUnpack(v: unknown): MineSt | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const num = (x: unknown, d: number): number => (typeof x === "number" && isFinite(x) ? x : d);
+  const items = (x: unknown): Item[] => (Array.isArray(x) ? x.map((a: unknown) => unpackItem(a)).filter((it: Item | null): it is Item => !!it) : []);
+  const p = items(o.p).filter((it: Item) => it.kind === "pet");
+  const q = new Array(17).fill(0);
+  if (Array.isArray(o.q)) for (let i = 0; i < 17; i++) q[i] = Math.max(0, Math.min(1, num(o.q[i], 0)));
+  const nk = Array.isArray(o.nk) ? (o.nk as unknown[]).filter((x: unknown): x is number => typeof x === "number" && x >= 0 && x < 8).map((x: number) => x | 0).slice(0, 16) : [];
+  return {
+    p, sl: Math.max(MINE_FREE_SLOTS, p.length, Math.floor(num(o.s, MINE_FREE_SLOTS))), t: Math.max(0, num(o.t, Date.now())), q,
+    box: items(o.b).slice(0, MINE_BOX_MAX), gd: Math.max(0, Math.floor(num(o.gd, 0))), nk, h: Math.max(0, num(o.h, 0)), a: Math.max(0, num(o.a, 0)), ov: Math.max(0, Math.floor(num(o.ov, 0))), rb: Math.max(0, Math.floor(num(o.rb, 0))),
+  };
+}
+// ---------- clear-rate tracking (active play only: mode play, not paused, page visible, not at camp) ----------
+function mrPlaying(g: Game): boolean { return g.mode === "play" && (g.area ?? "dungeon") !== "camp"; }
+function mrTick(g: Game, dt: number): void {
+  if (!mrPlaying(g) || !(dt > 0) || dt > 5) { if (g.mr) { g.mr.lg = -1; g.mr.d = 0; } return; }
+  const r = mrOf(g);
+  const k = Math.exp(-dt / (MINE_RATE_TAU_H * 3600));
+  r.s = r.s * k + dt;
+  for (let i = 0; i < MR_N; i++) r.c[i] *= k;
+  r.c[MR_DEPTH] += g.depth * dt;
+  if (r.d && g.depth !== r.d && !g.vault && (g.area ?? "dungeon") === "dungeon") r.c[MR_FLOOR] += 1;
+  r.d = g.depth;
+  const gold = Math.floor(g.gold);
+  if (r.lg >= 0 && gold > r.lg) r.c[MR_GOLD] += (gold - r.lg) / (ownsPrismatic(g) ? 1 : LOOT_BONUS); // remove the x1.5 no-Prismatic boost
+  r.lg = gold;
+}
+function mrAdd(g: Game, i: number, n = 1): void { if (mrPlaying(g)) mrOf(g).c[i] += n; }
+function mrOnKill(g: Game, e: En): void {
+  if (!mrPlaying(g) || e.sw || e.child) return;
+  if (e.act) { mrAdd(g, MR_ACT); if (bossPowerOf(e) >= 3) mrAdd(g, MR_X3); mrAdd(g, MR_OVSH, Math.max(0, e.ovm ?? 0)); return; }
+  if (e.gob === 2) { mrAdd(g, MR_GEMGOB); return; }
+  if (e.gob === 3) { mrAdd(g, MR_GOLDGOB); return; }
+  if (e.gob || e.hunt) { mrAdd(g, MR_GOB); return; }
+  if (e.sgc) { mrAdd(g, MR_ROYAL); return; }
+  if (e.ue) { mrAdd(g, MR_UE); return; }
+  if (e.se) { mrAdd(g, MR_SE); return; }
+  if (e.cls === 1) { mrAdd(g, MR_ELITE); return; }
+  if (e.rare) { mrAdd(g, MR_RARE); return; }
+  if (e.cls === 0) { mrAdd(g, MR_NORM); return; }
+  if (isPackBoss(e)) {
+    mrAdd(g, MR_COPIES); if (bossPowerOf(e) >= 3) mrAdd(g, MR_X3); mrAdd(g, MR_OVSH, Math.max(0, e.ovm ?? 0));
+    const last = !g.en.some((o: En) => o !== e && o.hp > 0 && isPackBoss(o) && e.packId !== undefined && o.packId === e.packId);
+    if (last) mrAdd(g, bossLairKilled(g) ? MR_LAIR_RE : MR_LAIR);
+  }
+}
+function mrOnChest(g: Game, c: Chest): void { if (!c.starter) mrAdd(g, g.vault ? MR_VCHEST : MR_CHEST); }
+function mrOnDrop(g: Game, it: Item): void { mrAdd(g, it.kind === "gem" ? MR_GEMS : MR_ITEMS); }
+// default pace per active second (the prior): MINE_FLOORS_PER_HOUR floors of the standard floor mix at depth d
+function mrPrior(d: number): number[] {
+  const depth = Math.max(1, d), c = new Array(MR_N).fill(0), f = MINE_FLOORS_PER_HOUR / 3600;
+  const n = enBase(depth), pE = eliteChance(depth), actFl = isActFloor(depth);
+  c[MR_FLOOR] = f; c[MR_NORM] = f * n * (1 - pE); c[MR_ELITE] = f * n * pE; c[MR_RARE] = f * expectedPacks(depth) * 3.6;
+  if (depth > EARLY_SAFE_MAX) c[MR_LAIR] = f * (actFl ? 0 : Math.min(0.5, 0.2 + depth * 0.01));
+  c[MR_ACT] = f * 0.2; // one act boss per 5 floors
+  if (depth >= 3) { c[MR_GOB] = f * (GOB_CH + HUNTER_CHANCE); c[MR_GOLDGOB] = f * GOB_GOLD_CH; }
+  c[MR_CHEST] = f * 3; c[MR_VCHEST] = f * 0.04 * 16;
+  c[MR_GOLD] = f * expectedFloorGold(depth);
+  c[MR_DEPTH] = depth;
+  return c;
+}
+// measured rate per active second, smoothed with the prior; depth = time-weighted measured depth
+function mineRate(g: Game): { per: number[]; depth: number; sec: number } {
+  const r = g.mr;
+  const s = r ? r.s : 0;
+  const dMeas = r && s > 1 ? r.c[MR_DEPTH] / s : mineDepth(g);
+  const depth = Math.max(1, Math.round(s > 60 ? dMeas : mineDepth(g)));
+  const pr = mrPrior(depth);
+  const per = new Array(MR_N).fill(0);
+  for (let i = 0; i < MR_N; i++) per[i] = i === MR_DEPTH ? depth : ((r ? r.c[i] : 0) + pr[i] * MINE_PRIOR_SEC) / (s + MINE_PRIOR_SEC);
+  return { per, depth, sec: s };
+}
+// ---------- natural expected haul (the game's real drop tables, encounter odds as expectations) ----------
+function norm8(w: number[]): number[] { let t = 0; for (const v of w) t += v; return w.map((v: number) => (t > 0 ? v / t : 0)); }
+function nine8(p: number[]): number[] { return [p[0], p[1], p[2], p[3], p[4], p[5], p[6] + p[7], p[8]]; } // set relic counts as tier 6
+function addV(a: number[], b: number[], k: number): void { for (let i = 0; i < 8; i++) a[i] += b[i] * k; }
+function mineNatural(g: Game, hours: number): { gear: number[]; gems: number[]; gold: number; nk: number; depth: number; enc: Record<string, number> } {
+  const { per, depth: d } = mineRate(g);
+  const sec = Math.max(0, hours) * 3600;
+  const E = (i: number): number => per[i] * sec; // expected encounters in the absence
+  const gear = new Array(8).fill(0), gems = new Array(8).fill(0);
+  const gemO = norm8(gemRarW(d));
+  const kill = (n: number, ch: number, f: number, gch: number): void => { addV(gear, norm8(rollRarW(f, 0, d)), n * ch); addV(gems, gemO, n * gch); };
+  kill(E(MR_NORM), 0.12, 1, GEM_CH_NORM);
+  kill(E(MR_RARE), 0.32, 1.12, GEM_CH_ELITE);
+  kill(E(MR_ELITE), 0.6, 1.22, GEM_CH_ELITE);
+  const se8 = nine8(superEliteOdds9(d));
+  addV(gear, se8, E(MR_SE) * 1.45 + E(MR_UE) * 2.5); addV(gems, gemO, (E(MR_SE) + E(MR_UE)) * GEM_CH_SE);
+  // boss lairs: fresh lairs roll copies / power / overshields with the real odds; killed lairs return as one plain boss
+  const pTri = bossTripleChance(d), pDbl = bossDoubleChance(d);
+  const eCopies = 1 + pDbl + 2 * pTri;
+  const gated = prisEquippedCount(g) >= BOSS_PM_MIN;
+  const ePow = gated ? (1 + BOSS_PM_MAX) / 2 : 1;
+  const eOv = d >= DEEP_PRIS_MIN && prisGated(g) ? OVSH_W.reduce((a: number, w: number, i: number) => a + w * i, 0) : 0;
+  const bossO = norm8(rollRarW(1.35, 0, d)), extraO = norm8(rollRarW(1.28, 0, d));
+  const lairs = E(MR_LAIR), lairsRe = E(MR_LAIR_RE);
+  const extraPerLair = (pDbl * 2 + pTri * 3) * LOOT_EXTRA_PER_BOSS + eCopies * eOv * LOOT_EXTRA_PER_OVSH; // extraBossLootN per copy
+  addV(gear, bossO, lairs * eCopies * ePow * 2 + lairsRe * 2);
+  addV(gear, extraO, lairs * ePow * extraPerLair);
+  addV(gems, gemO, (lairs * eCopies + lairsRe) * GEM_CH_MINI);
+  // act bosses (per kill, copies are measured): x power, real act loot table and count at this depth
+  const act = actOf(d);
+  addV(gear, actLootOdds(act, d), E(MR_ACT) * ePow * actLootExpected(act, d));
+  addV(gems, gemO, E(MR_ACT) * actExtraLoot(act).gems);
+  // goblins / hunters / royal goblins
+  const jack = norm8(jackpotRarW(d));
+  addV(gear, jack, E(MR_GOB) * 4 + E(MR_GOLDGOB));
+  addV(gems, norm8(gobGemWeights(d)), E(MR_GEMGOB) * Math.max(2, Math.min(6, 3 + d * 0.08)));
+  addV(gear, norm8(rollRarW(1.6, 2, d)), E(MR_ROYAL) * 1.5);
+  // chests (normal and vault): the chest-rarity odds, item counts and rarity lifts from chestW / chestLoot
+  for (const [n, vlt] of [[E(MR_CHEST), false], [E(MR_VCHEST), true]] as [number, boolean][]) {
+    if (n <= 0) continue;
+    const cw = norm8(chestW(d, vlt).concat([0, 0, 0]));
+    const cnt = [1, 1.4, 2, 2.5, 3.4], f = [1.0, 1.06, 1.12, 1.2, 1.3], mn = [0, 0, 0, 0, 1];
+    for (let r = 0; r < 5; r++) addV(gear, norm8(rollRarW(f[r], mn[r], d)), n * cw[r] * cnt[r]);
+    addV(gems, gemO, n * (vlt ? GEM_CH_VAULT : GEM_CH_CHEST));
+  }
+  // necklaces: the same per-source weights the live rolls use (Eternum necklaces start past depth 100)
+  let nkW = 0;
+  if (d >= NK_MIN_DEPTH) {
+    const cwN = norm8(chestW(d, false).concat([0, 0, 0]));
+    let chW = 0; for (let r = 0; r < 5; r++) chW += cwN[r] * NK_W_CHEST[r];
+    nkW = E(MR_NORM) * NK_W_NORM + E(MR_RARE) * NK_W_RARE + E(MR_ELITE) * NK_W_ELITE + E(MR_SE) * NK_W_SE + E(MR_UE) * NK_W_UE
+      + lairs * eCopies * NK_W_MINI * (1 + NK_W_MINI_PM * (ePow - 1)) * (1 + NK_W_MINI_OV * eOv) + lairsRe * NK_W_MINI
+      + E(MR_ACT) * NK_W_ACT * (1 + NK_W_ACT_PM * (ePow - 1)) * (1 + NK_W_OVSH * eOv)
+      + (E(MR_GOB) + E(MR_GEMGOB) + E(MR_GOLDGOB)) * NK_W_GOB + E(MR_ROYAL) * NK_W_ROYAL + E(MR_CHEST) * chW;
+  }
+  return {
+    gear, gems, gold: per[MR_GOLD] * sec, nk: NK_BASE * nkW, depth: d,
+    enc: { floors: E(MR_FLOOR), normal: E(MR_NORM), rare: E(MR_RARE), elite: E(MR_ELITE), superElite: E(MR_SE), ultraElite: E(MR_UE), lairs, lairsKilledBefore: lairsRe, tripleLairs: lairs * pTri, doubleLairs: lairs * pDbl, bossPower: ePow, overshields: lairs * eCopies * eOv, actBosses: E(MR_ACT), goblins: E(MR_GOB) + E(MR_GEMGOB) + E(MR_GOLDGOB), royal: E(MR_ROYAL), chests: E(MR_CHEST), vaultChests: E(MR_VCHEST) },
+  };
+}
+function mineQual(it: Item): number { return Math.max(0, Math.min(7, it.rar | 0)) * 1e6 + petStars(it) * 1e4 + Math.min(9999, Math.max(0, it.ilvl | 0)); }
+function mineCrewFrac(n: number): number { return Math.min(MINE_CREW_CAP, Math.max(0, n) * MINE_PER_PET_SHARE); }
+function mineIncomeHr(d: number): number { return safeNum(campIntervalGold(Math.max(1, Math.floor(d))) * MINE_FLOORS_PER_HOUR / 5); }
+function mineAnchorAt(d: number): number { return MINE_ANCHOR_GOLD * mineIncomeHr(d) / mineIncomeHr(MINE_ANCHOR_DEPTH); }
+function minePriceRound(v: number): number { return v >= 1e6 ? Math.round(v / 1e4) * 1e4 : v >= 1e4 ? Math.round(v / 100) * 100 : Math.max(MINE_PRICE_MIN, Math.round(v / 10) * 10); }
+function mineSlotPrice(n: number, d: number): number {
+  if (n <= MINE_FREE_SLOTS) return 0;
+  return minePriceRound(safeNum(mineAnchorAt(d) * MINE_SLOT_SHARE * Math.pow(MINE_GROWTH, n - MINE_ANCHOR_SLOT)));
+}
+function mineHireRaw(d: number, n: number, rar: number, _stars = 0): number {
+  const r = Math.max(0, Math.min(7, rar | 0));
+  return mineAnchorAt(d) * (1 - MINE_SLOT_SHARE) * MINE_RAR_MULT[r] / MINE_RAR_MULT[7] * Math.pow(MINE_GROWTH, Math.max(0, n) - (MINE_ANCHOR_SLOT - 1));
+}
+// fee to hire this pet when n pets already work (0 = first hire)
+function mineHirePrice(d: number, n: number, rar: number, stars = 0): number {
+  if (n <= 0 && d <= MINE_FREE_HIRE_DEPTH) return 0;
+  return minePriceRound(safeNum(mineHireRaw(d, n, rar, stars)));
+}
+// swap: the newcomer takes the weakest worker's place in a crew of the same size; pay the difference of the two fees
+function mineSwapPrice(d: number, n: number, pet: Item, old: Item): number {
+  const k = Math.max(0, n - 1);
+  if (k <= 0 && d <= MINE_FREE_HIRE_DEPTH) return 0;
+  const diff = mineHireRaw(d, k, pet.rar, petStars(pet)) - mineHireRaw(d, k, old.rar, petStars(old));
+  return diff <= 0 ? 0 : minePriceRound(safeNum(diff));
+}
+// what pressing "send to dig" on this pet would cost right now (-1 = not possible)
+function mineAssignPrice(g: Game, pet: Item): number {
+  const m = mineOf(g), d = mineDepth(g);
+  if (m.p.length < m.sl) return mineHirePrice(d, m.p.length, pet.rar, petStars(pet));
+  const lo = mineLowest(m);
+  if (!lo || mineQual(pet) <= mineQual(lo)) return -1;
+  return mineSwapPrice(d, m.p.length, pet, lo);
+}
+function mineDepth(g: Game): number { return Math.max(1, Math.floor(g.depth || 1)); }
+function mineTierW(pet: Item): number[] {
+  const r = Math.max(0, Math.min(7, pet.rar | 0));
+  const up = Math.min(0.9, MINE_TIER_UP * (1 + 0.05 * petStars(pet)));
+  return norm8([0, 1, 2, 3, 4, 5, 6, 7].map((i: number) => (i === r ? 1 : i < r ? Math.pow(MINE_TIER_DOWN, r - i) : Math.pow(up, i - r))));
+}
+// Splits the crew's budget (frac x natural, per tier) between the pets. Each pet wants its quota spread by its tier
+// preference; a tier short on budget is rationed between the pets that want it; unmet quota spills only to tiers at or
+// below the pet's own. Result per tier <= budget <= natural.
+function mineAllocate(pets: Item[], natural: number[], frac: number): { got: number[]; budget: number[]; unmet: number } {
+  const budget = natural.map((v: number) => Math.max(0, v) * frac);
+  const left = budget.slice();
+  const got = new Array(8).fill(0);
+  const n = pets.length;
+  if (!n) return { got, budget, unmet: 0 };
+  const total = budget.reduce((a: number, b: number) => a + b, 0);
+  const need = pets.map(() => total / n);
+  const pref = pets.map((p: Item) => mineTierW(p));
+  for (let pass = 0; pass < 6; pass++) {
+    const dem: number[][] = pets.map((p: Item, j: number) => {
+      const r = Math.max(0, Math.min(7, p.rar | 0));
+      const w = pref[j].map((v: number, i: number) => (pass === 0 || i <= r ? v : 0));
+      let t = 0; for (let i = 0; i < 8; i++) if (left[i] > 1e-12) t += w[i];
+      return w.map((v: number, i: number) => (t > 0 && left[i] > 1e-12 ? need[j] * v / t : 0));
+    });
+    let moved = 0;
+    for (let i = 0; i < 8; i++) {
+      let tot = 0; for (let j = 0; j < n; j++) tot += dem[j][i];
+      if (tot <= 0) continue;
+      const k = Math.min(1, left[i] / tot);
+      for (let j = 0; j < n; j++) { const v = dem[j][i] * k; need[j] -= v; got[i] += v; moved += v; }
+      left[i] = Math.max(0, left[i] - tot * k);
+    }
+    if (moved < 1e-9) break;
+  }
+  return { got, budget, unmet: need.reduce((a: number, b: number) => a + Math.max(0, b), 0) };
+}
+// One find of a given tier through the game's own item / gem makers (natural kinds, stars, sets, golden).
+function mineMakeFind(isGem: boolean, tier: number, d: number): Item { return isGem ? makeGem(tier, ri(7), d, rollGemStars(tier, d)) : maybeSet(makeItem(d, tier, undefined, d)); }
+// Credits `hours` away (capped) into the chest. Returns what was added.
+function mineCredit(g: Game, hours: number): Record<string, unknown> & { hrs: number; items: number; gems: number; gold: number; nk: number; salv: number } {
+  const m = mineOf(g);
+  const out = { hrs: 0, items: 0, gems: 0, gold: 0, nk: 0, salv: 0, frac: 0, natural: null as null | Record<string, unknown>, gearExp: [] as number[], gemExp: [] as number[] };
+  const hrs = Math.max(0, Math.min(MINE_CAP_HOURS, isFinite(hours) ? hours : 0));
+  const crew = m.p.length;
+  if (hrs <= 0 || crew <= 0) return out;
+  out.hrs = hrs;
+  const nat = mineNatural(g, hrs);
+  nat.gear[7] *= MINE_TEST_PRIS; nat.gems[7] *= MINE_TEST_PRIS;
+  const frac = mineCrewFrac(crew);
+  out.frac = frac;
+  const ag = mineAllocate(m.p, nat.gear, frac), am = mineAllocate(m.p, nat.gems, frac);
+  out.gearExp = ag.got.slice(); out.gemExp = am.got.slice();
+  out.natural = { gear: nat.gear, gems: nat.gems, gold: nat.gold, nk: nat.nk, depth: nat.depth, enc: nat.enc };
+  const d = nat.depth;
+  // whole finds per tier; fractions carry to the next absence (so no tier ever runs ahead of its natural expectation)
+  const counts: number[] = [], gcounts: number[] = [];
+  for (let i = 0; i < 8; i++) { const x = ag.got[i] + m.q[i]; counts[i] = Math.floor(x + 1e-9); m.q[i] = Math.max(0, x - counts[i]); }
+  for (let i = 0; i < 8; i++) { const x = am.got[i] + m.q[8 + i]; gcounts[i] = Math.floor(x + 1e-9); m.q[8 + i] = Math.max(0, x - gcounts[i]); }
+  // fill the chest best-first; what does not fit (lowest tiers) is salvaged at the normal salvage value into the chest gold
+  const room = (): number => MINE_BOX_MAX - m.box.length;
+  for (let i = 7; i >= 0; i--) {
+    for (const [isGem, n] of [[false, counts[i]], [true, gcounts[i]]] as [boolean, number][]) {
+      if (n <= 0) continue;
+      const keep = Math.min(n, room());
+      for (let k = 0; k < keep; k++) {
+        const it = mineMakeFind(isGem, i, d);
+        m.box.push(it); if (isGem) out.gems++; else out.items++;
+      }
+      if (n > keep) { const sample = isGem ? makeGem(i, 0, d, 0) : makeItem(d, i, undefined, d); const v = (n - keep) * salvageVal(sample); m.gd += v; out.salv += n - keep; out.gold += v; }
+    }
+  }
+  const gold = Math.max(0, Math.round(nat.gold * frac));
+  m.gd += gold; out.gold += gold;
+  const xn = nat.nk * frac * MINE_NK_Q + m.q[16];
+  const nn = Math.floor(xn + 1e-9); m.q[16] = Math.max(0, xn - nn);
+  for (let i = 0; i < nn && m.nk.length < 16; i++) {
+    const s = nkOf(g);
+    const eternum = nkAllSeven(g) && !s.own[NK_PE] && !m.nk.includes(NK_PE) && R() < NK_BASE_E / NK_BASE;
+    m.nk.push(eternum ? NK_PE : ri(NK_REG)); out.nk++;
+  }
+  m.ov += out.salv;
+  m.h += hrs; m.a = hrs;
+  return out;
+}
+// Called every frame while the page is visible. A long gap means the player was away (tab hidden / game closed).
+function mineTick(g: Game, now: number): void {
+  const m = g.mine;
+  if (!m) return;
+  if (!(m.t > 0)) { m.t = now; return; }
+  const gap = now - m.t;
+  if (gap < -MINE_ROLLBACK_TOL_SEC * 1000) { m.t = now; m.rb++; return; } // clock rollback guard
+  if (gap < 0) return;
+  if (gap >= MINE_AWAY_MIN_SEC * 1000 && m.p.length > 0) {
+    const r = mineCredit(g, gap / 3600000);
+    if (r.hrs > 0 && (r.items || r.gems || r.gold || r.nk)) {
+      msg(g, "Your excavation crew dug while you were away (" + mineHrsLabel(r.hrs) + "). Their chest is waiting at camp.", "#ffc870");
+      MINE_NOTE = "Welcome back! +" + (r.items + r.gems) + " finds, +" + fmtg(r.gold) + (r.salv ? " (" + r.salv + " low finds salvaged: chest full)" : "") + ".";
+    }
+  }
+  m.t = now;
+}
+function mineHrsLabel(h: number): string { const mins = Math.round(h * 60); return mins >= 60 ? Math.floor(mins / 60) + "h " + (mins % 60) + "m" : mins + "m"; }
+function mineBagPets(g: Game): Item[] { return g.bag.filter((it: Item) => it.kind === "pet"); }
+function mineLowest(m: MineSt): Item | null { let lo: Item | null = null; for (const p of m.p) if (!lo || mineQual(p) < mineQual(lo)) lo = p; return lo; }
+function mineReturnPet(g: Game, it: Item): void { ensureBagCapacity(g, false, g.bag.length + 1); g.bag.push(it); sortInventory(g); }
+// Put a bag pet to work. Free slot: it just joins. Crew full: it replaces the lowest-quality worker if it is better.
+function mineAssign(g: Game, id: number): string {
+  if (g.area !== "camp") return "The excavation is at camp.";
+  const m = mineOf(g);
+  const bi = g.bag.findIndex((it: Item) => it.id === id && it.kind === "pet");
+  if (bi < 0) return "That pet is not in your bag.";
+  const pet = g.bag[bi];
+  const fee = mineAssignPrice(g, pet);
+  if (fee > 0 && g.gold < fee) return "Not enough gold. Need " + fmtg(fee) + ".";
+  let swapped: Item | null = null;
+  if (m.p.length >= m.sl) {
+    const lo = mineLowest(m);
+    if (!lo || mineQual(pet) <= mineQual(lo)) return "Crew full. Buy another slot, or send a better pet than your weakest worker.";
+    m.p.splice(m.p.indexOf(lo), 1);
+    swapped = lo;
+  }
+  g.bag.splice(bi, 1);
+  if (fee > 0) { g.gold -= fee; g.sfx("coin"); }
+  if (!m.p.length) m.t = Date.now();
+  m.p.push(pet);
+  if (swapped) mineReturnPet(g, swapped);
+  sortInventory(g);
+  saveGame(g, true);
+  g.notify();
+  const paid = fee > 0 ? " Paid " + fmtg(fee) + "." : " Free.";
+  return (swapped ? (pet.name + " replaced " + swapped.name + " (back in your bag).") : (pet.name + " grabs a pickaxe and joins the dig.")) + paid;
+}
+function mineDismiss(g: Game, id: number): string {
+  const m = g.mine;
+  if (!m) return "";
+  const i = m.p.findIndex((it: Item) => it.id === id);
+  if (i < 0) return "";
+  const [pet] = m.p.splice(i, 1);
+  mineReturnPet(g, pet);
+  saveGame(g, true);
+  g.notify();
+  return pet.name + " returns to your bag.";
+}
+function mineBuySlot(g: Game): string {
+  if (g.area !== "camp") return "The excavation is at camp.";
+  const m = mineOf(g);
+  const price = mineSlotPrice(m.sl + 1, mineDepth(g));
+  if (g.gold < price) return "Not enough gold. Need " + fmtg(price) + ".";
+  g.gold -= price;
+  m.sl++;
+  g.sfx("coin");
+  saveGame(g, true);
+  g.notify();
+  return "Dig slot " + m.sl + " opened for " + fmtg(price) + ".";
+}
+function mineHasLoot(g: Game): boolean { const m = g.mine; return !!m && (m.box.length > 0 || m.gd > 0 || m.nk.length > 0); }
+function mineOpenChest(g: Game): string {
+  const m = g.mine;
+  if (!m || !mineHasLoot(g)) return "The excavation chest is empty. Your crew digs while you are away.";
+  const items = m.box.slice(), gold = Math.floor(m.gd), nks = m.nk.slice();
+  m.box = []; m.gd = 0; m.nk = []; m.h = 0; m.ov = 0;
+  const sfx = g.sfx;
+  let best = -1;
+  g.sfx = () => undefined;
+  try {
+    for (const it of items) { best = Math.max(best, it.rar); takePickedItem(g, it, g.hero.x, g.hero.y); }
+    g.gold += gold;
+    for (const i of nks) nkTake(g, { i, k: nkKey(g), x: g.hero.x, y: g.hero.y, t: 0 });
+  } finally { g.sfx = sfx; }
+  sortInventory(g);
+  g.sfx("chest"); if (gold > 0) g.sfx("coin");
+  const sub = items.length + " finds" + (gold ? " + " + fmtg(gold) : "") + (nks.length ? " + " + nks.length + " necklace" + (nks.length > 1 ? "s" : "") : "") + (best >= 0 ? " \u00b7 best: " + RT[best] : "");
+  if (!nks.length) setBanner(g, "EXCAVATION CHEST", sub, best >= 0 ? RC[best] : GOLD, Math.max(1, best), 3.2);
+  msg(g, "Excavation chest: " + sub + ".", "#ffc870");
+  burst(g, MINE_CHEST.x * TS + 12, MINE_CHEST.y * TS + 12, 60, [GOLD, "#ffffff", best >= 0 ? RC[best] : GOLD], 110, 40);
+  saveGame(g, true);
+  g.notify();
+  return "Opened the excavation chest: " + sub + ".";
+}
+function mineHit(g: Game, x: number, y: number): "cave" | "rack" | "chest" | "" {
+  if (g.area !== "camp") return "";
+  if (x >= MINE_CAVE.x && x < MINE_CAVE.x + MINE_CAVE.w && y >= MINE_CAVE.y && y < MINE_CAVE.y + MINE_CAVE.h) return "cave";
+  if (x === MINE_RACK.x && y === MINE_RACK.y) return "rack";
+  if (x === MINE_CHEST.x && y === MINE_CHEST.y) return "chest";
+  return "";
+}
+function mineBump(g: Game, x: number, y: number): boolean {
+  const k = mineHit(g, x, y);
+  if (!k) return false;
+  if (k === "chest" && mineHasLoot(g)) { MINE_NOTE = mineOpenChest(g); g.mineOpen = true; g.notify(); return true; }
+  g.mineOpen = true;
+  g.sfx("chest");
+  g.notify();
+  return true;
+}
+function drawPickaxe(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number): void {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = "#8a5a2a"; ctx.fillRect(-0.5, -9, 2, 9);
+  ctx.fillStyle = "#c8ccd4"; ctx.fillRect(-4, -10, 9, 2); ctx.fillRect(-5, -9, 2, 2); ctx.fillRect(4, -9, 2, 2);
+  ctx.restore();
+}
+function drawMine(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  if (g.area !== "camp") return;
+  const m = g.mine;
+  const cx0 = MINE_CAVE.x * TS - camX, cy0 = MINE_CAVE.y * TS - camY, cw = MINE_CAVE.w * TS, ch = MINE_CAVE.h * TS;
+  // cave: rock mound with a big dark opening and a timber frame
+  ctx.fillStyle = "#3a3430"; ctx.fillRect(cx0, cy0, cw, ch);
+  ctx.fillStyle = "#52483f";
+  for (let i = 0; i < 9; i++) { const rx = cx0 + ((i * 37) % (cw - 8)), ry = cy0 + ((i * 23) % (ch - 10)); ctx.fillRect(rx, ry, 8 + (i % 3) * 3, 6 + (i % 2) * 3); }
+  const hx = cx0 + cw / 2, hy = cy0 + ch * 0.62;
+  ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.ellipse(hx, hy, cw * 0.36, ch * 0.42, 0, Math.PI, 0); ctx.lineTo(hx + cw * 0.36, cy0 + ch); ctx.lineTo(hx - cw * 0.36, cy0 + ch); ctx.closePath(); ctx.fill();
+  const glow = ctx.createRadialGradient(hx, hy, 2, hx, hy, cw * 0.34);
+  glow.addColorStop(0, "rgba(255,170,60," + (0.18 + 0.06 * Math.sin(t * 2.3)).toFixed(3) + ")"); glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.ellipse(hx, hy + 6, cw * 0.34, ch * 0.4, 0, 0, 6.283); ctx.fill();
+  ctx.fillStyle = "#7a5228"; ctx.fillRect(hx - cw * 0.4, cy0 + 6, 4, ch - 6); ctx.fillRect(hx + cw * 0.4 - 4, cy0 + 6, 4, ch - 6); ctx.fillRect(hx - cw * 0.42, cy0 + 4, cw * 0.84, 4);
+  ctx.fillStyle = "#a07038"; ctx.fillRect(hx - cw * 0.42, cy0 + 4, cw * 0.84, 1);
+  // rails leading out of the cave toward the chest
+  ctx.fillStyle = "#5a5048"; for (let k = 0; k < 4; k++) ctx.fillRect(hx - 8, cy0 + ch + k * 6, 16, 2);
+  ctx.fillStyle = "#8c8c94"; ctx.fillRect(hx - 6, cy0 + ch - 2, 1, 26); ctx.fillRect(hx + 5, cy0 + ch - 2, 1, 26);
+  // tool rack with spare pickaxes and a lantern
+  const rx = MINE_RACK.x * TS - camX, ry = MINE_RACK.y * TS - camY;
+  ctx.fillStyle = "#6a4420"; ctx.fillRect(rx + 3, ry + 4, 18, 3); ctx.fillRect(rx + 4, ry + 4, 2, 18); ctx.fillRect(rx + 18, ry + 4, 2, 18);
+  drawPickaxe(ctx, rx + 9, ry + 21, -0.15); drawPickaxe(ctx, rx + 15, ry + 21, 0.2);
+  ctx.fillStyle = "rgba(255,200,90," + (0.5 + 0.3 * Math.sin(t * 6)).toFixed(3) + ")"; ctx.fillRect(rx + 10, ry, 4, 4);
+  // the loot chest beside the dig site
+  const kx = MINE_CHEST.x * TS - camX, ky = MINE_CHEST.y * TS - camY;
+  const full = !!m && (m.box.length > 0 || m.gd > 0 || m.nk.length > 0);
+  let best = 0; if (m) for (const it of m.box) best = Math.max(best, it.rar);
+  const crar = Math.min(4, Math.floor(best * 4 / 7));
+  if (full) chestAuraFx(ctx, kx + 12, ky + 13, 20, crar, t, 5);
+  drawChestSized(ctx, kx + 12, ky + 14, 22, crar, !full, t);
+  if (m && full) {
+    const fill = Math.min(1, m.box.length / MINE_BOX_MAX);
+    for (let i = 0; i < 3 + Math.round(fill * 5); i++) { const ph = (t * 1.7 + i * 0.37) % 1; if (ph < 0.4) { ctx.fillStyle = i % 2 ? GOLD : "#ffffff"; ctx.fillRect(kx + 4 + ((i * 7) % 16), ky + 2 - ph * 10, 2, 2); } }
+    const h = g.hero;
+    if (Math.abs(h.x - MINE_CHEST.x) + Math.abs(h.y - MINE_CHEST.y) <= 2) { ctx.font = "bold 6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#000"; ctx.fillText((m.box.length + m.nk.length) + " finds", kx + 13, ky - 3); ctx.fillStyle = GOLD; ctx.fillText((m.box.length + m.nk.length) + " finds", kx + 12, ky - 4); }
+  }
+  // workers: walk out of the cave to the chest with a find, then back in; others swing pickaxes at the cave wall
+  if (!m || !m.p.length) {
+    ctx.font = "bold 6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#c8b090"; ctx.fillText("EXCAVATION", hx, cy0 - 2);
+    return;
+  }
+  const show = Math.min(m.p.length, 12);
+  const sx0 = hx, sy0 = cy0 + ch - 6, sx1 = kx + 2, sy1 = ky + 6;
+  for (let i = 0; i < show; i++) {
+    const pet = m.p[i];
+    if (pet.pt === undefined) continue;
+    const spr = petCanvas(pet.pt);
+    const per = 5 + (i % 4) * 0.9, ph = ((t + i * 1.37) / per) % 1;
+    if (i % 3 === 2) { // digger at the mouth
+      const dx = hx + (i % 2 ? 1 : -1) * (cw * 0.26 - (i % 5)), dy = cy0 + ch - 14 + (i % 4);
+      const sw = Math.sin(t * 7 + i) * 0.7;
+      ctx.drawImage(spr, Math.round(dx - 8), Math.round(dy - 8));
+      drawPickaxe(ctx, dx + (i % 2 ? -5 : 5), dy, (i % 2 ? -0.6 : 0.6) + sw);
+      if (Math.sin(t * 7 + i) > 0.92) { ctx.fillStyle = "#e8d0a0"; ctx.fillRect(dx + (i % 2 ? -10 : 9), dy - 6, 2, 2); }
+      continue;
+    }
+    // 0..0.15 inside (hidden), 0.15..0.5 walk out, 0.5..0.6 at chest, 0.6..0.95 walk back, 0.95..1 inside
+    let k: number, carry = false, alpha = 1;
+    if (ph < 0.15 || ph >= 0.95) { alpha = 0; k = 0; }
+    else if (ph < 0.5) { k = (ph - 0.15) / 0.35; carry = true; }
+    else if (ph < 0.6) { k = 1; }
+    else { k = 1 - (ph - 0.6) / 0.35; }
+    if (alpha <= 0) continue;
+    const lane = ((i % 4) - 1.5) * 5;
+    const px = sx0 + (sx1 - sx0) * k + lane, py = sy0 + (sy1 - sy0) * k + Math.abs(Math.sin(ph * 40)) * -1.5;
+    ctx.globalAlpha = k < 0.08 ? Math.max(0.15, k / 0.08) : 1;
+    const flip = (ph >= 0.6) !== (sx1 < sx0);
+    ctx.save();
+    if (flip) { ctx.translate(Math.round(px + 8), Math.round(py - 8)); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0); }
+    else ctx.drawImage(spr, Math.round(px - 8), Math.round(py - 8));
+    ctx.restore();
+    if (carry) { ctx.fillStyle = RC[Math.max(0, Math.min(7, pet.rar))]; ctx.fillRect(Math.round(px - 2), Math.round(py - 13), 4, 4); ctx.fillStyle = "#ffffff"; ctx.fillRect(Math.round(px - 1), Math.round(py - 13), 1, 1); }
+    else drawPickaxe(ctx, px + 6, py + 2, 0.9);
+    ctx.globalAlpha = 1;
+  }
+  if (m.p.length > show) { ctx.font = "bold 6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#000"; ctx.fillText("+" + (m.p.length - show) + " digging", hx + 1, cy0 - 1); ctx.fillStyle = "#ffd890"; ctx.fillText("+" + (m.p.length - show) + " digging", hx, cy0 - 2); }
+}
+function useMineBtn(): ReturnType<typeof mineBtnEl> { return mineBtnEl(); }
+function mineBtnEl() { return <span />; }
 function genCamp(g: Game): void {
   setMapSize(BASE_MAP);
   g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
@@ -8406,7 +8951,7 @@ function genCamp(g: Game): void {
   g.thShift = themeShift(g);
   g.tiles = makeTiles(g.theme, g.thShift);
   g.en = []; g.pend = []; g.chests = []; g.drops = []; g.shots = []; g.floats = []; g.ground = []; g.fx = []; g.echo = []; g.allies = [];
-  g.shopOpen = false; g.stashOpen = false; g.gambOpen = false; g.vault = null; g.gobT = 0; g.floorTurn = 0;
+  g.shopOpen = false; g.stashOpen = false; g.gambOpen = false; g.mineOpen = false; g.vault = null; g.gobT = 0; g.floorTurn = 0;
   const cx = 22, cy = 22;
   g.fireAt = { x: cx, y: cy };
   g.restAt = { x: cx - 5, y: cy };
@@ -8450,7 +8995,7 @@ function enterCamp(g: Game): void {
 }
 function leaveCamp(g: Game): void {
   if (g.area !== "camp") return;
-  g.shopOpen = false; g.stashOpen = false; g.gambOpen = false; g.gambler = null; g.merchant = null;
+  g.shopOpen = false; g.stashOpen = false; g.gambOpen = false; g.mineOpen = false; g.gambler = null; g.merchant = null;
   g.actCampAt = 0;
   const nxt = (g.actCleared && g.actCleared > 0 ? g.actCleared : g.depth) + 1;
   peakStretchStart(g, nxt);
@@ -9384,6 +9929,8 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     pks: g.pkShow ?? null,
     bpm: g.bpm ?? null,
     nk: nkPackSt(g),
+    mn: minePack(g),
+    mr: mrPack(g),
   };
 }
 
@@ -9704,6 +10251,8 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.arts = unpackArts(s.afx); g.shrUsedD = typeof s.sud === "number" && isFinite(s.sud) ? Math.floor(s.sud) : 0;
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
     g.bkd = cleanBkd(s.bkd);
+    g.mine = mineUnpack(s.mn);
+    g.mr = mrUnpack(s.mr);
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
     g.bpm = cleanBpm(s.bpm); // before the floor is restored, so respawned bosses reuse their rolls
     g.snapPrev = unpackFloorSnap(s.fp);
@@ -10192,6 +10741,7 @@ function dropBurstPlan(rar: number, isSet: boolean, isGolden: boolean = false): 
 }
 function announceDrop(g: Game, it: Item, x: number, y: number): void {
   if (!it) return;
+  mrOnDrop(g, it);
   if (onItemDropped) onItemDropped(it);
   if (shouldPlayDropSfx(g.muted, it)) g.sfx("loot", lootSfxCode(it));
   const plan = dropBurstPlan(it.rar, isDropSet(it), !!it.golden);
@@ -10604,6 +11154,7 @@ function gainXp(g: Game, n: number): void {
 function kill(g: Game, e: En): void {
   const prevQ = LOOT_Q;
   LOOT_Q = lootBonusMult(g);
+  try { mrOnKill(g, e); } catch { /* tracking never blocks a kill */ }
   try { killLoot(g, e); } finally { LOOT_Q = prevQ; }
 }
 function killLoot(g: Game, e: En): void {
@@ -15886,6 +16437,7 @@ function openChest(g: Game, c: Chest): void {
   }
   c.open = true;
   nkOnChest(g, c);
+  mrOnChest(g, c);
   const cr = Math.max(0, Math.min(4, c.rar | 0));
   const col = RC[cr];
   g.sfx("chest", cr);
@@ -18961,6 +19513,7 @@ function act(g: Game, dx: number, dy: number): void {
   if (shrineHit(g, nx, ny)) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; if (g.shrine.used) msg(g, "The shrine is cracked and silent - its power is spent.", "#a09090"); else if (!g.swarm) startSwarm(g); g.notify(); return; }
   if (g.artCave && !g.artCave.taken && g.artCave.cx === nx && g.artCave.cy === ny) { h.bump = 0.6; h.bdx = dx; h.bdy = dy; discoverArtifact(g); g.notify(); return; }
   if (trophyHit(g, nx, ny)) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; g.trophyOpen = true; g.notify(); return; }
+  if (mineHit(g, nx, ny)) { h.bump = 0.5; h.bdx = dx; h.bdy = dy; mineBump(g, nx, ny); return; }
   if (g.fireAt && g.fireAt.x === nx && g.fireAt.y === ny) { h.bump = 0.4; h.bdx = dx; h.bdy = dy; msg(g, "The campfire warms you.", "#ffb040"); g.notify(); return; }
   const px = h.x, py = h.y;
   h.x = nx; h.y = ny;
@@ -24182,9 +24735,11 @@ export default function App() {
       RC[7] = "hsl(" + Math.floor((g.time * 140) % 360) + ",100%,62%)";
       g.toast = Math.max(0, g.toast - dt);
       if (g.lootToast) g.lootToast = Math.max(0, g.lootToast - dt);
-      const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
+      if (g.mode !== "title" && !(typeof document !== "undefined" && document.hidden)) mineTick(g, Date.now());
+      const paused = invRef.current || g.shopOpen || g.stashOpen || g.gambOpen || g.mineOpen || quitRef.current || pauseRef.current || (typeof document !== "undefined" && document.hidden);
       FRAME_VDT = (g.mode !== "title" && !paused) ? dt : 0;
       if (g.para) dt *= paraTick(g, paused ? 0 : dt); // Paramount: real-time timeline, slowed game time until detonation
+      mrTick(g, paused ? 0 : dt);
       if (g.mode === "play" && !paused) { g.saveT += dt; if (g.saveT >= 60) saveGame(g); }
       if (g.mode === "play" && !paused) { gobTick(g, dt); g.rt = true; rtUpdate(g, dt); portalFxTick(g, dt); }
       if (g.portal && portalVis(g, g.vis) && Math.random() < 0.3) {
@@ -24326,6 +24881,7 @@ export default function App() {
         drawTrophyCase(ctx, 0, 0, t, artsOf(g).length);
         ctx.restore();
       }
+      drawMine(ctx, g, camX, camY, t);
       for (const dr of g.drops) {
         if (!g.vis[dr.y * MW + dr.x]) continue;
         const sx = dr.x * TS - camX, sy = dr.y * TS - camY;
@@ -25340,6 +25896,68 @@ export default function App() {
               </div>
             );
           })()}
+          {g && g.mineOpen && (() => {
+            const m = mineOf(g);
+            const close = (): void => { g.mineOpen = false; MINE_NOTE = ""; bump(); };
+            const d = mineDepth(g);
+            const price = mineSlotPrice(m.sl + 1, d);
+            const share = mineCrewFrac(m.p.length);
+            const rate = mineRate(g);
+            const fph = Math.round(rate.per[MR_FLOOR] * 3600 * 10) / 10, kph = Math.round((rate.per[MR_NORM] + rate.per[MR_RARE] + rate.per[MR_ELITE] + rate.per[MR_SE] + rate.per[MR_UE]) * 3600);
+            const lo = mineLowest(m);
+            const full = m.p.length >= m.sl;
+            const bagPets = mineBagPets(g).slice().sort((a: Item, b: Item) => mineQual(b) - mineQual(a));
+            const do_ = (s: string): void => { MINE_NOTE = s; bump(); };
+            const has = mineHasLoot(g);
+            const petRow = (it: Item, right: ReturnType<typeof useMineBtn>) => (
+              <div key={"mp" + it.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: "1px solid #2a2634" }}>
+                <img src={iconURL(it, false)} width={28} height={28} alt="" style={{ imageRendering: "pixelated" }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: RC[it.rar], fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                  <div className="dc-sm">{RT[it.rar] + (petStars(it) ? " \u2605" + petStars(it) : "") + " \u00b7 finds center on " + RT[it.rar]}</div>
+                </div>
+                {right}
+              </div>
+            );
+            return (
+              <div className="dc-shopw" onPointerDown={(ev: { target: unknown; currentTarget: unknown }) => { if (ev.target === ev.currentTarget) close(); }} role="dialog" aria-modal="true" aria-label="Pet excavation">
+                <div className="dc-inv dc-shop" onPointerDown={(ev: { stopPropagation: () => void }) => ev.stopPropagation()}>
+                  <div className="dc-shop-hd">
+                    <div>
+                      <b style={{ fontSize: 14 }}>{"\u26cf Pet Excavation"}</b>
+                      <div className="dc-shop-gold">{"Crew " + m.p.length + " / " + m.sl + " slots \u00b7 Gold: " + fmtg(g.gold)}</div>
+                    </div>
+                    <button className="dc-leave" onClick={close} aria-label="Close excavation">{"\u2715 Close"}</button>
+                  </div>
+                  <div className="dc-shop-bd">
+                    <div className="dc-sm">{"Pets you put to work dig while you are away (closed game or hidden tab, up to " + MINE_CAP_HOURS + " h per absence). Each pet brings back 20% of what you would find playing that long at your own pace, up to 100% for the crew (5 pets fill it; more pets help only by being rarer). Each pet leans toward finds of its own rarity, but the crew never finds more of any rarity than real play would. Their chest sits by the cave. Hiring costs gold: more for deeper camps, rarer pets and every pet already digging. Swapping a better pet in for your weakest worker costs only the difference; recalling is free."}</div>
+                    <div className="dc-sm" style={{ marginTop: 4, color: "#ffd890" }}>{"Crew share: " + Math.round(share * 100) + "% of your natural haul (" + Math.round(MINE_PER_PET_SHARE * 100) + "% per pet, never more than 100%)" + (m.a > 0 ? " \u00b7 last absence " + mineHrsLabel(m.a) : "")}</div>
+                    <div className="dc-sm" style={{ color: "#b8a888" }}>{"Your pace: ~" + fph + " floors and ~" + kph + " kills per hour at depth " + rate.depth + (rate.sec >= 60 ? " (measured over " + mineHrsLabel(rate.sec / 3600) + " of play)" : " (default pace until you play a while)")}</div>
+                    {MINE_NOTE && <div style={{ color: "#ffd080", margin: "6px 0" }}>{MINE_NOTE}</div>}
+                    <div className="dc-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
+                      <button className="dc-b go" style={{ ...btn, minHeight: 40 }} disabled={!has} onClick={() => do_(mineOpenChest(g))}>{has ? "Open chest (" + (m.box.length + m.nk.length) + " finds, " + fmtg(m.gd) + ")" : "Chest empty"}</button>
+                      <button className="dc-b" style={{ ...btn, minHeight: 40 }} disabled={g.gold < price} onClick={() => do_(mineBuySlot(g))}>{"+1 dig slot \u00b7 " + fmtg(price)}</button>
+                    </div>
+                    <div className="dc-sm" style={{ marginTop: 8 }}><b>{"Working (" + m.p.length + ")"}</b></div>
+                    {m.p.length === 0 && <div className="dc-sm">No pets are digging yet. Send one from your bag below.</div>}
+                    {m.p.slice().sort((a: Item, b: Item) => mineQual(b) - mineQual(a)).map((it: Item) => petRow(it, <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11 }} onClick={() => do_(mineDismiss(g, it.id))}>Recall</button>))}
+                    <div className="dc-sm" style={{ marginTop: 8 }}><b>{"Pets in your bag (" + bagPets.length + ")"}</b></div>
+                    {bagPets.length === 0 && <div className="dc-sm">No spare pets. Your equipped pet stays with you.</div>}
+                    {bagPets.map((it: Item) => {
+                      const canSwap = full && !!lo && mineQual(it) > mineQual(lo);
+                      const fee = mineAssignPrice(g, it);
+                      const feeLab = fee > 0 ? " \u00b7 " + fmtg(fee) : fee === 0 ? " \u00b7 free" : "";
+                      const lab = (!full ? "Hire" : canSwap ? "Replace " + RT[(lo as Item).rar] : "Crew full") + feeLab;
+                      return petRow(it, <button className="dc-b go" style={{ ...btn, minHeight: 32, fontSize: 11 }} disabled={(full && !canSwap) || (fee > 0 && g.gold < fee)} onClick={() => do_(mineAssign(g, it.id))}>{lab}</button>);
+                    })}
+                  </div>
+                  <div className="dc-shop-ft">
+                    <button className="dc-leave dc-leave-wide" onClick={close}>Close</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {g && g.trophyOpen && (() => {
             const own = new Set(artsOf(g));
             const close = (): void => { g.trophyOpen = false; bump(); };
@@ -25771,3 +26389,142 @@ const NK_ICONS: string[] = [
   "data:image/png;base64,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",
   "data:image/png;base64,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"
 ];
+// ---------- excavation test hook (headless tests only; never touches the player's saves: GIB_SKIP_SAVE while it runs) ----------
+let MINE_G: Game | null = null;
+function mineHk<T>(fn: () => T): T { const prev = GIB_SKIP_SAVE; GIB_SKIP_SAVE = true; try { return fn(); } finally { GIB_SKIP_SAVE = prev; } }
+function mineState(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false };
+  const m = g.mine;
+  const rc = [0, 0, 0, 0, 0, 0, 0, 0], gc = [0, 0, 0, 0, 0, 0, 0, 0];
+  let pris5 = 0;
+  if (m) for (const it of m.box) { if (it.kind === "gem") gc[it.rar]++; else { rc[it.rar]++; if (it.rar === 7 && starCount(it) >= 5) pris5++; } }
+  return {
+    ok: true, area: g.area, depth: g.depth, gold: g.gold, bagPets: mineBagPets(g).length, bagN: g.bag.length,
+    mine: m ? { crew: m.p.length, slots: m.sl, t: m.t, q: m.q.slice(), box: m.box.length, gearRar: rc, gemRar: gc, pris5, gd: m.gd, nk: m.nk.slice(), h: m.h, a: m.a, ov: m.ov, rb: m.rb, crewRar: m.p.map((p: Item) => p.rar), crewIds: m.p.map((p: Item) => p.id) } : null,
+    open: !!g.mineOpen, owned: ownsPrismatic(g), nkOwn: g.nk ? g.nk.own.slice() : null,
+  };
+}
+try {
+  (window as unknown as { __ED16_MINE?: object }).__ED16_MINE = {
+    consts: (): Record<string, unknown> => ({ MINE_FREE_SLOTS, MINE_ANCHOR_DEPTH, MINE_ANCHOR_GOLD, MINE_ANCHOR_SLOT, MINE_SLOT_SHARE, MINE_GROWTH, MINE_RAR_MULT, MINE_FREE_HIRE_DEPTH, MINE_PRICE_MIN, MINE_PER_PET_SHARE, MINE_CREW_CAP, MINE_CAP_HOURS, MINE_AWAY_MIN_SEC, MINE_ROLLBACK_TOL_SEC, MINE_BOX_MAX, MINE_TIER_DOWN, MINE_TIER_UP, MINE_RATE_TAU_H, MINE_PRIOR_SEC, MINE_FLOORS_PER_HOUR, MINE_CAVE, MINE_RACK, MINE_CHEST }),
+    crewFrac: (n: number): number => mineCrewFrac(n),
+    // a game from a Save Code (a copy of a real save) or a fresh one; parked at camp with the given carried gold
+    setup: (code?: string, opts?: { depth?: number; gold?: number; live?: boolean }): Record<string, unknown> => mineHk(() => {
+      let g = code ? decodeCode(code, null) : newGame(null);
+      if (!g) return { ok: false, error: "decode failed" };
+      g.mode = "play"; g.paused = false;
+      if (opts && opts.depth) { g.depth = opts.depth; g.front = Math.max(g.front ?? 1, opts.depth); }
+      if (opts && typeof opts.gold === "number") g.gold = opts.gold;
+      g.area = "camp"; genCamp(g);
+      MINE_G = g;
+      if (opts && opts.live && installTestGame) { PRIS_TEST_G = g; STAT_G = g; installTestGame(g); }
+      return mineState(g);
+    }),
+    state: (): Record<string, unknown> => mineState(MINE_G),
+    addPets: (n: number, rar: number, stars = 0): number[] => mineHk(() => {
+      const g = MINE_G; if (!g) return [];
+      const ids: number[] = [];
+      for (let i = 0; i < n; i++) { const p = makePet(mineDepth(g), rar, mineDepth(g)); if (stars > 0) forceStars(p, Math.min(stars, starMax(rar, false) || stars)); else delete p.st; g.bag.push(p); ids.push(p.id); }
+      syncBagCaps(g);
+      return ids;
+    }),
+    assign: (id: number): string => mineHk(() => (MINE_G ? mineAssign(MINE_G, id) : "")),
+    dismiss: (id: number): string => mineHk(() => (MINE_G ? mineDismiss(MINE_G, id) : "")),
+    buySlot: (): string => mineHk(() => (MINE_G ? mineBuySlot(MINE_G) : "")),
+    incomeHr: (d: number): number => mineIncomeHr(d),
+    hirePrice: (d: number, n: number, rar: number, stars?: number): number => mineHirePrice(d, n, rar, stars ?? 0),
+    assignPrice: (id: number): number => { const g = MINE_G; if (!g) return -2; const it = g.bag.find((x: Item) => x.id === id); return it ? mineAssignPrice(g, it) : -2; },
+    priceTable: (): Record<string, unknown> => { const rows: unknown[] = []; const D = [1, 25, 50, 100, MINE_ANCHOR_DEPTH, 300, 500]; for (const d of D) for (const n of [1, 5, 10, 15, 20, 25, 30]) rows.push({ d, slot: n, slotFee: mineSlotPrice(n, d), hire: MINE_RAR_MULT.map((_: number, r: number) => mineHirePrice(d, n - 1, r, 0)) }); return { rows, income: D.map((d: number) => ({ d, incomeHr: mineIncomeHr(d), anchor: mineSlotPrice(20, d) + mineHirePrice(d, 19, 7) })) }; },
+    price: (n: number, d?: number): number => mineSlotPrice(n, d ?? (MINE_G ? mineDepth(MINE_G) : 1)),
+    credit: (hours: number): Record<string, unknown> => mineHk(() => (MINE_G ? mineCredit(MINE_G, hours) : {})),
+    // drive the real per-frame timer: last-seen = t0, then a frame at t1
+    tick: (t0: number, t1: number): Record<string, unknown> => mineHk(() => { const g = MINE_G; if (!g) return {}; mineOf(g).t = t0; mineTick(g, t1); return mineState(g); }),
+    clearBoxKeepCarry: (): void => { const m = MINE_G && MINE_G.mine; if (m) { m.box = []; m.gd = 0; m.nk = []; } },
+    clearBox: (): void => { const m = MINE_G && MINE_G.mine; if (m) { m.box = []; m.gd = 0; m.nk = []; m.q = [0, 0]; m.h = 0; m.ov = 0; } },
+    openChest: (): Record<string, unknown> => mineHk(() => { const g = MINE_G; if (!g) return {}; const before = { bag: g.bag.length + ensureGemBag(g).length, gold: g.gold }; const note = mineOpenChest(g); return { note, before, after: { bag: g.bag.length + ensureGemBag(g).length, gold: g.gold }, state: mineState(g) }; }),
+    odds: (rar: number, stars = 0): number[] => { const p = makePet(100, rar, 100); if (stars) forceStars(p, stars); else delete p.st; return mineTierW(p); },
+    // the budget split for a crew of the given pet tiers against a natural per-tier vector
+    allocate: (rars: number[], natural: number[], frac?: number): Record<string, unknown> => {
+      const pets = rars.map((r: number) => { const p = makePet(100, r, 100); delete p.st; return p; });
+      return mineAllocate(pets, natural, frac ?? mineCrewFrac(pets.length));
+    },
+    natural: (hours: number): Record<string, unknown> => (MINE_G ? mineNatural(MINE_G, hours) : {}),
+    rate: (): Record<string, unknown> => { const g = MINE_G; if (!g) return {}; const r = mineRate(g); return { perHour: r.per.map((v: number, i: number) => (i === MR_DEPTH ? v : v * 3600)), depth: r.depth, sec: r.sec, raw: g.mr ? { s: g.mr.s, c: g.mr.c.slice() } : null }; },
+    resetRate: (): void => { if (MINE_G) MINE_G.mr = undefined; },
+    econ: (d: number): Record<string, unknown> => { const g = MINE_G; if (!g) return {}; const od = g.depth, of = g.front, omr = g.mr; g.depth = d; g.front = Math.max(of ?? 1, d); g.mr = undefined; const n = mineNatural(g, 1); g.depth = od; g.front = of; g.mr = omr; return { d, ci: campIntervalGold(d), goldPerHour: n.gold, gearPerHour: n.gear.reduce((x: number, y: number) => x + y, 0) }; },
+    // a real play session through the live paths: mrTick each second, real kill() / openChest() calls, depth steps
+    trackSession: (o: { secs: number; normal?: number; elite?: number; chests?: number; floors?: number; lairs?: number }): Record<string, unknown> => mineHk(() => {
+      const g = MINE_G; if (!g) return {};
+      const camp = { area: g.area, depth: g.depth };
+      g.area = "dungeon"; genFloor(g); g.en = [];
+      const n = Math.max(1, Math.floor(o.secs));
+      const ev: string[] = [];
+      for (let i = 0; i < (o.normal ?? 0); i++) ev.push("n");
+      for (let i = 0; i < (o.elite ?? 0); i++) ev.push("e");
+      for (let i = 0; i < (o.chests ?? 0); i++) ev.push("c");
+      for (let i = 0; i < (o.floors ?? 0); i++) ev.push("f");
+      for (let i = 0; i < (o.lairs ?? 0); i++) ev.push("b");
+      const every = Math.max(1, Math.floor(n / Math.max(1, ev.length)));
+      const sfx = g.sfx; g.sfx = () => undefined;
+      try {
+        let k = 0;
+        for (let t = 0; t < n; t++) {
+          mrTick(g, 1);
+          if (t % every === 0 && k < ev.length) {
+            const kind = ev[k++];
+            const x = g.hero.x + 1, y = g.hero.y;
+            if (kind === "f") { g.depth++; }
+            else if (kind === "c") openChest(g, { x, y, open: false, rar: 0 });
+            else {
+              const e = mkEnemy(g, x, y, kind === "e" ? 1 : kind === "b" ? 2 : 0);
+              if (kind === "n") { e.rare = 0; e.se = 0; e.ue = 0; }
+              e.packId = 900000 + k; g.en.push(e); e.hp = 0; kill(g, e); g.en = g.en.filter((q: En) => q !== e);
+            }
+            g.drops = [];
+          }
+        }
+        mrTick(g, 1);
+      } finally { g.sfx = sfx; }
+      g.area = camp.area; g.depth = camp.depth; genCamp(g);
+      const r = mineRate(g);
+      return { raw: g.mr ? { s: g.mr.s, c: g.mr.c.slice() } : null, perHour: r.per.map((v: number, i: number) => (i === MR_DEPTH ? v : v * 3600)), depth: r.depth };
+    }),
+    sampleFinds: (tier: number, gem: boolean, n: number, d: number, luck = 1): Record<string, unknown> => {
+      const prev = STAR_LUCK; STAR_LUCK = luck;
+      const stars: Record<string, number> = {}, kinds: Record<string, number> = {};
+      let golden = 0, set = 0;
+      try { for (let i = 0; i < n; i++) { const it = mineMakeFind(gem, tier, d); const k = String(starCount(it)); stars[k] = (stars[k] ?? 0) + 1; kinds[it.kind] = (kinds[it.kind] ?? 0) + 1; if (it.golden) golden++; if (it.set !== undefined) set++; } } finally { STAR_LUCK = prev; }
+      return { stars, kinds, golden, set };
+    },
+    setPrisBoost: (k: number): void => { MINE_TEST_PRIS = k; },
+    giveNk: (i: number): void => { const m = MINE_G && MINE_G.mine; if (m) m.nk.push(i); },
+    roundTrip: (): Record<string, unknown> => mineHk(() => {
+      const g = MINE_G; if (!g) return {};
+      // what the excavation itself owns: crew, slots, timer, carries, chest contents (tier/kind), gold, necklaces, tracker
+      const sig = (x: Game | null): string => { if (!x) return "null"; const m = x.mine; return JSON.stringify([m ? [m.p.map((it: Item) => [it.id === 0 ? 0 : it.rar, it.kind, it.pt, it.seed]), m.sl, Math.round(m.t), m.q.map((v: number) => Math.round(v * 1e6)), m.box.map((it: Item) => [it.rar, it.kind, it.seed, starCount(it)]), Math.floor(m.gd), m.nk, Math.round(m.h * 1e4), Math.round(m.a * 1e4)] : null, mrPack(x) ?? null]); };
+      const a = sig(g);
+      const code = makeCode(g);
+      const g2 = decodeCode(code, null);
+      const b = sig(g2);
+      const g3 = g2 ? decodeCode(makeCode(g2), null) : null; // a second save/load changes nothing more
+      const c = sig(g3);
+      const body = JSON.parse(lzd(code.replace(/^ED2-/, "")) || "{}") as Record<string, unknown>;
+      delete body.mn; delete body.mr;
+      const g4 = decodeCode("ED2-" + lzc(JSON.stringify(body)), null);
+      return { same: a === b, stable: b === c, len: code.length, sigLen: a.length, g2: !!g2, oldOk: !!g4, oldMine: g4 ? (g4.mine ?? null) : "fail", oldMr: g4 ? (g4.mr ?? null) : "fail", crew2: g2 && g2.mine ? g2.mine.p.length : -1, box2: g2 && g2.mine ? g2.mine.box.length : -1, mr2: g2 && g2.mr ? Math.round(g2.mr.s) : -1 };
+    }),
+    // bump into a mine tile through act() (hero placed next to it)
+    bump: (what: "cave" | "rack" | "chest"): Record<string, unknown> => mineHk(() => {
+      const g = MINE_G; if (!g) return {};
+      g.mineOpen = false;
+      const tgt = what === "chest" ? MINE_CHEST : what === "rack" ? MINE_RACK : { x: MINE_CAVE.x + 1, y: MINE_CAVE.y + MINE_CAVE.h - 1 };
+      g.hero.x = g.hero.ax = tgt.x; g.hero.y = g.hero.ay = tgt.y + 1; g.rt = false; g.pcd = 0;
+      act(g, 0, -1);
+      return { open: !!g.mineOpen, hero: [g.hero.x, g.hero.y], blocked: campBlocked(g, tgt.x, tgt.y), state: mineState(g) };
+    }),
+    close: (): void => { if (MINE_G) { MINE_G.mineOpen = false; MINE_G.notify(); } },
+    openPanel: (): void => { if (MINE_G) { MINE_G.mineOpen = true; MINE_G.notify(); } },
+    heroTo: (x: number, y: number): void => { const g = MINE_G; if (g) { g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); g.banner = null; } },
+    end: (): void => { MINE_G = null; MINE_TEST_PRIS = 1; },
+  };
+} catch { /* ignore */ }
