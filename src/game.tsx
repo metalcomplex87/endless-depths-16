@@ -11353,7 +11353,7 @@ const NK: NkDef[] = [
   { key: "storm-crown", n: "Storm Crown", c: "#3a78ff", c2: "#b8d4ff", off: true, d: "Every 3rd attack calls lightning that chains to up to 6 enemies for 100% weapon damage each." },
   { key: "grave-toll", n: "Grave Toll", c: "#a456ff", c2: "#e0c8ff", off: true, d: "Enemies you kill rise as ghosts for 15 s and fight for you at 40% of your damage (max 5)." },
   { key: "phalanx-of-the-dead", n: "Phalanx of the Dead", c: "#a8e830", c2: "#e8ffb8", off: true, d: "Six sword skeletons fight around you at 8% of your damage each; +5% per kill (max +50%) on this floor. A broken skeleton rebuilds in 4 s; if all six break they burst into bone shards. They do not block." },
-  { key: "echo-self", n: "Echo Self", c: "#f4f0e8", c2: "#b8e8ff", off: true, d: "A ghostly copy of you repeats every attack (and its spells) 1 s later at 50% damage." },
+  { key: "echo-self", n: "Echo Self", c: "#f4f0e8", c2: "#b8e8ff", off: true, d: "A ghostly teal copy trails your moves and repeats every attack (and its spells) 1 s later at 50% damage." },
   { key: "neon-skyfall", n: "Neon Skyfall", c: "#ffd21f", c2: "#ff40ff", off: true, d: "While you move, ceiling lasers strike random enemies within 5 tiles twice per second for 25% weapon damage; scorch marks burn for 10% per second for 3 s." },
   { key: "second-heartbeat", n: "Second Heartbeat", c: "#ff2a48", c2: "#ffb8c0", off: false, d: "On a lethal hit you split into two of you at half HP each, both at full damage. You only die if both fall; after 10 s the survivor is whole again. 3 min cooldown." },
   { key: "prism-guard", n: "Prism Guard", c: "#22e070", c2: "#c8ffe0", off: false, d: "A diamond shell blocks one full hit every 6 s, then fires a rainbow beam at the attacker for 200% weapon damage." },
@@ -11380,7 +11380,12 @@ interface NkSt { own: number[]; eq: number[]; pe: boolean; gd: NkGround[]; hbAt:
 interface NkGhost { x: number; y: number; t: number; cd: number }
 interface NkTwin { x: number; y: number; hp: number; t: number; cd: number; mv: number }
 interface NkScorch { x: number; y: number; t: number; c: string; acc: number }
-interface NkRt { atk: number; ghosts: NkGhost[]; sk: number[]; skCd: number; skKills: number; skKey: string; echo: { t: number; id: number; x: number; y: number }[]; las: number; mvT: number; lx: number; ly: number; scorch: NkScorch[]; twin: NkTwin | null; pgReady: number; echoShow: number; lasers: { x: number; y: number; t: number; c: string }[] }
+interface NkLaser { x: number; y: number; t: number; c: string; hit?: boolean }
+interface NkLaserMark { x: number; y: number; t: number; max: number; c: string; seed: number }
+interface NkRt { atk: number; ghosts: NkGhost[]; sk: number[]; skCd: number; skKills: number; skKey: string; echo: { t: number; id: number; x: number; y: number }[]; las: number; mvT: number; lx: number; ly: number; scorch: NkScorch[]; twin: NkTwin | null; pgReady: number; echoShow: number; lasers: NkLaser[]; lmark: NkLaserMark[] }
+// Neon Skyfall visuals: beams are 1.5x the original 16/6/2 widths. Impact decals fade over 2s, pooled at 16.
+const NK_LASER_GLOW_W = 24, NK_LASER_MID_W = 9, NK_LASER_CORE_W = 3;
+const NK_LASER_MARK_CAP = 16, NK_LASER_MARK_LIFE = 2, NK_LASER_LIFE = 0.32, NK_LASER_CHARGE = 0.08;
 let NK_SCALE = 1;           // damage scale while an Echo Self repeat is resolving
 let NK_ECHOING = false;
 let NK_ATTACKER: En | null = null;
@@ -11391,8 +11396,43 @@ function nkOf(g: Game): NkSt {
   return g.nk;
 }
 function nkRt(g: Game): NkRt {
-  if (!g.nkr) g.nkr = { atk: 0, ghosts: [], sk: [0, 0, 0, 0, 0, 0], skCd: 0, skKills: 0, skKey: "", echo: [], las: 0, mvT: 0, lx: g.hero.x, ly: g.hero.y, scorch: [], twin: null, pgReady: 0, echoShow: 0, lasers: [] };
+  if (!g.nkr) g.nkr = { atk: 0, ghosts: [], sk: [0, 0, 0, 0, 0, 0], skCd: 0, skKills: 0, skKey: "", echo: [], las: 0, mvT: 0, lx: g.hero.x, ly: g.hero.y, scorch: [], twin: null, pgReady: 0, echoShow: 0, lasers: [], lmark: [] };
+  if (!g.nkr.lmark) g.nkr.lmark = [];
   return g.nkr;
+}
+function nkLaserMark(r: NkRt, x: number, y: number, c: string): void {
+  const m: NkLaserMark = { x, y, t: NK_LASER_MARK_LIFE, max: NK_LASER_MARK_LIFE, c, seed: Math.random() };
+  if (r.lmark.length < NK_LASER_MARK_CAP) { r.lmark.push(m); return; }
+  let oi = 0;
+  for (let i = 1; i < r.lmark.length; i++) if (r.lmark[i].t < r.lmark[oi].t) oi = i;
+  r.lmark[oi] = m;
+}
+function nkSkyfallStrike(g: Game, r: NkRt, x: number, y: number, c: string, life = NK_LASER_LIFE): NkLaser {
+  const l: NkLaser = { x, y, t: life, c, hit: false };
+  r.lasers.push(l);
+  g.sfx("nkSkyfall");
+  return l;
+}
+function nkSkyfallArrive(g: Game, r: NkRt, l: NkLaser): void {
+  if (l.hit) return;
+  l.hit = true;
+  nkLaserMark(r, l.x, l.y, l.c);
+  fxAdd(g, "nkimpact", l.x, l.y, 0, 0, 0.22, l.c, "#ffffff", 16);
+  g.sfx("nkSkyfallHit");
+  g.shake = Math.max(g.shake, 1.2);
+}
+function nkSkyfallInfo(g: Game | null): Record<string, unknown> {
+  const r = g && g.nkr ? g.nkr : null;
+  return {
+    glowW: NK_LASER_GLOW_W, midW: NK_LASER_MID_W, coreW: NK_LASER_CORE_W,
+    glowW0: 16, midW0: 6, coreW0: 2, scale: NK_LASER_GLOW_W / 16,
+    markCap: NK_LASER_MARK_CAP, markLife: NK_LASER_MARK_LIFE,
+    charge: NK_LASER_CHARGE, life: NK_LASER_LIFE,
+    lasers: r ? r.lasers.length : 0,
+    marks: r && r.lmark ? r.lmark.length : 0,
+    scorch: r ? r.scorch.length : 0,
+    sfx: ["nkSkyfall", "nkSkyfallHit"],
+  };
 }
 function nkCap(g: Game): number { const s = nkOf(g); return s.pe && s.own[NK_PE] ? 2 : 1; }
 function nkOn(g: Game, i: number): boolean { const s = g.nk; return !!s && s.eq.includes(i) && !!s.own[i]; }
@@ -11524,7 +11564,7 @@ function nkEquip(g: Game, i: number): string {
 function nkUnwear(g: Game, i: number): void {
   const r = g.nkr; if (!r) return;
   if (i === 1) r.ghosts = [];
-  if (i === 3) r.echo = [];
+  if (i === 3) { r.echo = []; nkEchoClear(g); }
   if (i === 4) r.scorch = [];
 }
 // ---- damage helpers ----
@@ -11815,6 +11855,201 @@ function nkSkPos(g: Game, k: number): { x: number; y: number } {
   return { x: g.hero.ax, y: g.hero.ay };
 }
 // ---- per-frame tick (real-time clock) ----
+
+// Echo Self visible afterimage: a ring buffer of the hero's recent pose, drawn as a teal ghost
+// ~NK_ECHO_LAG seconds behind. Damage still repeats 1 s later at 50% (NK_SCALE); only the
+// sprite and the repeat's FX origin use this delayed pose. Canvases are allocated once.
+const NK_ECHO_LAG = 0.35;
+const NK_ECHO_N = 96;
+const NK_ECHO_SZ = 64;
+const NK_ECHO_PAD = 20;
+const NK_ECHO_A = 0.5;          // 50% alpha, in the 45-55% window
+const NK_ECHO_TEAL = "#3cf0d4";
+interface NkEchoSnap { t: number; ax: number; ay: number; face: number; dir: number; la: number; lb: number; ua: number; ub: number; arm: number; bob: number; sway: number; wa: number; wx: number; wy: number; glow: number; pull: number; pr: number; lunge: number; kind: number; adx: number; ady: number; bump: number; bdx: number; bdy: number; swing: number }
+interface NkEchoBuf { s: NkEchoSnap[]; i: number; n: number; lastT: number; key: string }
+const NK_ECHO_MAP = new WeakMap<Game, NkEchoBuf>();
+const NK_ECHO_PS: Pose = { la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0 };
+const NK_ECHO_VIEW: NkEchoSnap = { t: 0, ax: 0, ay: 0, face: 1, dir: 2, la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0, pr: -1, lunge: 0, kind: 0, adx: 1, ady: 0, bump: 0, bdx: 0, bdy: 0, swing: 0 };
+const NK_ECHO_TRAIL: NkEchoSnap = { t: 0, ax: 0, ay: 0, face: 1, dir: 2, la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0, pr: -1, lunge: 0, kind: 0, adx: 1, ady: 0, bump: 0, bdx: 0, bdy: 0, swing: 0 };
+let NK_ECHO_CV: HTMLCanvasElement | null = null;
+let NK_ECHO_CX: CanvasRenderingContext2D | null = null;
+let NK_ECHO_HASH = 0;
+let NK_ECHO_DRAWN = false;
+let NK_ECHO_REUSE = false;
+let NK_ECHO_OX = 0, NK_ECHO_OY = 0, NK_ECHO_HIT = 0;
+function nkEchoNewSnap(): NkEchoSnap { return { t: -1, ax: 0, ay: 0, face: 1, dir: 2, la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0, pr: -1, lunge: 0, kind: 0, adx: 1, ady: 0, bump: 0, bdx: 0, bdy: 0, swing: 0 }; }
+function nkEchoBuf(g: Game): NkEchoBuf {
+  let b = NK_ECHO_MAP.get(g);
+  if (!b) { const s: NkEchoSnap[] = []; for (let i = 0; i < NK_ECHO_N; i++) s.push(nkEchoNewSnap()); b = { s, i: 0, n: 0, lastT: -1, key: "" }; NK_ECHO_MAP.set(g, b); }
+  return b;
+}
+function nkEchoClear(g: Game): void {
+  const b = NK_ECHO_MAP.get(g); if (!b) return;
+  b.n = 0; b.i = 0; b.lastT = -1; b.key = "";
+  NK_ECHO_HASH = 0; NK_ECHO_DRAWN = false;
+}
+function nkEchoCopy(d: NkEchoSnap, s: NkEchoSnap): void {
+  d.t = s.t; d.ax = s.ax; d.ay = s.ay; d.face = s.face; d.dir = s.dir;
+  d.la = s.la; d.lb = s.lb; d.ua = s.ua; d.ub = s.ub; d.arm = s.arm; d.bob = s.bob; d.sway = s.sway;
+  d.wa = s.wa; d.wx = s.wx; d.wy = s.wy; d.glow = s.glow; d.pull = s.pull;
+  d.pr = s.pr; d.lunge = s.lunge; d.kind = s.kind; d.adx = s.adx; d.ady = s.ady;
+  d.bump = s.bump; d.bdx = s.bdx; d.bdy = s.bdy; d.swing = s.swing;
+}
+function nkEchoLerp(d: NkEchoSnap, a: NkEchoSnap, b: NkEchoSnap, u: number): void {
+  const L = (x: number, y: number): number => x + (y - x) * u;
+  d.t = L(a.t, b.t); d.ax = L(a.ax, b.ax); d.ay = L(a.ay, b.ay);
+  const hi = u >= 0.5 ? b : a;
+  d.face = hi.face; d.dir = hi.dir; d.kind = hi.kind; d.swing = hi.swing;
+  d.la = L(a.la, b.la); d.lb = L(a.lb, b.lb); d.ua = L(a.ua, b.ua); d.ub = L(a.ub, b.ub);
+  d.arm = L(a.arm, b.arm); d.bob = L(a.bob, b.bob); d.sway = L(a.sway, b.sway);
+  d.wa = L(a.wa, b.wa); d.wx = L(a.wx, b.wx); d.wy = L(a.wy, b.wy); d.glow = L(a.glow, b.glow); d.pull = L(a.pull, b.pull);
+  d.lunge = L(a.lunge, b.lunge); d.adx = hi.adx; d.ady = hi.ady;
+  d.bump = L(a.bump, b.bump); d.bdx = hi.bdx; d.bdy = hi.bdy;
+  if (a.pr < 0 && b.pr < 0) d.pr = -1;
+  else if (a.pr < 0) d.pr = b.pr;
+  else if (b.pr < 0) d.pr = a.pr;
+  else d.pr = L(a.pr, b.pr);
+}
+function nkEchoFill(s: NkEchoSnap, g: Game): void {
+  const h = g.hero, t = g.time || 0, p = heroPose(g, t), q = p.q;
+  s.t = t; s.ax = h.ax; s.ay = h.ay; s.face = h.face; s.dir = heroDir(h);
+  s.la = q.la; s.lb = q.lb; s.ua = q.ua; s.ub = q.ub; s.arm = q.arm; s.bob = q.bob; s.sway = q.sway;
+  s.wa = q.wa; s.wx = q.wx; s.wy = q.wy; s.glow = q.glow; s.pull = q.pull;
+  s.pr = p.pr; s.lunge = p.lunge; s.kind = HA.kind; s.adx = HA.adx; s.ady = HA.ady;
+  s.bump = h.bump; s.bdx = h.bdx; s.bdy = h.bdy; s.swing = p.pr < 0 && h.bump > 0 ? 2 : 0;
+}
+function nkEchoSample(g: Game): void {
+  if (!nkOn(g, 3) || g.mode === "dead") { NK_ECHO_DRAWN = false; return; }
+  const b = nkEchoBuf(g), t = g.time || 0, k = nkKey(g);
+  if (b.key !== k) { b.n = 0; b.i = 0; b.key = k; b.lastT = -1; }
+  if (t === b.lastT && b.n > 0) { nkEchoFill(b.s[(b.i + NK_ECHO_N - 1) % NK_ECHO_N], g); return; }
+  nkEchoFill(b.s[b.i], g); b.s[b.i].t = t;
+  b.i = (b.i + 1) % NK_ECHO_N; if (b.n < NK_ECHO_N) b.n++; b.lastT = t;
+}
+function nkEchoAt(g: Game, lag: number, out: NkEchoSnap): boolean {
+  const b = NK_ECHO_MAP.get(g); if (!b || b.n < 2) return false;
+  const newest = b.s[(b.i + NK_ECHO_N - 1) % NK_ECHO_N], oldest = b.s[(b.i + NK_ECHO_N - b.n) % NK_ECHO_N];
+  const span = newest.t - oldest.t; if (span < lag * 0.85) return false;
+  const target = newest.t - lag;
+  if (target >= newest.t) { nkEchoCopy(out, newest); return true; }
+  if (target <= oldest.t) { nkEchoCopy(out, oldest); return true; }
+  for (let k = 1; k < b.n; k++) {
+    const older = b.s[(b.i + NK_ECHO_N - k - 1) % NK_ECHO_N], newer = b.s[(b.i + NK_ECHO_N - k) % NK_ECHO_N];
+    if (older.t <= target && newer.t >= target) {
+      const den = newer.t - older.t, u = den > 1e-6 ? (target - older.t) / den : 1;
+      nkEchoLerp(out, older, newer, u); return true;
+    }
+  }
+  nkEchoCopy(out, oldest); return true;
+}
+function nkEchoEqSig(eq: Eq): number {
+  let h = 0;
+  const add = (it: Item | null | undefined): void => { if (it) h = (Math.imul(h, 16777619) ^ (it.id * 131 + (it.rar | 0) * 17 + (it.kind ? it.kind.length : 0))) >>> 0; };
+  add(eq.head); add(eq.chest); add(eq.arms); add(eq.legs); add(eq.rh); add(eq.lh);
+  return h;
+}
+function nkEchoHash(s: NkEchoSnap, g: Game): number {
+  const q = (v: number, n: number): number => (Math.round(v * n) + 512) & 1023;
+  let h = (s.face + 2) * 8 + (s.dir & 7); h = (h * 33 + s.swing + 1) | 0; h = (h * 33 + (s.kind & 15)) | 0;
+  h = (Math.imul(h, 16777619) ^ q(s.bob, 2) ^ (q(s.sway, 2) << 10) ^ (q(s.la, 2) << 20)) >>> 0;
+  h = (Math.imul(h, 16777619) ^ q(s.wa, 8) ^ (q(s.wx, 2) << 10) ^ (q(s.wy, 2) << 20)) >>> 0;
+  h = (Math.imul(h, 16777619) ^ q(s.arm, 2) ^ (q(s.pr, 16) << 10) ^ (q(s.pull, 4) << 20)) >>> 0;
+  return (Math.imul(h, 16777619) ^ nkEchoEqSig(g.eq)) >>> 0;
+}
+function nkEchoCvs(): CanvasRenderingContext2D | null {
+  if (!NK_ECHO_CX) {
+    const c = (typeof document !== "undefined" && document.createElement) ? document.createElement("canvas") : null;
+    if (!c) return null;
+    c.width = NK_ECHO_SZ; c.height = NK_ECHO_SZ;
+    NK_ECHO_CV = c; NK_ECHO_CX = c.getContext("2d");
+  }
+  return NK_ECHO_CX;
+}
+function nkEchoPoseOf(s: NkEchoSnap): Pose {
+  const p = NK_ECHO_PS;
+  p.la = s.la; p.lb = s.lb; p.ua = s.ua; p.ub = s.ub; p.arm = s.arm; p.bob = s.bob; p.sway = s.sway;
+  p.wa = s.wa; p.wx = s.wx; p.wy = s.wy; p.glow = s.glow; p.pull = s.pull;
+  return p;
+}
+function nkEchoBake(g: Game, s: NkEchoSnap): void {
+  const cx = nkEchoCvs(); if (!cx || !NK_ECHO_CV) { NK_ECHO_REUSE = false; return; }
+  const hash = nkEchoHash(s, g);
+  if (hash === NK_ECHO_HASH && NK_ECHO_HASH !== 0) { NK_ECHO_REUSE = true; return; }
+  NK_ECHO_HASH = hash; NK_ECHO_REUSE = false;
+  cx.setTransform(1, 0, 0, 1, 0, 0);
+  cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+  cx.clearRect(0, 0, NK_ECHO_SZ, NK_ECHO_SZ);
+  drawHero(cx, NK_ECHO_PAD, NK_ECHO_PAD, 1, s.face, g.eq, s.swing, nkEchoPoseOf(s), s.dir);
+  // source-atop keeps transparent padding clear (multiply+fill would opaque the whole canvas)
+  cx.globalCompositeOperation = "source-atop";
+  cx.fillStyle = "rgba(40,240,220,0.82)"; cx.fillRect(0, 0, NK_ECHO_SZ, NK_ECHO_SZ);
+  cx.fillStyle = "rgba(200,255,250,0.18)"; cx.fillRect(0, 0, NK_ECHO_SZ, NK_ECHO_SZ);
+  // scanline shimmer lives on the sprite, not in the empty padding
+  const ph = 1;
+  cx.fillStyle = "rgba(230,255,252,0.35)";
+  for (let yy = ph; yy < NK_ECHO_SZ; yy += 4) cx.fillRect(0, yy, NK_ECHO_SZ, 1);
+  cx.globalCompositeOperation = "source-over";
+}
+function nkEchoXY(s: NkEchoSnap, camX: number, camY: number): number[] {
+  const atk = s.pr >= 0;
+  const bx = atk ? s.adx * s.lunge : s.bump > 0 ? s.bdx * Math.sin(s.bump * Math.PI) * 5 : 0;
+  const by = atk ? s.ady * s.lunge : s.bump > 0 ? s.bdy * Math.sin(s.bump * Math.PI) * 5 : 0;
+  return [s.ax * TS - camX + bx, s.ay * TS - camY + by];
+}
+function nkEchoBlit(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, t: number, glow: boolean): void {
+  if (!NK_ECHO_CV) return;
+  const dx = x - NK_ECHO_PAD, dy = y - NK_ECHO_PAD;
+  const prev = ctx.globalCompositeOperation;
+  if (glow) {
+    // character-shaped halo: four 1px offset blits, no blur filter
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = a * 0.28;
+    ctx.drawImage(NK_ECHO_CV, dx - 1, dy); ctx.drawImage(NK_ECHO_CV, dx + 1, dy);
+    ctx.drawImage(NK_ECHO_CV, dx, dy - 1); ctx.drawImage(NK_ECHO_CV, dx, dy + 1);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = a;
+  ctx.drawImage(NK_ECHO_CV, dx, dy);
+  ctx.globalCompositeOperation = prev;
+  ctx.globalAlpha = 1;
+}
+function drawNkEchoGhost(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  NK_ECHO_DRAWN = false;
+  if (!nkOn(g, 3) || g.mode === "dead" || !NK_ECHO_CV && !nkEchoCvs()) return;
+  nkEchoSample(g);
+  if (!nkEchoAt(g, NK_ECHO_LAG, NK_ECHO_VIEW)) return;
+  nkEchoBake(g, NK_ECHO_VIEW);
+  // dissolving trail of slightly older poses (same cached sprite, earlier positions)
+  for (let k = 3; k >= 1; k--) {
+    if (!nkEchoAt(g, NK_ECHO_LAG + k * 0.08, NK_ECHO_TRAIL)) continue;
+    const d = Math.hypot(NK_ECHO_TRAIL.ax - NK_ECHO_VIEW.ax, NK_ECHO_TRAIL.ay - NK_ECHO_VIEW.ay);
+    if (d < 0.04) continue;
+    const xy = nkEchoXY(NK_ECHO_TRAIL, camX, camY);
+    nkEchoBlit(ctx, xy[0], xy[1], NK_ECHO_A * (0.18 + 0.08 * (4 - k)), t, false);
+  }
+  const xy = nkEchoXY(NK_ECHO_VIEW, camX, camY);
+  let a = NK_ECHO_A;
+  const r = g.nkr; if (r && r.echoShow > 0) a = Math.min(0.7, a + 0.2 * (r.echoShow / 0.35));
+  nkEchoBlit(ctx, xy[0], xy[1], a, t, true);
+  NK_ECHO_DRAWN = true;
+}
+function nkEchoState(g: Game | null): Record<string, unknown> {
+  if (!g) return { ok: false };
+  const on = nkOn(g, 3);
+  const b = NK_ECHO_MAP.get(g);
+  const has = on && nkEchoAt(g, NK_ECHO_LAG, NK_ECHO_VIEW);
+  const h = g.hero;
+  return {
+    ok: true, on, ready: !!has, lag: NK_ECHO_LAG, drawn: NK_ECHO_DRAWN, reuse: NK_ECHO_REUSE,
+    buf: b ? b.n : 0, span: b && b.n > 1 ? +(b.s[(b.i + NK_ECHO_N - 1) % NK_ECHO_N].t - b.s[(b.i + NK_ECHO_N - b.n) % NK_ECHO_N].t).toFixed(4) : 0,
+    age: has ? +( ((b ? b.s[(b.i + NK_ECHO_N - 1) % NK_ECHO_N].t : 0) - NK_ECHO_VIEW.t).toFixed(4) ) : 0,
+    ax: has ? +NK_ECHO_VIEW.ax.toFixed(4) : null, ay: has ? +NK_ECHO_VIEW.ay.toFixed(4) : null,
+    heroAx: +h.ax.toFixed(4), heroAy: +h.ay.toFixed(4), face: has ? NK_ECHO_VIEW.face : h.face,
+    pr: has ? +NK_ECHO_VIEW.pr.toFixed(4) : -1, attacking: !!(has && NK_ECHO_VIEW.pr >= 0),
+    origin: NK_ECHO_HIT ? { x: +NK_ECHO_OX.toFixed(2), y: +NK_ECHO_OY.toFixed(2), t: NK_ECHO_HIT } : null,
+  };
+}
+
 function nkTick(g: Game, dt: number): void {
   const s = g.nk;
   if (!s) return;
@@ -11846,10 +12081,14 @@ function nkTick(g: Game, dt: number): void {
     if (!tg) tg = nearestEnemy(g, Math.max(2, st.range + 1));
     if (!tg) continue;
     const dx = Math.sign(tg.x - h.x), dy = Math.sign(tg.y - h.y), dist = Math.max(Math.abs(tg.x - h.x), Math.abs(tg.y - h.y));
+    const hasG = nkEchoAt(g, NK_ECHO_LAG, NK_ECHO_VIEW);
+    const ax0 = h.ax, ay0 = h.ay;
+    if (hasG) { h.ax = NK_ECHO_VIEW.ax; h.ay = NK_ECHO_VIEW.ay; }
+    NK_ECHO_OX = (hasG ? NK_ECHO_VIEW.ax : h.ax) * TS + 12; NK_ECHO_OY = (hasG ? NK_ECHO_VIEW.ay : h.ay) * TS + 12; NK_ECHO_HIT = g.time || 0;
     NK_SCALE = 0.5; NK_ECHOING = true;
-    try { heroAttack(g, tg, st, dist, dx, dy, true); } finally { NK_SCALE = 1; NK_ECHOING = false; }
+    try { heroAttack(g, tg, st, dist, dx, dy, true); } finally { h.ax = ax0; h.ay = ay0; NK_SCALE = 1; NK_ECHOING = false; }
     r.echoShow = 0.35;
-    fxAdd(g, "nkburst", h.ax * TS + 12, h.ay * TS + 12, 0, 0, 0.28, NK[3].c2, "#ffffff", 1.1 * TS);
+    fxAdd(g, "nkburst", NK_ECHO_OX, NK_ECHO_OY, 0, 0, 0.28, NK[3].c2, "#ffffff", 1.1 * TS);
     fxAdd(g, "nkimpact", tg.ax * TS + 12, tg.ay * TS + 12, 0, 0, 0.2, NK[3].c2, "#ffffff", 9);
     g.sfx("nkEcho");
     if (g.mode !== "play") return;
@@ -11878,8 +12117,11 @@ function nkTick(g: Game, dt: number): void {
   // Neon Skyfall
   if (h.x !== r.lx || h.y !== r.ly) { r.lx = h.x; r.ly = h.y; r.mvT = 0.6; }
   else r.mvT = Math.max(0, r.mvT - dt);
-  for (const l of r.lasers) l.t -= dt;
-  r.lasers = r.lasers.filter((l: { t: number }) => l.t > 0);
+  if (!NK_FX_HOLD) for (const l of r.lasers) l.t -= dt;
+  for (const l of r.lasers) if (!l.hit && l.t <= NK_LASER_LIFE - NK_LASER_CHARGE) nkSkyfallArrive(g, r, l);
+  r.lasers = r.lasers.filter((l: NkLaser) => l.t > 0);
+  if (!NK_FX_HOLD) for (const m of r.lmark) m.t -= dt;
+  r.lmark = r.lmark.filter((m: NkLaserMark) => m.t > 0);
   if (nkOn(g, 4)) {
     if (r.mvT > 0) {
       r.las += dt;
@@ -11889,11 +12131,9 @@ function nkTick(g: Game, dt: number): void {
         if (!l.length) continue;
         const tg = pick(l);
         const c = pick(["#ff3050", "#30ff70", "#3080ff", "#b040ff"]);
-        r.lasers.push({ x: tg.ax * TS + 12, y: tg.ay * TS + 12, t: 0.3, c });
+        nkSkyfallStrike(g, r, tg.ax * TS + 12, tg.ay * TS + 12, c);
         if (r.scorch.length < 24) r.scorch.push({ x: tg.x, y: tg.y, t: 3, c, acc: 0 });
         nkHit(g, tg, nkWep(g, tg, st, 0.25), 4, tg.x, tg.y - 3);
-        fxAdd(g, "nkimpact", tg.ax * TS + 12, tg.ay * TS + 12, 0, 0, 0.18, c, "#ffffff", 12);
-        g.sfx("nkSkyfall");
       }
     } else r.las = Math.min(r.las, 0.49);
     for (const sc of r.scorch) {
@@ -12647,14 +12887,37 @@ function drawNkWorld(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY:
       ctx.globalAlpha = 0.85 * a; ctx.fillStyle = "#1a0a00"; ctx.beginPath(); ctx.ellipse(sc.x * TS + 12 - camX, sc.y * TS + 18 - camY, 5, 2, 0, 0, 6.2832); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    for (const m of r.lmark) {
+      const fade = Math.min(1, m.t / Math.max(0.001, m.max * 0.55)), grow = 1 + (1 - m.t / m.max) * 0.12;
+      const x = m.x - camX, y = m.y - camY + 2;
+      ctx.globalAlpha = 0.58 * fade; ctx.fillStyle = "#140800";
+      ctx.beginPath(); ctx.ellipse(x, y, 14 * grow, 6 * grow, 0, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 0.8 * fade; ctx.strokeStyle = m.c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(x, y, 13 * grow, 5.5 * grow, 0, 0, 6.2832); ctx.stroke();
+      ctx.globalAlpha = 0.8 * fade; ctx.fillStyle = m.c;
+      ctx.beginPath(); ctx.ellipse(x, y, 6.5 * grow, 2.7 * grow, 0, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 0.95 * Math.min(1, m.t / 0.7); ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.ellipse(x, y - 1, 3.2, 1.5, 0, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 0.8 * fade; ctx.strokeStyle = m.c; ctx.lineWidth = 1.25; ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const ang = m.seed * 6.2 + k * 1.7, len = (10 + ((m.seed * 17 + k * 9) % 7)) * grow;
+        ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len * 0.45);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     for (const l of r.lasers) {
-      const a = Math.min(1, l.t / 0.3), x = l.x - camX, y = l.y - camY;
+      const a = Math.min(1, l.t / 0.24), x = l.x - camX, y = l.y - camY;
+      const charged = Math.min(1, (NK_LASER_LIFE - l.t) / NK_LASER_CHARGE);
+      const hgt = 400 * Math.max(0.12, charged);
       const prev = ctx.globalCompositeOperation; ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = a * 0.4; ctx.fillStyle = l.c; ctx.fillRect(x - 8, y - 400, 16, 400);
-      ctx.globalAlpha = a * 0.7; ctx.fillStyle = l.c; ctx.fillRect(x - 3, y - 400, 6, 400);
-      ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.fillRect(x - 1, y - 400, 2, 400);
-      ctx.globalAlpha = a * 0.85; ctx.beginPath(); ctx.arc(x, y, 10, 0, 6.2832); ctx.fillStyle = l.c; ctx.fill();
-      ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, 4, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = a * 0.32; ctx.fillStyle = l.c; ctx.fillRect(x - NK_LASER_GLOW_W / 2, y - hgt, NK_LASER_GLOW_W, hgt);
+      ctx.globalAlpha = a * 0.7; ctx.fillStyle = l.c; ctx.fillRect(x - NK_LASER_MID_W / 2, y - hgt, NK_LASER_MID_W, hgt);
+      ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.fillRect(x - NK_LASER_CORE_W / 2, y - hgt, NK_LASER_CORE_W, hgt);
+      if (charged >= 1) {
+        ctx.globalAlpha = a * 0.85; ctx.beginPath(); ctx.arc(x, y, 15, 0, 6.2832); ctx.fillStyle = l.c; ctx.fill();
+        ctx.globalAlpha = a; ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, 6, 0, 6.2832); ctx.fill();
+      }
       ctx.globalCompositeOperation = prev;
     }
     ctx.globalAlpha = 1;
@@ -12667,8 +12930,8 @@ function drawNkWorld(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY:
       const mx = calc(g.lvl, g.eq).maxHp;
       ctx.fillStyle = "#300"; ctx.fillRect(x + 2, y - 4, 20, 3); ctx.fillStyle = NK[5].c; ctx.fillRect(x + 2, y - 4, Math.round(20 * Math.max(0, Math.min(1, tw.hp / mx))), 3);
     }
-    if (r.echoShow > 0) { ctx.globalAlpha = 0.4 * (r.echoShow / 0.35); drawHero(ctx, hx - 12 - 7, hy - 12 - 5, 1, h.face, g.eq, 2, P0, heroDir(h)); ctx.globalAlpha = 1; }
   }
+  drawNkEchoGhost(ctx, g, camX, camY, t);
   if (nkOn(g, 6) && g.mode !== "dead") { // Prism Guard: diamond shimmer around the hero, brighter when the shell is ready
     const ready = !r || r.pgReady <= (g.petAbiT ?? 0);
     for (let k = 0; k < 6; k++) {
@@ -13058,9 +13321,9 @@ try {
       } else if (i === 4) {
         const r = nkRt(g);
         const lx = hx + 40, ly = hy;
-        r.lasers.push({ x: lx, y: ly, t: 0.22, c: "#ff40ff" });
+        const beam = nkSkyfallStrike(g, r, lx, ly, "#ff40ff", NK_LASER_LIFE - NK_LASER_CHARGE);
+        nkSkyfallArrive(g, r, beam);
         mid("nkimpact", lx, ly, 0, 0, 0.2, "#ffd21f", "#ffffff", 12);
-        g.sfx("nkSkyfall");
       } else if (i === 5) {
         mid("nkburst", hx, hy, 0, 0, 0.55, NK[5].c, "#ffffff", 2.2 * TS);
         mid("nkimpact", hx + 24, hy, 0, 0, 0.3, NK[5].c2, "#ffffff", 14);
@@ -13094,6 +13357,31 @@ try {
     },
     rates: (): Record<string, unknown> => ({ NK_BASE, NK_BASE_E, NK_MIN_DEPTH, NK_W_NORM, NK_W_ACT }),
     holdFx: (on: boolean): void => { NK_FX_HOLD = !!on; },
+    skyfallInfo: (): Record<string, unknown> => nkSkyfallInfo(nkTestG()),
+    skyfallClear: (): void => { const g = nkTestG(); if (!g) return; const r = nkRt(g); r.lasers = []; r.lmark = []; },
+    skyfallBurst: (n: number): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const r = nkRt(g), h = g.hero, sfx0 = NK_SFX.slice();
+      const cols = ["#ff3050", "#30ff70", "#3080ff", "#b040ff"];
+      for (let i = 0; i < Math.max(0, n | 0); i++) {
+        const x = h.ax * TS + 12 + (i % 8) * 10 - 35, y = h.ay * TS + 12 + Math.floor(i / 8) * 8;
+        const beam = nkSkyfallStrike(g, r, x, y, cols[i % 4], NK_LASER_LIFE - NK_LASER_CHARGE);
+        nkSkyfallArrive(g, r, beam);
+      }
+      return { ok: true, ...(nkSkyfallInfo(g)), sfx: NK_SFX.slice(sfx0.length) };
+    },
+    skyfallCast: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const s = nkOf(g); if (!s.own[4]) s.own[4] = 1; s.got = true;
+      if (!s.eq.includes(4)) { while (s.eq.length >= nkCap(g)) { const old = s.eq.shift(); if (old !== undefined) nkUnwear(g, old); } s.eq.push(4); }
+      const r = nkRt(g); r.mvT = 0.6; r.las = 0.5;
+      if (g.vis) g.vis.fill(1);
+      const e = mkEnemy(g, g.hero.x + 2, g.hero.y, 0); e.hp = e.mhp = 100000; g.en.push(e);
+      const sfx0 = NK_SFX.slice();
+      nkTick(g, 0.05);
+      nkTick(g, NK_LASER_CHARGE + 0.02);
+      return { ok: true, ...(nkSkyfallInfo(g)), sfx: NK_SFX.slice(sfx0.length), hp: e.hp, fired: (r.lasers.length > 0) || (r.lmark.length > 0) };
+    },
     // mechanics fingerprint for Grave Toll (1) / Phalanx (2): seeded Math.random + fixed DRAW_T, fixed foes, N ticks of nkTick
     nkMechSim: (which: number, steps: number, seed: number, layout = "near"): Record<string, unknown> => {
       const g = nkTestG(); if (!g) return { ok: false };
@@ -13161,6 +13449,133 @@ try {
     },
     nkvReset: (): void => { const g = nkTestG(); if (g) NKV.delete(g); },
     quietHud: (): void => { const g = nkTestG(); if (!g) return; g.banner = null; g.flash = Math.min(g.flash, 0.2); g.floats = []; g.msgs = []; g.warn = ""; },
+    echoLag: (): number => NK_ECHO_LAG,
+    echoGhost: (): Record<string, unknown> => nkEchoState(nkTestG()),
+    echoReset: (): void => { const g = nkTestG(); if (g) nkEchoClear(g); NK_ECHO_HIT = 0; },
+    echoPrep: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      g.paused = false;
+      g.banner = null; g.flash = 0; g.floats = []; g.msgs = []; g.warn = ""; g.fx = []; g.shots = []; g.parts = []; g.shards = [];
+      g.en = [];
+      if (g.notify) g.notify();
+      return { ok: true };
+    },
+    echoAdvance: (dt: number, steps = 1): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const d = Math.max(0.001, dt);
+      for (let i = 0; i < steps; i++) { g.time = (g.time || 0) + d; visTick(g, d); nkTick(g, d); }
+      return nkEchoState(g);
+    },
+    echoSwing: (lag?: number): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      g.paused = true;
+      const st = calc(g.lvl, g.eq);
+      const tg = nearestEnemy(g, Math.max(2, st.range + 1)) || g.en.find((e: En) => e.hp > 0) || null;
+      const hp0 = tg ? tg.hp : 0;
+      if (tg) heroAttack(g, tg, st, Math.max(Math.abs(tg.x - g.hero.x), Math.abs(tg.y - g.hero.y)), Math.sign(tg.x - g.hero.x), Math.sign(tg.y - g.hero.y));
+      // snapshot the first frame of the swing at this exact time so the 0.35s lookup is not interpolated with a pre-attack pose
+      heroAnimTick(g, 0, 0); nkEchoSample(g);
+      const tAtk = g.time || 0;
+      const d = 1 / 60, steps = Math.max(1, Math.round((lag ?? NK_ECHO_LAG) / d));
+      for (let i = 0; i < steps; i++) { g.time = tAtk + (i + 1) * d; visTick(g, d); nkTick(g, d); }
+      const stt = nkEchoState(g);
+      return { ...stt, ok: true, dealt: tg ? +(hp0 - tg.hp).toFixed(2) : 0, queued: g.nkr ? g.nkr.echo.length : 0, as: g.hero.as ?? 0 };
+    },
+    echoAttack: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const st = calc(g.lvl, g.eq);
+      const tg = nearestEnemy(g, Math.max(2, st.range + 1)) || g.en.find((e: En) => e.hp > 0) || null;
+      if (!tg) return { ok: false, error: "no target" };
+      const hp0 = tg.hp;
+      heroAttack(g, tg, st, Math.max(Math.abs(tg.x - g.hero.x), Math.abs(tg.y - g.hero.y)), Math.sign(tg.x - g.hero.x), Math.sign(tg.y - g.hero.y));
+      return { ok: true, id: tg.id, dealt: +(hp0 - tg.hp).toFixed(2), hp: tg.hp, as: g.hero.as ?? 0, queued: g.nkr ? g.nkr.echo.length : 0 };
+    },
+    echoDmg: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const seedRng = (sd0: number): (() => void) => {
+        const mr = Math.random; let sd = sd0 >>> 0;
+        Math.random = (): number => { sd = (sd + 0x6d2b79f5) >>> 0; let t = sd; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+        return (): void => { Math.random = mr; };
+      };
+      const prevSkip = GIB_SKIP_SAVE; GIB_SKIP_SAVE = true;
+      const eq0 = g.eq;
+      try {
+        const s = nkOf(g); if (!s.own[3]) s.own[3] = 1; s.got = true;
+        if (!s.eq.includes(3)) { while (s.eq.length >= nkCap(g)) { const old = s.eq.shift(); if (old !== undefined) nkUnwear(g, old); } s.eq.push(3); }
+        const r = nkRt(g); r.echo = [];
+        const sword = makeItem(10, 0, "sword"); delete sword.ef; delete sword.spells; delete sword.pas; delete sword.ult; delete sword.sk; delete sword.set;
+        g.eq = { head: null, chest: null, arms: null, legs: null, rh: sword, lh: null, pet: null };
+        const h = g.hero;
+        const e = mkEnemy(g, h.x + 1, h.y, 0); e.hp = e.mhp = 1e12; e.def = 0; e.awake = true;
+        e.burn = 0; e.bl = 0; e.poi = 0; e.stun = 0; g.en = g.en.filter((o: En) => o.hp > 0); g.en.push(e);
+        if (g.vis) g.vis.fill(1);
+        const st = calc(g.lvl, g.eq);
+        const strike = (scale: number): number => {
+          e.hp = e.mhp = 1e12; e.def = 0; e.burn = 0; e.bl = 0; e.poi = 0; e.stun = 0; e.hit = 0;
+          r.echo = [];
+          NK_SCALE = scale; NK_ECHOING = true;
+          try { heroAttack(g, e, st, 1, 1, 0, true); } finally { NK_SCALE = 1; NK_ECHOING = false; }
+          return 1e12 - e.hp;
+        };
+        const SEED = 0xC0FFEE;
+        let restore = seedRng(SEED); const full = strike(1); restore();
+        restore = seedRng(SEED); const half = strike(0.5); restore();
+        const ratio = full > 0 ? half / full : 0;
+        e.hp = e.mhp = 1e12; r.echo = [];
+        heroAttack(g, e, st, 1, 1, 0);
+        const afterFirst = e.hp, queued = r.echo.length;
+        const t0 = g.time || 0;
+        for (let i = 0; i < 22; i++) { g.time = t0 + (i + 1) * 0.05; visTick(g, 0.05); nkTick(g, 0.05); }
+        const queuedDmg = afterFirst - e.hp;
+        return { ok: true, full: +full.toFixed(2), half: +half.toFixed(2), ratio: +ratio.toFixed(4), scale: 0.5, queued, queuedDmg: +queuedDmg.toFixed(2), origin: { x: NK_ECHO_OX, y: NK_ECHO_OY, t: NK_ECHO_HIT } };
+      } finally { g.eq = eq0; GIB_SKIP_SAVE = prevSkip; NK_SCALE = 1; NK_ECHOING = false; }
+    },
+    echoPixels: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const cv = document.createElement("canvas"); cv.width = NK_ECHO_SZ; cv.height = NK_ECHO_SZ;
+      const c = cv.getContext("2d"); if (!c) return { ok: false };
+      c.clearRect(0, 0, NK_ECHO_SZ, NK_ECHO_SZ);
+      const on = nkOn(g, 3);
+      const has = on && nkEchoAt(g, NK_ECHO_LAG, NK_ECHO_VIEW);
+      if (has) {
+        nkEchoBake(g, NK_ECHO_VIEW);
+        if (NK_ECHO_CV) c.drawImage(NK_ECHO_CV, 0, 0);
+      }
+      const img = c.getImageData(0, 0, NK_ECHO_SZ, NK_ECHO_SZ).data;
+      let pix = 0, teal = 0, rS = 0, gS = 0, bS = 0;
+      for (let i = 0; i < img.length; i += 4) {
+        if (img[i + 3] < 20) continue;
+        pix++; rS += img[i]; gS += img[i + 1]; bS += img[i + 2];
+        if (img[i + 1] > img[i] + 8 && img[i + 2] > img[i] && img[i + 1] > 80) teal++;
+      }
+      return { ok: true, on, ready: !!has, pix, teal, drawn: NK_ECHO_DRAWN, reuse: NK_ECHO_REUSE, avg: pix ? { r: Math.round(rS / pix), g: Math.round(gS / pix), b: Math.round(bS / pix) } : null };
+    },
+    echoBench: (n = 80): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const cv = document.createElement("canvas"); cv.width = VW * PX; cv.height = VH * PX;
+      const c = cv.getContext("2d"); if (!c) return { ok: false };
+      const camX = g.hero.ax * TS + 12 - VW / 2, camY = g.hero.ay * TS + 12 - VH / 2, t = g.time || DRAW_T;
+      const one = (ghost: boolean): void => {
+        c.setTransform(PX, 0, 0, PX, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+        c.fillStyle = "#1a2030"; c.fillRect(0, 0, VW, VH);
+        const hpo = heroPose(g, t), h = g.hero;
+        const hsx = Math.round(h.ax * TS - camX), hsy = Math.round(h.ay * TS - camY);
+        drawHero(c, hsx, hsy, 1, h.face, g.eq, 0, hpo.q, heroDir(h));
+        if (ghost) drawNkEchoGhost(c, g, camX, camY, t);
+        c.getImageData(0, 0, 1, 1);
+      };
+      const time = (ghost: boolean): number => {
+        one(ghost); one(ghost);
+        const t0 = performance.now();
+        for (let i = 0; i < n; i++) one(ghost);
+        return (performance.now() - t0) / n;
+      };
+      const off = nkOn(g, 3);
+      const msOff = time(false);
+      // force-draw path even if lag buffer is cold
+      const msOn = time(true);
+      return { ok: true, n, msOff: +msOff.toFixed(4), msOn: +msOn.toFixed(4), delta: +(msOn - msOff).toFixed(4), equipped: off, drawn: NK_ECHO_DRAWN, reuse: NK_ECHO_REUSE };
+    },
   };
 } catch { /* ignore */ }
 
@@ -16439,6 +16854,7 @@ function visTick(g: Game, dt: number): void {
   for (const id of [...IP.em.keys()]) if (!seen.has(id)) IP.em.delete(id);
   gobTrailTick(g, dt);
   camTick(g, dt);
+  nkEchoSample(g);
 }
 // Remap a tile (or offset) coordinate onto the sprite's interpolated position so floats/numbers stay on the body.
 function visOf(g: Game, x: number, y: number): number[] {
@@ -24447,13 +24863,36 @@ export default function App() {
           tone(880, 440, 0.08, "triangle", 0.02, 0.12);
           break;
         case "nkSkyfall": {
-          // Piercing neon zap: digital click + short down-sweep. Rate-limited so 2/s stays civil on a phone.
-          if ((lastS["nkSkyfall"] ?? 0) > nowS - 90) break;
-          lastS["nkSkyfall"] = nowS;
-          nz(0.03, 0.07, "highpass", 6000, 2500);
-          tone(2400, 480, 0.09, "sawtooth", 0.035);
-          tone(3600, 900, 0.06, "square", 0.02, 0.01);
-          tone(190, 80, 0.08, "triangle", 0.02, 0.03);
+          // Charge-up whine from the sky, then a violent strike: sub-boom, sizzling crack, distortion burst, rumble tail.
+          // Throttled so a spray of beams does not clip. Distinct from weather thunder and Storm Crown hops.
+          if ((lastS["nkSkyfallCast"] ?? 0) > nowS - 80) break;
+          lastS["nkSkyfallCast"] = nowS;
+          tone(900, 2800, 0.08, "sine", 0.035);
+          tone(1400, 3600, 0.07, "triangle", 0.02, 0.01);
+          tone(48, 24, 0.38, "sine", 0.09, 0.07);
+          tone(72, 32, 0.28, "triangle", 0.05, 0.075);
+          tone(110, 40, 0.18, "sawtooth", 0.035, 0.07);
+          nz(0.09, 0.14, "highpass", 7000, 2200, 0.07);
+          tone(3200, 700, 0.05, "square", 0.055, 0.07);
+          tone(4800, 1400, 0.035, "triangle", 0.035, 0.078);
+          nz(0.08, 0.1, "bandpass", 1800, 400, 0.07);
+          nz(0.06, 0.08, "highpass", 4000, 1500, 0.08);
+          tone(180, 60, 0.1, "sawtooth", 0.04, 0.075);
+          nz(0.42, 0.07, "lowpass", 220, 40, 0.1);
+          tone(42, 28, 0.45, "sine", 0.04, 0.12);
+          break;
+        }
+        case "nkSkyfallHit": {
+          // Ground impact: a felt slam and grit, delayed to the beam's arrival, throttled on its own clock.
+          if ((lastS["nkSkyfallHit"] ?? 0) > nowS - 55) break;
+          lastS["nkSkyfallHit"] = nowS;
+          const d = 0.08;
+          nz(0.05, 0.12, "highpass", 5000, 1600, d);
+          nz(0.08, 0.09, "bandpass", 900, 200, d);
+          tone(90, 36, 0.16, "sine", 0.07, d);
+          tone(200, 70, 0.1, "sawtooth", 0.03, d);
+          nz(0.22, 0.06, "lowpass", 300, 50, d + 0.04);
+          tone(55, 30, 0.22, "triangle", 0.035, d + 0.03);
           break;
         }
         case "nkHeart":
