@@ -21084,7 +21084,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-saveload { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .dc-saveload .dc-b { min-height: var(--ed-save-h, 42px); font-size: 13px; }
 .dc-saveload .dc-savegame { grid-column: 1 / -1; font-weight: 800; }
-.dc-prof-time { font-size: 10px; font-weight: 700; opacity: 0.85; margin-top: 2px; }
+.dc-prof-time { font-size: 9px; font-weight: 700; opacity: 0.85; margin-top: 0; }
 .dc-invsave { display: flex; gap: 6px; flex-wrap: wrap; }
 .dc-invsave .dc-b { flex: 1; min-width: 96px; }
 .dc-actions { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
@@ -21288,14 +21288,23 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
   .dc-ults .dc-ultn { font-size: 10px; }
   .dc-ults .dc-ultm { font-size: 9px; }
 }
-.dc-profs { position: absolute; inset: 0; z-index: 40; background: rgba(6, 4, 12, 0.82); display: flex; align-items: center; justify-content: center; padding: 10px; }
-.dc-profs-card { width: min(360px, 100%); max-height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
-.dc-profs-hd { font-size: 15px; font-weight: 800; text-align: center; margin-bottom: 8px; }
-.dc-profs-list { display: flex; flex-direction: column; gap: 6px; }
-.dc-prof-wrap { width: 100%; }
-.dc-prof { width: 100%; min-height: 48px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; padding: 6px 10px !important; }
-.dc-prof b { font-size: 14px; }
-.dc-mike-tools { margin-top: 4px; }
+html:has(.dc-profs), body:has(.dc-profs), .dc-root:has(.dc-profs), .dc-wrap:has(.dc-profs), .dc-stage:has(.dc-profs) { touch-action: pan-y !important; }
+.dc-profs { position: absolute; inset: 0; z-index: 40; background: rgba(6, 4, 12, 0.82); display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: 8px; box-sizing: border-box; min-height: 0; overflow: hidden; touch-action: pan-y; }
+.dc-profs-card { width: min(360px, 100%); max-height: 100%; min-height: 0; margin: 0 auto; display: flex; flex-direction: column; overflow: hidden; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 8px 10px; box-sizing: border-box; box-shadow: 0 8px 28px rgba(0,0,0,0.55); touch-action: pan-y; }
+.dc-profs-hd { font-size: 14px; font-weight: 800; text-align: center; margin: 0 0 4px; flex-shrink: 0; }
+.dc-profs-list { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain; }
+.dc-prof-wrap { width: 100%; flex-shrink: 0; }
+.dc-prof { width: 100%; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; padding: 3px 8px !important; }
+.dc-prof b { font-size: 13px; line-height: 1.15; }
+.dc-prof-prog { font-size: 9px; line-height: 1.2; margin-top: 1px; color: #a8a0b8; }
+.dc-profs-card > .dc-sm { margin-bottom: 4px !important; flex-shrink: 0; }
+.dc-profs-card > .dc-recover, .dc-profs-card > .dc-bkhist, .dc-profs-card > .dc-stor-rpt, .dc-profs-card > .dc-rec, .dc-profs-card > .dc-bk, .dc-profs-card > button.dc-b { flex-shrink: 0; }
+.dc-profs-card > .dc-recover, .dc-profs-card > .dc-bkhist, .dc-profs-card > button.dc-b { min-height: 32px; margin-top: 3px !important; }
+.dc-profs-card > .dc-stor-rpt { margin-top: 2px !important; font-size: 9px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-mike-tools { margin-top: 2px; }
+.dc-profs .dc-mike-age, .dc-profs .dc-mike-note { font-size: 10px; margin: 1px 0 2px; }
+.dc-profs .dc-prof-actions { gap: 4px; }
+.dc-profs .dc-prof-actions .dc-b { min-height: 30px; }
 .dc-mike-age, .dc-mike-note { font-size: 11px; opacity: 0.9; text-align: center; margin: 2px 0 4px; line-height: 1.3; }
 .dc-prof-actions { display: flex; gap: 6px; }
 .dc-prof-actions .dc-b { flex: 1; min-height: 40px; font-size: 12px; font-weight: 800; padding: 6px 4px !important; }
@@ -25613,7 +25622,7 @@ export default function App() {
     };
     const allowPan = (t: EventTarget | null): boolean => {
       const el = t as HTMLElement | null;
-      return !!(el && typeof el.closest === "function" && el.closest(".dc-inv, .dc-shop-bd, .dc-ta, .dc-code, .dc-io, .dc-msw"));
+      return !!(el && typeof el.closest === "function" && el.closest(".dc-inv, .dc-shop-bd, .dc-ta, .dc-code, .dc-io, .dc-msw, .dc-profs"));
     };
     const onTouchMove = (e: TouchEvent): void => { if (!allowPan(e.target)) e.preventDefault(); };
     apply();
@@ -27695,8 +27704,7 @@ export default function App() {
                       <div key={p.id} className="dc-prof-wrap">
                         <button className="dc-b dc-prof" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => pickProf(p.id)}>
                           <b>{p.id + ". " + p.name}{isTest ? " (test)" : ""}</b>
-                          <span className="dc-sm">{line}</span>
-                          {when ? <span className="dc-prof-time">{when}</span> : null}
+                          <span className="dc-sm dc-prof-prog">{line}{when ? "  ·  " + when : ""}</span>
                         </button>
                         {isMike ? (
                           <div className="dc-mike-tools">
