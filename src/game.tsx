@@ -126,7 +126,7 @@ interface Ult { n: string; el: El; pat: number; c2: string; i: number; fx?: numb
 interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number; mvv?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number; o6?: number; o6m?: number; o6ph?: number; o6inv?: number; o6t?: number; o6b?: number; o6rt?: number }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number; o6?: number; o6m?: number; o6ph?: number; o6inv?: number; o6t?: number; o6b?: number; o6rt?: number; efw?: number }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean; fit?: number } // fit 1 = 2x2 footprint at x..x+1,y..y+1; 2 = legacy 1x1 (no room for 2x2)
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
@@ -181,6 +181,7 @@ interface Game {
   warn?: { txt: string; sub: string; c: string; t: number; max: number }; warnGobs?: number[]; warnPort?: string;
   artAlert?: { txt: string; sub: string; t: number; max: number; rc: number; dx: number; dy: number } | null;
   mine?: MineSt; mineOpen?: boolean; mr?: MineRate; // camp pet excavation (save field "mn"; old saves have none)
+  hasPrismatic?: boolean; firstPrismaticAt?: number; // sticky: first Prismatic in bag or equipped; never counts stash
 }
 
 // ---------- data ----------
@@ -2085,6 +2086,87 @@ function prisGated(g: Game): boolean {
 }
 
 function deepPrisGated(g: Game): boolean { return g.depth >= DEEP_PRIS_MIN && prisGated(g); }
+// ---------- pre-Prismatic enemy strength (2026-11-20) ----------
+// Independent of the no-Prismatic loot / walk bonus. Until the player has held a Prismatic-rarity
+// item in equipped slots or the bag (stash, gem bag, sockets, and excavation do not count),
+// every enemy and boss is at 80% HP, 80% defence, 80% elemental resist strength, and deals 80%
+// damage. The flag is sticky in the save: selling or dropping the item does not bring the
+// reduction back. Do not consult this flag from any loot or drop path.
+const EARLY_FOE_MUL = 0.8;
+const EL_RESIST = 0.45; // elMul resist: take (1 - 0.45) = 0.55 damage on a resisted element
+function prisHeldInBagOrEq(g: Game): boolean {
+  for (const k of EQK) { const it = g.eq[k]; if (it && it.rar >= 7) return true; }
+  for (const it of g.bag) if (it && it.rar >= 7) return true;
+  return false;
+}
+function earlyFoeMul(g: Game | null | undefined): number { return g && g.hasPrismatic ? 1 : EARLY_FOE_MUL; }
+function earlyFoeDmg(g: Game, dmg: number): number {
+  if (!g || g.hasPrismatic || !(dmg > 0)) return dmg;
+  return Math.max(1, Math.round(dmg * EARLY_FOE_MUL));
+}
+function scaleFoeStats(e: En, f: number): void {
+  const hpRatio = e.hp / Math.max(1, e.mhp);
+  e.mhp = Math.max(1, Math.round(e.mhp * f));
+  e.hp = e.hp <= 0 ? 0 : Math.max(1, Math.min(e.mhp, Math.round(e.mhp * hpRatio)));
+  e.def = Math.max(0, Math.round(e.def * f));
+  if (e.mshd) e.mshd = Math.max(1, Math.round(e.mshd * f));
+  if (typeof e.shd === "number") e.shd = Math.max(0, Math.round(e.shd * f));
+  if (e.ovmhp) e.ovmhp = Math.max(1, Math.round(e.ovmhp * f));
+  if (typeof e.ovhp === "number") e.ovhp = Math.max(0, Math.round(e.ovhp * f));
+}
+function clearEarlyFoe(e: En): void {
+  if (e.efw) { scaleFoeStats(e, 1 / EARLY_FOE_MUL); e.efw = 0; }
+}
+function finishFoe(g: Game, e: En): En {
+  if (e.efw) clearEarlyFoe(e);
+  if (!g.hasPrismatic) { scaleFoeStats(e, EARLY_FOE_MUL); e.efw = 1; }
+  return e;
+}
+function syncAllFoes(g: Game): void {
+  for (const e of g.en) if (e) finishFoe(g, e);
+  for (const e of g.pend) if (e) finishFoe(g, e);
+}
+function noteFirstPrismaticToast(g: Game): void {
+  const txt = "First Prismatic! Enemies are now at full strength.";
+  showLootToast(g, txt);
+  msg(g, txt, "#ffd0ff");
+}
+function syncFirstPrismatic(g: Game, opts?: { toast?: boolean }): boolean {
+  if (g.hasPrismatic) return true;
+  if (!prisHeldInBagOrEq(g)) return false;
+  g.hasPrismatic = true;
+  if (!g.firstPrismaticAt) g.firstPrismaticAt = Date.now();
+  syncAllFoes(g);
+  if (opts && opts.toast === false) return true;
+  noteFirstPrismaticToast(g);
+  return true;
+}
+function loadFirstPrismatic(g: Game, savedFlag?: boolean, savedAt?: number): void {
+  if (savedFlag) {
+    g.hasPrismatic = true;
+    if (savedAt && savedAt > 0) g.firstPrismaticAt = savedAt;
+    else if (!g.firstPrismaticAt) g.firstPrismaticAt = 1;
+  }
+  syncFirstPrismatic(g, { toast: false });
+  syncAllFoes(g);
+}
+function lootTables(): Record<string, unknown> {
+  const depths = [1, 10, 26, 50, 100, 200, 500];
+  const pack = (f: number, min: number): Record<string, number[]> => {
+    const o: Record<string, number[]> = {};
+    for (const d of depths) o[String(d)] = rollRarW(f, min, d).slice();
+    return o;
+  };
+  const packRaw = (f: number, min: number): Record<string, number[]> => {
+    const o: Record<string, number[]> = {};
+    for (const d of depths) o[String(d)] = rollRarWRaw(f, min, d).slice();
+    return o;
+  };
+  return {
+    RW: RW.slice(), LOOT_BONUS, LOOT_RAR_FLOOR, PRIS_DROP_MULT, PRIS_F_EXP, PRIS_BONUS_END, RAR_F_EXP, RAR_F_CAP, RAR_F_LIFT, RAMP_START, RAMP_END,
+    wRaw_1_0: packRaw(1, 0), w_1_0: pack(1, 0), w_1_22_0: pack(1.22, 0), w_1_35_0: pack(1.35, 0), w_1_6_2: pack(1.6, 2),
+  };
+}
 function cavePortalChance(g: Game): number { return 0.04 * gemPortalMul(g); }
 // ---------- Prismatic Bulwark (option A1) + linear star curve (option C1), approved 2026-11-18 ----------
 // Derived ONLY from what is equipped now (star counts on Prismatic items) and the current depth, never stored,
@@ -2419,6 +2501,7 @@ function maybeSpawnSecretPortal(g: Game): boolean {
 
 function mkUltraElite(g: Game, x: number, y: number): En {
   const e = mkEnemy(g, x, y, 1, { full: true, se: true });
+  clearEarlyFoe(e);
   e.se = undefined;
   e.ue = 1;
   const hs = g.eq ? calc(g.lvl, g.eq) : null;
@@ -2437,7 +2520,7 @@ function mkUltraElite(g: Game, x: number, y: number): En {
   e.name = e.name.replace(/^Super Elite /, "Ultra Elite ");
   if (e.name.indexOf("Ultra Elite") < 0) e.name = "Ultra Elite " + e.name;
   e.pal = [UE_COL, UE_COL2, "#3a1860", "#ffffff"];
-  return e;
+  return finishFoe(g, e);
 }
 function maybeSpawnUltraElites(g: Game): void {
   if (!deepPrisGated(g)) return;
@@ -2591,7 +2674,7 @@ function mkCaveGoblin(g: Game, x: number, y: number, typ: number): En {
   else if (typ === 6) { e.name = "Hex Goblin"; if (!e.tr.includes("ranged")) e.tr = e.tr.concat(["ranged"]); e.pal = ["#60c040", "#c0ff80", "#204018", "#d060ff"]; }
   else if (e.name.indexOf("Goblin") < 0) e.name = "Cave Goblin";
   e.awake = true;
-  return e;
+  return finishFoe(g, e);
 }
 // Royal Goblin Warren goblins: much tougher, better XP, and every one drops boosted loot (see kill()).
 const SGC_HP = 3, SGC_ATK = 1.5, SGC_XP = 3, SGC_KING_HP = 7;
@@ -4883,7 +4966,7 @@ function mkEnemy(g: Game, x: number, y: number, cls: number, opts?: { full?: boo
   if (se) e0.se = 1;
   rollAffix(e0, lesser);
   maybeGiveRanged(e0, f.n);
-  return e0;
+  return finishFoe(g, e0);
 }
 function maybeGiveRanged(e: En, famN: string): void {
   if (e.tr.includes("ranged") || e.gob || e.hunt) return;
@@ -4933,7 +5016,7 @@ function resolveShot(g: Game, s: Shot): void {
     if (R() * 100 < st.block) { floatTxt(g, h.x, h.y, "BLOCK", "#80c0ff"); g.sfx("block"); return; }
     let dmg = bwMitigate(st, s.dmg as number, true);
     if (g.ward > 0) { const ab = Math.min(g.ward, dmg); g.ward -= ab; dmg -= ab; }
-    if (dmg > 0) applyHeroDmg(g, dmg, 3);
+    if (dmg > 0) applyHeroDmg(g, earlyFoeDmg(g, dmg), 3);
   }
 }
 
@@ -5482,7 +5565,7 @@ function mkHunter(g: Game, x: number, y: number): En {
   e.xp = Math.round(e.xp * 1.3);
   e.name = "The " + pick(HUNTN);
   e.pal = ["#2a0a3a", "#9a30d0", "#0e0418", "#ff3cff"];
-  return e;
+  return finishFoe(g, e);
 }
 // Relentless pursuit: BFS distance field from the hero over the whole floor (no leash), step to the closest free neighbour.
 function huntMove(g: Game, e: En): void {
@@ -6909,7 +6992,7 @@ function mkGoblin(g: Game, x: number, y: number, kind: number = 1): En {
   e.xp = Math.round(e.xp * 2);
   e.name = gobName(k);
   e.pal = gobPal(k);
-  return e;
+  return finishFoe(g, e);
 }
 // The goblin never attacks: it runs away, a little slower than the hero (it skips every 4th turn) so it can be caught.
 function gobMove(g: Game, e: En): void {
@@ -7422,6 +7505,7 @@ function actLootExpected(act: number, d?: number): number {
 }
 function mkActBoss(g: Game, x: number, y: number): En {
   const e = mkEnemy(g, x, y, 2);
+  clearEarlyFoe(e);
   const act = actOf(g.depth);
   e.phase = 1;
   e.atk = recapActAtk(g, e.atk * actAtkMul(act), act);
@@ -7452,7 +7536,7 @@ function mkActBoss(g: Game, x: number, y: number): En {
   }
   e.mshd = e.shd = Math.round(e.mhp * sh);
   bindActBoss(e, act);
-  return e;
+  return finishFoe(g, e);
 }
 
 function drawActBossSprite(p: Pt, id: number, c: string[], t: number): void {
@@ -10255,6 +10339,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
     nk: nkPackSt(g),
     mn: minePack(g),
     mr: mrPack(g),
+    prf: g.hasPrismatic ? (g.firstPrismaticAt || 1) : 0,
   };
 }
 
@@ -10273,6 +10358,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     wallBreak: !!g.wallBreak, cracks: packCracks(g), arts: artsOf(g).slice(), shrUsedD: g.shrUsedD ?? 0,
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
     nk: nkPackSt(g),
+    hasPrismatic: !!g.hasPrismatic, firstPrismaticAt: g.firstPrismaticAt || 0,
   };
 }
 function buildPersistRaw(g: Game): string {
@@ -10633,6 +10719,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     attachBank(g, codeItems, codeGold, hasBg ? codeGold : undefined);
     msg(g, "Run restored from Save Code - depth " + g.depth + ", level " + g.lvl + ".", "#80ff80");
     fixPrisLoad(g);
+    loadFirstPrismatic(g, (typeof s.prf === "number" && isFinite(s.prf) && s.prf > 0) || s.prf === true || s.hasPrismatic === true, typeof s.prf === "number" && isFinite(s.prf) ? s.prf : (typeof s.firstPrismaticAt === "number" && isFinite(s.firstPrismaticAt) ? s.firstPrismaticAt : 0));
     return g;
   } catch { return null; }
 }
@@ -10890,6 +10977,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.msgs = []; g.banner = null; g.parts = []; g.floats = []; g.shots = [];
     msg(g, "Welcome back! Continuing on depth " + g.depth + ".", "#80ffff");
     fixPrisLoad(g);
+    loadFirstPrismatic(g, s.hasPrismatic === true || (typeof s.firstPrismaticAt === "number" && isFinite(s.firstPrismaticAt) && (s.firstPrismaticAt as number) > 0) || (typeof s.prf === "number" && isFinite(s.prf) && (s.prf as number) > 0), typeof s.firstPrismaticAt === "number" && isFinite(s.firstPrismaticAt) ? (s.firstPrismaticAt as number) : (typeof s.prf === "number" && isFinite(s.prf) ? (s.prf as number) : 0));
     computeVis(g);
     placeTorches(g);
     if (g.area === "camp") { g.seen.fill(1); g.vis.fill(1); }
@@ -10919,6 +11007,7 @@ function newGame(prev: Game | null): Game {
     front: 1, snapPrev: null, snapCur: null,
     muted: prev ? prev.muted : false, notify: prev ? prev.notify : () => undefined, sfx: prev ? prev.sfx : () => undefined,
     wallBreak: false, cracks: new Array(MW * MH).fill(0),
+    hasPrismatic: false, firstPrismaticAt: 0,
   };
   attachStash(g);
   genFloor(g);
@@ -15042,9 +15131,12 @@ function autoSocketEquippedPass(g: Game): boolean {
   return changed;
 }
 function takePickedItem(g: Game, it: Item, x: number, y: number): boolean {
-  if (isGem(it) && autoSocketGem(g, it, x, y)) { lootFx(g, it); runAutoCombine(g); return true; }
-  if (!isGem(it) && tryAutoEquip(g, it)) { lootFx(g, it, true); autoSocketItem(g, it); runAutoCombine(g); return true; }
-  return takeItemOrSalvage(g, it, x, y);
+  let ok: boolean;
+  if (isGem(it) && autoSocketGem(g, it, x, y)) { lootFx(g, it); runAutoCombine(g); ok = true; }
+  else if (!isGem(it) && tryAutoEquip(g, it)) { lootFx(g, it, true); autoSocketItem(g, it); runAutoCombine(g); ok = true; }
+  else ok = takeItemOrSalvage(g, it, x, y);
+  syncFirstPrismatic(g);
+  return ok;
 }
 function dropStarMax(rar: number, isSet: boolean): number { return starMax(rar, isSet); }
 function combineStarMax(rar: number, isSet: boolean): number { return isSet ? 4 : (STAR_COMBINE_MAX[rar] ?? 0); }
@@ -15381,6 +15473,7 @@ function equipIntoSlot(g: Game, it: Item, slot: EqKey): boolean {
     relocatePoppedGems(g, popSocketGems(x), it);
     takeItemOrSalvage(g, x, g.hero.x, g.hero.y);
   }
+  syncFirstPrismatic(g);
   return true;
 }
 function refillEmptySlotsFromBag(g: Game): void {
@@ -15484,6 +15577,7 @@ function runAutoCombine(g: Game): number {
     }
   } finally { COMBINE_DEPTH--; }
   sortInventory(g);
+  syncFirstPrismatic(g);
   return n;
 }
 
@@ -15740,7 +15834,11 @@ function rollAffix(e: En, lesser = false): void {
   const sch = bossy && !e.hunt ? 0.45 : e.hunt ? 0.25 : lesser ? 0 : e.cls === 1 ? 0.12 : e.rare ? 0.18 : 0;
   if (sch && R() < sch) { e.mshd = e.shd = Math.round(e.mhp * (e.rare ? 0.22 : bossy ? 0.4 + R() * 0.15 : 0.28)); }
 }
-function elMul(e: En, el: El): number { if (e.elW === el) return 1.7; if (e.elR && e.elR.includes(el)) return 0.55; return 1; }
+function elMul(e: En, el: El): number {
+  if (e.elW === el) return 1.7;
+  if (e.elR && e.elR.includes(el)) return 1 - EL_RESIST * (e.efw ? EARLY_FOE_MUL : 1);
+  return 1;
+}
 // ---------- peak-damage tracker (per five-layer stretch between camp visits) ----------
 // Every player-owned damage impact goes through hurtEn / applyHpDmg and is noted here.
 // Two separate maxima: s = anything that is not a Prismatic ultimate, u = Prismatic ultimate hits only.
@@ -17016,7 +17114,7 @@ function enemyAttack(g: Game, e: En, mul: number, st: Stats): void {
   }
   dmg = efPreHurt(g, e, dmg, st, Math.abs(e.x - h.x) + Math.abs(e.y - h.y) > 1);
   dmg = starPreHurt(g, e, dmg, st, Math.abs(e.x - h.x) + Math.abs(e.y - h.y) > 1);
-  if (dmg > 0) { NK_ATTACKER = e; try { applyHeroDmg(g, dmg, e.cls === 2 ? 5 : 3); } finally { NK_ATTACKER = null; } }
+  if (dmg > 0) { dmg = earlyFoeDmg(g, dmg); NK_ATTACKER = e; try { applyHeroDmg(g, dmg, e.cls === 2 ? 5 : 3); } finally { NK_ATTACKER = null; } }
   if (h.hp <= 0 || g.mode !== "play") return;
   efPostHurt(g, e, dmg, st);
   for (const p of allPassives(g.eq)) {
@@ -20455,6 +20553,7 @@ function equip(g: Game, bi: number, hand?: "rh" | "lh"): string {
   sortInventory(g);
   g.hero.hp = Math.min(g.hero.hp, calc(g.lvl, g.eq).maxHp);
   g.sfx("equip");
+  syncFirstPrismatic(g);
   return "Equipped " + it.name + ".";
 }
 function enforceHandRules(g: Game): void {
@@ -20479,6 +20578,7 @@ function unequip(g: Game, k: EqKey): string {
   g.bag.push(it, ...extra);
   sortInventory(g);
   g.hero.hp = Math.min(g.hero.hp, calc(g.lvl, g.eq).maxHp);
+  syncFirstPrismatic(g);
   return "Unequipped " + it.name + ".";
 }
 
@@ -24144,6 +24244,138 @@ function portalsShotSetup(kind: string): Record<string, unknown> {
     return portalsState(g);
   });
 }
+
+function earlyHookGame(): Game | null { return PRIS_TEST_G || LIVE; }
+function earlyInspectFoe(e: En | null | undefined): Record<string, unknown> | null {
+  if (!e) return null;
+  const fire = elMul(e, "fire");
+  const resist = e.elR && e.elR.length ? 1 - fire : 0;
+  return { id: e.id, name: e.name, cls: e.cls, hp: e.hp, mhp: e.mhp, def: e.def, atk: e.atk, efw: e.efw || 0, elR: e.elR ? e.elR.slice() : [], elW: e.elW || null, fireMul: fire, resist };
+}
+function earlyMakePris(kind: "wep" | "armor" | "pet" = "wep"): Item {
+  if (kind === "pet") return makePet(20, 7, 20);
+  if (kind === "armor") return makeItem(20, 7, "chest", 20);
+  return makeItem(20, 7, "sword", 20);
+}
+function earlyState(): Record<string, unknown> {
+  const g = earlyHookGame();
+  if (!g) return { ok: false, error: "no game" };
+  const foes = (g.en || []).filter((e: En) => e && e.hp > 0).map((e: En) => earlyInspectFoe(e));
+  return {
+    ok: true, hasPrismatic: !!g.hasPrismatic, firstPrismaticAt: g.firstPrismaticAt || 0, mul: earlyFoeMul(g),
+    held: prisHeldInBagOrEq(g), lootOwned: ownsPrismatic(g), lootMul: lootBonusMult(g),
+    toast: g.lootToastTxt || "", toastT: g.lootToast || 0, lastMsg: (g.msgs && g.msgs.length) ? g.msgs[g.msgs.length - 1].t : "",
+    bagRars: (g.bag || []).map((it: Item) => it.rar), eqRars: EQK.map((k: EqKey) => g.eq[k] ? g.eq[k]!.rar : -1),
+    stashRars: (g.stash || []).map((it: Item) => it.rar), gemBagRars: (g.gemBag || []).map((it: Item) => it.rar),
+    foes, fpInCode: ((): number => { try { const body = codeBodyOf(g); return typeof body.prf === "number" ? body.prf as number : 0; } catch { return -1; } })(),
+  };
+}
+try {
+  (window as unknown as { __ED16_EARLY?: object }).__ED16_EARLY = {
+    begin: (opts?: { depth?: number; lvl?: number }): Record<string, unknown> => {
+      const r = prisBegin({ depth: (opts && opts.depth) || 1, lvl: (opts && opts.lvl) || 1 });
+      const g = earlyHookGame();
+      if (g) {
+        g.hasPrismatic = false; g.firstPrismaticAt = 0;
+        g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+        g.bag = []; g.stash = []; g.gemBag = []; g.en = []; g.pend = [];
+        g.lootToast = 0; g.lootToastTxt = "";
+        syncFirstPrismatic(g, { toast: false });
+      }
+      return { ...r, ...earlyState() };
+    },
+    end: (): void => { prisEnd(); },
+    state: earlyState,
+    lootTables,
+    spawn: (cls = 0): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      const e = cls >= 2 ? mkActBoss(g, g.hero.x + 2, g.hero.y) : mkEnemy(g, g.hero.x + 2, g.hero.y, cls);
+      e.awake = true;
+      // Force a known resist so tests can read the 0.45 * mul curve without relying on a random affix roll.
+      e.elR = ["fire"]; e.elW = undefined;
+      if (!g.en.includes(e)) g.en.push(e);
+      return { ok: true, foe: earlyInspectFoe(e), ...earlyState() };
+    },
+    giveBag: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      g.bag.push(earlyMakePris());
+      syncFirstPrismatic(g);
+      return earlyState();
+    },
+    giveEq: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      g.eq.rh = earlyMakePris();
+      syncFirstPrismatic(g);
+      return earlyState();
+    },
+    giveStash: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      if (!Array.isArray(g.stash)) g.stash = [];
+      g.stash.push(earlyMakePris("armor"));
+      syncFirstPrismatic(g);
+      return earlyState();
+    },
+    giveGemBag: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      const gem = makeItem(20, 7, "gem", 20);
+      (g.gemBag || (g.gemBag = [])).push(gem);
+      syncFirstPrismatic(g);
+      return earlyState();
+    },
+    removeHeld: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      for (const k of EQK) g.eq[k] = null;
+      g.bag = (g.bag || []).filter((it: Item) => it.rar < 7);
+      syncFirstPrismatic(g);
+      return earlyState();
+    },
+    applyFoeDmg: (raw: number): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      const st = calc(g.lvl, g.eq);
+      g.hero.hp = st.maxHp;
+      const h0 = g.hero.hp;
+      const incoming = earlyFoeDmg(g, raw);
+      applyHeroDmg(g, incoming, 0);
+      return { ok: true, raw, incoming, h0, h1: g.hero.hp, took: h0 - g.hero.hp, mul: earlyFoeMul(g), maxHp: st.maxHp };
+    },
+    loadFromCode: (code: string): Record<string, unknown> => {
+      const prev = earlyHookGame();
+      const g = decodeCode(String(code || ""), prev);
+      if (!g) return { ok: false, error: "decode failed" };
+      if (installTestGame) installTestGame(g);
+      PRIS_TEST_G = g; STAT_G = g;
+      return earlyState();
+    },
+    saveCode: (): Record<string, unknown> => {
+      const g = earlyHookGame();
+      if (!g) return { ok: false, error: "no game" };
+      g.mode = "play";
+      return { ok: true, code: makeCode(g), fp: codeBodyOf(g).prf, ...earlyState() };
+    },
+    loadSynthetic: (opts?: { bag?: boolean; eq?: boolean; stash?: boolean; flag?: boolean; fp?: number }): Record<string, unknown> => {
+      const prev = earlyHookGame();
+      const g = newGame(prev);
+      g.mode = "play";
+      g.eq = { head: null, chest: null, arms: null, legs: null, rh: null, lh: null, pet: null };
+      g.bag = []; g.stash = []; g.gemBag = [];
+      g.hasPrismatic = false; g.firstPrismaticAt = 0;
+      if (opts && opts.bag) g.bag.push(earlyMakePris());
+      if (opts && opts.eq) g.eq.rh = earlyMakePris();
+      if (opts && opts.stash) { g.stash = [earlyMakePris("armor")]; }
+      loadFirstPrismatic(g, !!(opts && opts.flag), opts && opts.fp ? opts.fp : 0);
+      if (installTestGame) installTestGame(g);
+      PRIS_TEST_G = g; STAT_G = g;
+      return earlyState();
+    },
+  };
+} catch { /* ignore */ }
 try {
   (window as unknown as { __ED16_PORTALS?: object }).__ED16_PORTALS = {
     begin: portalsBegin,
@@ -25843,6 +26075,7 @@ export default function App() {
     const update = (dt: number): void => {
       const g = gRef.current;
       if (!g) return;
+      if (g.mode === "play") syncFirstPrismatic(g);
       if (g.mode === "play" && !LOAD_COMBINED.has(g)) { repairSocketSpill(g); clampBossPowerAll(g); loadCombinePass(g); }
       if (PRIS_T_FREEZE != null) g.time = PRIS_T_FREEZE;
       else g.time += dt;
@@ -26370,7 +26603,7 @@ export default function App() {
       }
       if (g.lootToast && g.lootToast > 0 && g.lootToastTxt) {
         ctx.globalAlpha = Math.min(1, g.lootToast * 2);
-        const lab = g.lootToastTxt.length > 36 ? g.lootToastTxt.slice(0, 34) + "..." : g.lootToastTxt;
+        const lab = g.lootToastTxt.length > 64 ? g.lootToastTxt.slice(0, 62) + "..." : g.lootToastTxt;
         ctx.fillStyle = "rgba(28,18,8,0.88)"; ctx.fillRect(8, VH - MSGH - 14, VW - 16, 12);
         text(lab, VW / 2, VH - MSGH - 8, "#ffd080", "center", 6);
         ctx.globalAlpha = 1;
