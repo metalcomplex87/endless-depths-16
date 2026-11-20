@@ -66,7 +66,7 @@ async function main() {
 
   // Chance table: leave the roll itself unchanged, just document it.
   const probs = await page.evaluate(() => window.__ED16_HZ.sizeSim(1, 200));
-  rec("larger-layer roll chances are unchanged (normal has double weight; extra sizes unlock from depth 25 every 25 floors)",
+  rec("larger-layer roll chances keep double weight for normal; extra sizes unlock from depth 11 every 25 floors",
     !!(probs && probs.ok && probs.probs && probs.probs[0] > probs.probs[1]),
     { depth200: probs && probs.probs, note: "P(normal)=2/(2+unlocked large tiers)" });
 

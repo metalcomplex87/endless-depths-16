@@ -5318,11 +5318,11 @@ function setBanner(g: Game, txt: string, sub: string, c: string, rar: number, t:
 }
 
 // ---- Floor size tiers (item 13) ----
-// From depth 25 every 25 depths unlocks one more, slightly larger tier; any unlocked size can roll
+// From depth 11 every 25 depths unlocks one more, slightly larger tier; any unlocked size can roll
 // (normal has double weight). Square maps; capped at 72x72 (2.7x the normal area) for phones.
 const FLOOR_SIZES = [44, 50, 56, 61, 65, 68, 70, 72];
 const FLOOR_SIZE_NAMES = ["Normal", "Large", "Larger", "Huge", "Vast", "Immense", "Colossal", "Titanic"];
-const FLOOR_SIZE_START = 25, FLOOR_SIZE_STEP = 25, FLOOR_NORMAL_W = 2;
+const FLOOR_SIZE_START = 11, FLOOR_SIZE_STEP = 25, FLOOR_NORMAL_W = 2;
 function floorTierMax(depth: number): number {
   if (depth < FLOOR_SIZE_START) return 0;
   return Math.min(FLOOR_SIZES.length - 1, 1 + Math.floor((depth - FLOOR_SIZE_START) / FLOOR_SIZE_STEP));
@@ -18694,10 +18694,10 @@ function ripWall(g: Game, x: number, y: number, ox: number, oy: number, power: n
   return true;
 }
 // Tier 1 hook: a main strike landed on `tg` (k = 0 normal, 1 crit, 2 super crit).
-// ---------- Floor weather (depth 50+; purely visual) ----------
+// ---------- Floor weather (depth 11+; purely visual) ----------
 type WxKind = "snow" | "blizzard" | "drift" | "frost" | "drizzle" | "rain" | "lightning" | "storm" | "wind";
-const WX_MIN_DEPTH = 50;
-const WX_NONE_CH = 0.55; // 55% of depth-50+ floors stay clear
+const WX_MIN_DEPTH = 11;
+const WX_NONE_CH = 0.55; // 55% of depth-11+ floors stay clear
 const WX_LIST: { k: WxKind; n: string; w: number; icon: string }[] = [
   { k: "snow", n: "Light Snow", w: 13, icon: "\u2744" }, { k: "blizzard", n: "Blowing Snow", w: 10, icon: "\u2744" },
   { k: "drift", n: "Drifting Snow", w: 10, icon: "\u2744" }, { k: "frost", n: "Ice & Frost", w: 10, icon: "\u2746" },
@@ -19109,7 +19109,7 @@ const ARTIFACTS: { t: string; n: string; l: string }[] = [
   { t: "Orb", n: "Void Marble", l: "Darker than shadow; light bends politely around it." },
 ];
 const ART_N = ARTIFACTS.length; // 50
-const ART_CH = 0.02; // 1/50 per lava-eligible floor past depth 25
+const ART_CH = 0.02; // 1/50 per lava-eligible floor from depth 11
 function artsOf(g: Game): number[] { return Array.isArray(g.arts) ? g.arts : (g.arts = []); }
 function packArts(a: unknown): string {
   const ok = (Array.isArray(a) ? a : []).filter((n: unknown) => typeof n === "number" && n >= 0 && n < ART_N);
@@ -19606,10 +19606,10 @@ function drawArtReveal(ctx: CanvasRenderingContext2D, dt: number, t: number): vo
   ctx.restore();
 }
 
-// ---------- Item 17: water, lava and ice hazards (depth 26+), item 18: gib reactions, item 19: obsidian ----------
+// ---------- Item 17: water, lava and ice hazards (depth 11+), item 18: gib reactions, item 19: obsidian ----------
 // g.hz per tile: 0 none (plain floor; Paramount evaporates water/ice into this), 1 water (hero can walk/run across; enemies cannot), 2 lava (impassable unless Lavastrider), 3 ice (walkable, slippery), 4 obsidian (walkable, lava hit by Paramount), 5 dry pit (legacy walkable tile; Paramount no longer creates these).
 const HZ_NONE = 0, HZ_WATER = 1, HZ_LAVA = 2, HZ_ICE = 3, HZ_OBS = 4, HZ_PIT = 5;
-const HZ_MIN_DEPTH = 26, HZ_WATER_CH = 0.32, HZ_LAVA_CH = 0.26;
+const HZ_MIN_DEPTH = 11, HZ_WATER_CH = 0.32, HZ_LAVA_CH = 0.26;
 const WW_NAME = "Lavastrider", WW_DESC = "walk across lava unharmed";
 const WW_CH_GEAR = [0, 0, 0.003, 0.006, 0.012, 0.02, 0.03, 0.045]; // per item, by rarity (Common..Prismatic)
 const WW_CH_PET = [0, 0, 0.005, 0.01, 0.018, 0.03, 0.045, 0.065];
@@ -22276,7 +22276,37 @@ function artAccessTest(g: Game): Record<string, unknown> {
 }
 try {
   (window as unknown as { __ED16_HZ?: object }).__ED16_HZ = {
-    rates: { HZ_MIN_DEPTH, HZ_WATER_CH, HZ_LAVA_CH, WW_CH_GEAR, WW_CH_PET, ART_CH, SHRINE_CH, SHRINE_MIN_DEPTH, SWARM_TIERS, BURIED_CH, BURIED_CAP, WX_NONE_CH, WX_LIST: WX_LIST.map((w) => ({ k: w.k, w: w.w })) },
+    rates: { HZ_MIN_DEPTH, HZ_WATER_CH, HZ_LAVA_CH, WW_CH_GEAR, WW_CH_PET, ART_CH, SHRINE_CH, SHRINE_MIN_DEPTH, SWARM_TIERS, BURIED_CH, BURIED_CAP, WX_MIN_DEPTH, WX_NONE_CH, FLOOR_SIZE_START, FLOOR_SIZE_STEP, WX_LIST: WX_LIST.map((w) => ({ k: w.k, w: w.w })) },
+    sizeProbs: (depth: number): number[] => floorTierProbs(depth).map((x: number) => +x.toFixed(3)),
+    // Standalone sampler: does not use LIVE or any profile slot (never writes p1). Used by tests/floor-features-gate.mjs.
+    sampleDepth: (depth: number, n: number): Record<string, unknown> => {
+      const prevSave = GIB_SKIP_SAVE, prevWx = WX_FORCE, prevHz = HZ_FORCE, prevTier = FLOOR_TIER_FORCE, prevW = MW, prevH = MH;
+      GIB_SKIP_SAVE = true; WX_FORCE = null; HZ_FORCE = ""; FLOOR_TIER_FORCE = null;
+      try {
+        const g = newGame(null);
+        g.mode = "play"; g.paused = false; g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null;
+        const out: { depth: number; n: number; water: number; lava: number; ice: number; oversized: number; wx: number; sizes: Record<string, number>; act: boolean } = {
+          depth, n, water: 0, lava: 0, ice: 0, oversized: 0, wx: 0, sizes: {}, act: isActFloor(depth),
+        };
+        for (let i = 0; i < n; i++) {
+          g.depth = depth; g.front = Math.max(floorFront(g), depth); g.area = "dungeon"; g.vault = null; g.mode = "play";
+          genFloor(g);
+          const c = hzCounts(g);
+          const lavaPools = c.lava - (g.artCave ? 9 : 0);
+          if (c.water) out.water++;
+          if (lavaPools > 0) out.lava++;
+          if (c.ice) out.ice++;
+          if (MW > FLOOR_SIZES[0]) out.oversized++;
+          if (floorWx(g)) out.wx++;
+          const key = String(MW);
+          out.sizes[key] = (out.sizes[key] || 0) + 1;
+        }
+        return out;
+      } finally {
+        GIB_SKIP_SAVE = prevSave; WX_FORCE = prevWx; HZ_FORCE = prevHz; FLOOR_TIER_FORCE = prevTier;
+        setMapSize(prevW, prevH);
+      }
+    },
     wx: (k: string | null): void => { WX_FORCE = k === null ? null : (k as WxKind | ""); },
     // 2026-11-18: 2x2 chests/shrine + torch light test hooks
     big: (): Record<string, unknown> => {
@@ -28011,7 +28041,7 @@ export default function App() {
                     <button className="dc-leave" onClick={close} aria-label="Close trophy case">{"\u2715 Close"}</button>
                   </div>
                   <div className="dc-shop-bd">
-                    <div className="dc-sm">{"Artifacts hide in lava-sealed caves past depth 25. Cross the moat with a " + WW_NAME + " item or turn it to obsidian with a Paramount. Each artifact can only be found once."}</div>
+                    <div className="dc-sm">{"Artifacts hide in lava-sealed caves from depth 11. Cross the moat with a " + WW_NAME + " item or turn it to obsidian with a Paramount. Each artifact can only be found once."}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 4, marginTop: 8 }}>
                       {ARTIFACTS.map((A: { t: string; n: string; l: string }, i: number) => {
                         const has = own.has(i);
