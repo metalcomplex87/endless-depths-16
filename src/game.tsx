@@ -10666,7 +10666,15 @@ function bkCodeStats(code: string): { lvl: number; depth: number } {
 }
 function bkOn(): boolean { return !!ED16_BK_KEY && (!!ED16_BK_URL || !!ED16_BK_GIST || !!bkLocalRelay()) && typeof fetch === "function"; }
 // ?bktest=1 sends to the relay's _test namespace (e2e only). ?bkrelay= is honoured only for a loopback test relay.
-function bkTest(): boolean { try { return new URLSearchParams(location.search).get("bktest") === "1"; } catch { return false; } }
+// Test mode = relay's separate _test namespace (never the kids' real backups): ?bktest=1, any automated browser
+// (puppeteer/playwright set navigator.webdriver), or a local dev server. Real phones are none of these.
+function bkTest(): boolean {
+  try {
+    if (new URLSearchParams(location.search).get("bktest") === "1") return true;
+    if (typeof navigator !== "undefined" && (navigator as Navigator & { webdriver?: boolean }).webdriver === true) return true;
+    return /^(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0)$/.test(location.hostname) || location.protocol === "file:";
+  } catch { return true; }
+}
 function bkLocalRelay(): string {
   try { const u = new URLSearchParams(location.search).get("bkrelay") || ""; return bkTest() && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(u) ? u.replace(/\/+$/, "") : ""; } catch { return ""; }
 }
