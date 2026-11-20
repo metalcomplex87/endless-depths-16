@@ -10036,15 +10036,20 @@ function ssAllKeys(): string[] {
 }
 async function scanRecoverable(includeCurrent = false): Promise<RecoverCand[]> {
   const seen: Record<string, number> = {};
+  const seenFp: Record<string, number> = {};
   const out: RecoverCand[] = [];
   const cur: Record<string, number> = {};
-  if (!includeCurrent) for (const p of PROFILES) { const b = profBlob(p.id); if (b) cur[b] = 1; }
+  const curFp: Record<string, number> = {};
+  if (!includeCurrent) for (const p of PROFILES) { const b = profBlob(p.id); if (b) { cur[b] = 1; curFp[recoverFingerprint(b)] = 1; } }
   const add = (src: string, key: string, vIn: string | null): void => {
     const v = premigBlob(vIn);
-    if (!v || seen[v] || cur[v]) return;
+    if (!v) return;
+    const fp = recoverFingerprint(v);
+    if (seen[v] || seenFp[fp] || cur[v] || curFp[fp]) return;
     const s = parseSaveRaw(v);
     if (!s) return;
     seen[v] = 1;
+    seenFp[fp] = 1;
     out.push({ src, key, raw: v, lvl: Math.floor(Number(s.lvl) || 1), depth: Math.floor(Number(s.depth) || 1), t: typeof s.t === "number" && isFinite(s.t) ? s.t : 0, prof: profOfKey(key) });
   };
   for (const k of lsKeys()) if (isSaveishKey(k)) add("localStorage", k, lsGet(k));
@@ -10055,6 +10060,38 @@ async function scanRecoverable(includeCurrent = false): Promise<RecoverCand[]> {
   out.sort((a: RecoverCand, b: RecoverCand) => (b.t - a.t) || (runProgressRank(b.lvl, b.depth, 0) - runProgressRank(a.lvl, a.depth, 0)));
   return out;
 }
+// Identity of a save blob ignoring the wall-clock `t` that buildPersistRaw stamps on every encode.
+function recoverFingerprint(raw: string): string {
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (!o || typeof o !== "object") return raw;
+    const copy: Record<string, unknown> = { ...o };
+    delete copy.t;
+    return JSON.stringify(copy);
+  } catch { return raw; }
+}
+function recoverPrevAlreadyKept(raw: string): boolean {
+  if (!raw) return false;
+  const fp = recoverFingerprint(raw);
+  try {
+    for (const k of lsKeys()) {
+      if (!/^ed16_recover_prev_/.test(k)) continue;
+      const v = lsGet(k);
+      if (v && (v === raw || recoverFingerprint(v) === fp)) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+// Copy a slot's current blob aside before replacing it. Never deletes. Skips a write when this exact
+// save (or the same save with only a new `t`) is already stored under ed16_recover_prev_*.
+function keepSlotBackup(id: ProfId, blobs: string[]): void {
+  blobs.forEach((r: string, i: number) => {
+    if (!r || recoverPrevAlreadyKept(r)) return;
+    const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : "");
+    void idbPutDone(k, r);
+    lsSet(k, r);
+  });
+}
 function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
   // Recover only writes Richard / Jax / Piper. Tester is ephemeral; Mike uses Back up / Restore.
   if (id !== 1 && id !== 2 && id !== 3) return false;
@@ -10064,11 +10101,7 @@ function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
   // Keep whatever sits in the slot now - even an unreadable blob - under a new key before it is replaced.
   const keep: string[] = [];
   for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== c.raw && keep.indexOf(r) < 0) keep.push(r);
-  keep.forEach((r: string, i: number) => {
-    const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : "");
-    void idbPutDone(k, r);
-    lsSet(k, r);
-  });
+  keepSlotBackup(id, keep);
   if (id === activeProf) memSave = c.raw; else memSaveBy[id] = c.raw;
   const ok = writeDurable(profSaveKey(id), c.raw);
   if (ok) bkAfterRestore(id, c.raw);
@@ -10795,14 +10828,20 @@ function bkAfterRestore(id: ProfId, raw: string): void {
   try { bkCapture(id, () => bkCodeOfRaw(raw), savedT(raw), true); } catch { /* ignore */ }
 }
 // Write a code into a profile slot. The slot's current blob is kept under ed16_recover_prev_pN_<time> first.
+function bkSameSave(existing: string | null, raw: string | null): boolean {
+  if (!existing || !raw) return false;
+  return existing === raw || recoverFingerprint(existing) === recoverFingerprint(raw);
+}
 function bkWriteCode(id: ProfId, code: string): string | null {
   if (!BK_SLOTS[id]) return null;
   const raw = persistRawFromCode(code);
   if (!raw) return null;
   const existing = profBlob(id);
+  // persistRawFromCode stamps a new t every call; do not rewrite or snapshot when the save is already this one.
+  if (bkSameSave(existing, raw)) return existing;
   const keep: string[] = [];
   for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== raw && keep.indexOf(r) < 0) keep.push(r);
-  keep.forEach((r: string, i: number) => { const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : ""); void idbPutDone(k, r); lsSet(k, r); });
+  keepSlotBackup(id, keep);
   if (id === activeProf) memSave = raw; else memSaveBy[id] = raw;
   const ok = writeDurable(profSaveKey(id), raw) || lsGet(profSaveKey(id)) === raw;
   return ok ? raw : null;
@@ -10896,6 +10935,9 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
           // Re-read right before writing: a save may have landed while the relay was answering.
           const now = parseSaveRaw(profBlob(id));
           if (now && savedT(profBlob(id)) > curT) break;
+          // persistRawFromCode always mints a new t, which used to look like an older slot on the next heal
+          // and rewrite+snapshot the same save over and over.
+          if (bkSameSave(profBlob(id), persistRawFromCode(c.code))) break;
           const raw = bkWriteCode(id, c.code);
           if (!raw) continue;
           bkHistPush(id, { t: c.t, lvl: st.lvl, depth: st.depth, h: bkHash(c.code), code: c.code });
@@ -21581,7 +21623,11 @@ html:has(.dc-profs), body:has(.dc-profs), .dc-root:has(.dc-profs), .dc-wrap:has(
 .dc-profs { position: absolute; inset: 0; z-index: 40; background: rgba(6, 4, 12, 0.82); display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: 8px; box-sizing: border-box; min-height: 0; overflow: hidden; touch-action: pan-y; }
 .dc-profs-card { width: min(360px, 100%); max-height: 100%; min-height: 0; margin: 0 auto; display: flex; flex-direction: column; overflow: hidden; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 8px 10px; box-sizing: border-box; box-shadow: 0 8px 28px rgba(0,0,0,0.55); touch-action: pan-y; }
 .dc-profs-hd { font-size: 14px; font-weight: 800; text-align: center; margin: 0 0 4px; flex-shrink: 0; }
-.dc-profs-list { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain; }
+.dc-profs-hd-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; margin: 0 0 4px; }
+.dc-profs-hd-row .dc-profs-hd { flex: 1; margin: 0; text-align: center; }
+.dc-profs-close { flex-shrink: 0; min-height: 36px !important; min-width: 72px; padding: 6px 12px !important; font-size: 13px; font-weight: 800; }
+.dc-profs-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain; }
+.dc-profs-list { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; min-height: 0; overflow: visible; }
 .dc-prof-wrap { width: 100%; flex-shrink: 0; }
 .dc-prof { width: 100%; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; padding: 3px 8px !important; }
 .dc-prof b { font-size: 13px; line-height: 1.15; }
@@ -23163,6 +23209,9 @@ function withSaveTest<T>(fn: () => T): T {
 }
 try {
   (window as unknown as { __ED16_SAVE?: object }).__ED16_SAVE = {
+    recoverFingerprint: (raw: string): string => recoverFingerprint(raw),
+    recoverPrevAlreadyKept: (raw: string): boolean => recoverPrevAlreadyKept(raw),
+    keepSlotBackup: (id: ProfId, blobs: string[]): void => keepSlotBackup(id, blobs),
     inspect: (): Record<string, unknown> => inspectRun(SAVE_TEST_G),
     decode: (code: string): Record<string, unknown> => withSaveTest(() => {
       const g = decodeCode(String(code || ""), null);
@@ -25495,8 +25544,10 @@ export default function App() {
     void scanRecoverable().then((list: RecoverCand[]) => { setRecList(list); bump(); }, () => { /* keep list */ });
     bump();
   };
+  const closeProfiles = (): void => { setProfOpen(false); };
   const openProfiles = (): void => {
     if (isMikeLocked()) { setMikeToolsOpen(true); return; }
+    if (profOpen) { setProfOpen(false); return; }
     const g = gRef.current;
     if (g && g.mode === "play" && profPersists(activeProf)) { try { saveGame(g, true); } catch { /* still open the picker */ } }
     setProfOpen(true);
@@ -28010,8 +28061,12 @@ export default function App() {
           {profOpen && !isMikeLocked() && (
             <div className="dc-profs" role="dialog" aria-modal="true" aria-label="Choose profile">
               <div className="dc-profs-card">
-                <div className="dc-profs-hd">Choose a profile</div>
+                <div className="dc-profs-hd-row">
+                  <div className="dc-profs-hd">Choose a profile</div>
+                  <button type="button" className="dc-b dc-profs-close" style={btn} onClick={closeProfiles} aria-label="Back">Back</button>
+                </div>
                 {stor === "checking" && <div className="dc-sm" style={{ textAlign: "center", marginBottom: 8 }}>Loading saves…</div>}
+                <div className="dc-profs-body">
                 <div className="dc-profs-list">
                   {PROFILES.map((p: { id: ProfId; name: string }) => {
                     const s = profSummary(p.id);
@@ -28051,7 +28106,7 @@ export default function App() {
                 </div>
                 <button className="dc-b dc-recover" style={{ ...btn, marginTop: 8, width: "100%" }} disabled={stor === "checking" || !storageReady || recBusy} onClick={openRecover}>{recBusy ? "Searching saves…" : "\ud83d\udd0d Recover lost profiles"}</button>
                 {recList !== null && (
-                  <div className="dc-rec" style={{ width: "100%", marginTop: 8, maxHeight: 260, overflowY: "auto", fontSize: 12, lineHeight: 1.35 }}>
+                  <div className="dc-rec" style={{ width: "100%", marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
                     {recNote ? <div className="dc-sm" style={{ textAlign: "center", marginBottom: 6 }}>{recNote}</div> : null}
                     {recList.length === 0 ? <div className="dc-sm" style={{ textAlign: "center" }}>No other saves found in this browser. If a profile is missing, it was played on a different device, browser, private tab or home-screen app - open the game there, tap Save Code and LOAD it here.</div> : recList.slice(0, 15).map((c: RecoverCand, i: number) => (
                       <div key={c.src + c.key + i} className="dc-rec-row" style={{ borderTop: "1px solid rgba(255,255,255,0.15)", padding: "6px 0" }}>
@@ -28068,7 +28123,7 @@ export default function App() {
                 )}
                 <button className="dc-b dc-bkhist" style={{ ...btn, marginTop: 8, width: "100%" }} disabled={stor === "checking" || !storageReady} onClick={openBkHist}>{"\ud83d\uddc2 Recover from backup"}</button>
                 {bkList !== null && (
-                  <div className="dc-bk" style={{ width: "100%", marginTop: 8, maxHeight: 260, overflowY: "auto", fontSize: 12, lineHeight: 1.35 }}>
+                  <div className="dc-bk" style={{ width: "100%", marginTop: 8, fontSize: 12, lineHeight: 1.35 }}>
                     {bkNote ? <div className="dc-sm" style={{ textAlign: "center", marginBottom: 6 }}>{bkNote}</div> : null}
                     {bkList.length === 0 ? <div className="dc-sm" style={{ textAlign: "center" }}>No backups on this device yet. Every save of Richard, Jax, Piper and Mike keeps one here (last 5 each).</div> : bkList.map((r: { id: ProfId; e: BkHist }, i: number) => (
                       <div key={r.id + "-" + r.e.h + "-" + i} className="dc-bk-row" style={{ borderTop: "1px solid rgba(255,255,255,0.15)", padding: "6px 0", display: "flex", alignItems: "center", gap: 6 }}>
@@ -28080,7 +28135,8 @@ export default function App() {
                 )}
                 <div className="dc-stor-rpt" style={{ width: "100%", marginTop: 8, fontSize: 11, opacity: 0.85, textAlign: "center", lineHeight: 1.35 }}>{storageReportLine()}</div>
                 <button className="dc-b" style={{ ...btn, marginTop: 10, width: "100%" }} onClick={lockOwnerDevice} aria-label="Lock">Lock</button>
-                {g && g.mode === "play" && <button className="dc-b" style={{ ...btn, marginTop: 8, width: "100%" }} onClick={() => setProfOpen(false)}>Cancel</button>}
+                {g && g.mode === "play" && <button className="dc-b" style={{ ...btn, marginTop: 8, width: "100%" }} onClick={closeProfiles}>Cancel</button>}
+                </div>
               </div>
             </div>
           )}
