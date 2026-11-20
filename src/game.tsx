@@ -111,7 +111,7 @@ type Shape = "bolt" | "nova" | "chain" | "meteor" | "beam" | "pillar" | "blades"
 type PType = "orbs" | "aura" | "thorns" | "retal" | "pulse" | "steps" | "halo" | "field" | "ward" | "sentinel";
 interface Spell { el: El; sh: Shape; mod: number; ch: number; pw: number; r: number; name: string }
 interface Passive { el: El; ty: PType; mod: number; pw: number; name: string }
-interface Fx { k: string; x: number; y: number; x2: number; y2: number; t: number; max: number; c: string; c2: string; r: number; seed: number; fired: boolean }
+interface Fx { k: string; x: number; y: number; x2: number; y2: number; t: number; max: number; c: string; c2: string; r: number; seed: number; fired: boolean; echo?: boolean }
 interface Ground { x: number; y: number; t: number; el: El; dmg: number }
 interface Ally { t: number; el: El; pw: number; ph: number }
 interface Trader { x: number; y: number; stock: Item[] }
@@ -131,7 +131,7 @@ interface Part { x: number; y: number; vx: number; vy: number; life: number; max
 interface ES { combo: number; cid: number; chg: number; rush: number; rage: number; hits: number; aegis: number; decoy: number; dodge: number; eth: number; tr: number; trT: number; wind: boolean; last: boolean; iron: boolean; still: boolean; moved: number; free: number; frz: number; q: number[][] }
 interface PShot { x0: number; y0: number; x1: number; y1: number; t: number; max: number; pt: number; rar: number; hit: boolean }
 interface Float { x: number; y: number; txt: string; c: string; life: number }
-interface Shot { x0: number; y0: number; x1: number; y1: number; t: number; c: string; max?: number; dmg?: number; tx?: number; ty?: number; from?: number; typ?: number; wep?: Item; path?: number }
+interface Shot { x0: number; y0: number; x1: number; y1: number; t: number; c: string; max?: number; dmg?: number; tx?: number; ty?: number; from?: number; typ?: number; wep?: Item; path?: number; echo?: boolean }
 interface Banner { txt: string; sub: string; c: string; rar: number; t: number; nk?: number }
 // sup: 1 = the rare "super" variant (Celestial Treasury loot cave / Royal Goblin Warren). cs: what is left inside a cave
 // the player already visited (the portal stays open for good, and the cave keeps its state so loot never refills).
@@ -4979,9 +4979,10 @@ function announce(t: string): void {
 }
 function msg(g: Game, t: string, c: string): void { g.msgs.push({ t, c }); if (g.msgs.length > 6) g.msgs.shift(); announce(t); }
 function burst(g: Game, x: number, y: number, n: number, cols: string[], sp: number, grav: number): void {
+  const pal = echoBurstCols(cols);
   for (let i = 0; i < n && g.parts.length < 600; i++) {
     const an = R() * 6.2832, v = sp * (0.3 + R() * 0.7), life = 0.4 + R() * 0.6;
-    g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v - sp * 0.2, life, max: life, c: pick(cols), s: R() < 0.3 ? 2 : 1, g: grav });
+    g.parts.push({ x, y, vx: Math.cos(an) * v, vy: Math.sin(an) * v - sp * 0.2, life, max: life, c: pick(pal), s: R() < 0.3 ? 2 : 1, g: grav });
   }
 }
 type HitCtx = { dx?: number; dy?: number; ox?: number; oy?: number };
@@ -10295,7 +10296,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     enforceHandRules(g);
     g.ultAts = readUltCds(s.ucs, g.ultAt, g.ultAtA, g.eq, true);
     g.paraAt = typeof s.pa === "number" && isFinite(s.pa) && s.pa > 0 ? Date.now() + Math.min(PARA_CD, s.pa) : 0;
-    g.nk = nkUnpackSt(s.nk); g.nkr = undefined;
+    g.nk = nkUnpackSt(s.nk); g.nkr = undefined; nkEchoClear(g);
     normUltCds(g);
     syncLegacyUlt(g);
     g.thSeen = thSeenParse(s.ts);
@@ -10567,7 +10568,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.ultAtA = typeof s.ultAtA === "number" && isFinite(s.ultAtA) ? Math.min(s.ultAtA, Date.now() + ULT_CD_MAX) : 0;
     g.ultAts = readUltCds(s.ultAts, g.ultAt, g.ultAtA, g.eq, false);
     g.paraAt = typeof s.paraAt === "number" && isFinite(s.paraAt) ? Math.max(0, Math.min(s.paraAt, Date.now() + PARA_CD)) : 0;
-    g.nk = nkUnpackSt(s.nk); g.nkr = undefined;
+    g.nk = nkUnpackSt(s.nk); g.nkr = undefined; nkEchoClear(g);
     normUltCds(g);
     syncLegacyUlt(g);
     g.floorTurn = typeof s.floorTurn === "number" && isFinite(s.floorTurn) ? Math.floor(s.floorTurn) : 0;
@@ -11369,7 +11370,7 @@ const NK: NkDef[] = [
   { key: "storm-crown", n: "Storm Crown", c: "#3a78ff", c2: "#b8d4ff", off: true, d: "Every 3rd attack calls lightning that chains to up to 6 enemies for 100% weapon damage each." },
   { key: "grave-toll", n: "Grave Toll", c: "#a456ff", c2: "#e0c8ff", off: true, d: "Enemies you kill rise as ghosts for 15 s and fight for you at 40% of your damage (max 5)." },
   { key: "phalanx-of-the-dead", n: "Phalanx of the Dead", c: "#a8e830", c2: "#e8ffb8", off: true, d: "Six sword skeletons fight around you at 8% of your damage each; +5% per kill (max +50%) on this floor. A broken skeleton rebuilds in 4 s; if all six break they burst into bone shards. They do not block." },
-  { key: "echo-self", n: "Echo Self", c: "#f4f0e8", c2: "#b8e8ff", off: true, d: "A ghostly teal copy trails your moves and repeats every attack (and its spells) 1 s later at 50% damage." },
+  { key: "echo-self", n: "Echo Self", c: "#f4f0e8", c2: "#b8e8ff", off: true, d: "A ghostly teal copy trails your moves and repeats every attack (and its spells) from the afterimage at 50% damage." },
   { key: "neon-skyfall", n: "Neon Skyfall", c: "#ffd21f", c2: "#ff40ff", off: true, d: "While you move, ceiling lasers strike random enemies within 5 tiles twice per second for 25% weapon damage; scorch marks burn for 10% per second for 3 s." },
   { key: "second-heartbeat", n: "Second Heartbeat", c: "#ff2a48", c2: "#ffb8c0", off: false, d: "On a lethal hit you split into two of you at half HP each, both at full damage. You only die if both fall; after 10 s the survivor is whole again. 3 min cooldown." },
   { key: "prism-guard", n: "Prism Guard", c: "#22e070", c2: "#c8ffe0", off: false, d: "A diamond shell blocks one full hit every 6 s, then fires a rainbow beam at the attacker for 200% weapon damage." },
@@ -11629,8 +11630,11 @@ function nkAfterAttack(g: Game, e: En, st: Stats): void {
 }
 function nkQueueEcho(g: Game, e: En): void {
   if (!nkOn(g, 3) || NK_ECHOING) return;
-  const r = nkRt(g);
-  if (r.echo.length < 12) r.echo.push({ t: 1, id: e.id, x: e.x, y: e.y });
+  const b = nkEchoBuf(g);
+  if (b.qn >= NK_ECHO_QCAP) return;
+  const ev = b.q[(b.qh + b.qn) % NK_ECHO_QCAP];
+  ev.t = NK_ECHO_LAG; ev.id = e.id; ev.x = e.x; ev.y = e.y;
+  b.qn++; b.qk = nkKey(g);
 }
 // Prism Guard / Second Heartbeat / Phalanx breaks. Returns true when the hit is fully handled.
 function nkPreHurt(g: Game, dmg: number): boolean {
@@ -11873,16 +11877,21 @@ function nkSkPos(g: Game, k: number): { x: number; y: number } {
 // ---- per-frame tick (real-time clock) ----
 
 // Echo Self visible afterimage: a ring buffer of the hero's recent pose, drawn as a teal ghost
-// ~NK_ECHO_LAG seconds behind. Damage still repeats 1 s later at 50% (NK_SCALE); only the
-// sprite and the repeat's FX origin use this delayed pose. Canvases are allocated once.
+// ~NK_ECHO_LAG seconds behind. Copied attacks (damage + visuals) fire on that same delay at
+// 50% (NK_SCALE) from the ghost's pose, so you see the afterimage perform the strike. Canvases
+// and the attack queue are preallocated; nothing is allocated in the per-frame tick.
 const NK_ECHO_LAG = 0.35;
 const NK_ECHO_N = 96;
 const NK_ECHO_SZ = 64;
 const NK_ECHO_PAD = 20;
 const NK_ECHO_A = 0.5;          // 50% alpha, in the 45-55% window
 const NK_ECHO_TEAL = "#3cf0d4";
+const NK_ECHO_TEAL2 = "#c8fff8";
+const NK_ECHO_BURST = [NK_ECHO_TEAL, NK_ECHO_TEAL2, "#ffffff"];
+const NK_ECHO_QCAP = 32;
 interface NkEchoSnap { t: number; ax: number; ay: number; face: number; dir: number; la: number; lb: number; ua: number; ub: number; arm: number; bob: number; sway: number; wa: number; wx: number; wy: number; glow: number; pull: number; pr: number; lunge: number; kind: number; adx: number; ady: number; bump: number; bdx: number; bdy: number; swing: number }
-interface NkEchoBuf { s: NkEchoSnap[]; i: number; n: number; lastT: number; key: string }
+interface NkEchoAtk { t: number; id: number; x: number; y: number }
+interface NkEchoBuf { s: NkEchoSnap[]; i: number; n: number; lastT: number; key: string; qk: string; q: NkEchoAtk[]; qh: number; qn: number }
 const NK_ECHO_MAP = new WeakMap<Game, NkEchoBuf>();
 const NK_ECHO_PS: Pose = { la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0 };
 const NK_ECHO_VIEW: NkEchoSnap = { t: 0, ax: 0, ay: 0, face: 1, dir: 2, la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0, pr: -1, lunge: 0, kind: 0, adx: 1, ady: 0, bump: 0, bdx: 0, bdy: 0, swing: 0 };
@@ -11894,15 +11903,27 @@ let NK_ECHO_DRAWN = false;
 let NK_ECHO_REUSE = false;
 let NK_ECHO_OX = 0, NK_ECHO_OY = 0, NK_ECHO_HIT = 0;
 function nkEchoNewSnap(): NkEchoSnap { return { t: -1, ax: 0, ay: 0, face: 1, dir: 2, la: 0, lb: 0, ua: 0, ub: 0, arm: 0, bob: 0, sway: 0, wa: 0, wx: 0, wy: 0, glow: 0, pull: 0, pr: -1, lunge: 0, kind: 0, adx: 1, ady: 0, bump: 0, bdx: 0, bdy: 0, swing: 0 }; }
+function nkEchoNewAtk(): NkEchoAtk { return { t: 0, id: 0, x: 0, y: 0 }; }
 function nkEchoBuf(g: Game): NkEchoBuf {
   let b = NK_ECHO_MAP.get(g);
-  if (!b) { const s: NkEchoSnap[] = []; for (let i = 0; i < NK_ECHO_N; i++) s.push(nkEchoNewSnap()); b = { s, i: 0, n: 0, lastT: -1, key: "" }; NK_ECHO_MAP.set(g, b); }
+  if (!b) {
+    const s: NkEchoSnap[] = []; for (let i = 0; i < NK_ECHO_N; i++) s.push(nkEchoNewSnap());
+    const q: NkEchoAtk[] = []; for (let i = 0; i < NK_ECHO_QCAP; i++) q.push(nkEchoNewAtk());
+    b = { s, i: 0, n: 0, lastT: -1, key: "", qk: "", q, qh: 0, qn: 0 }; NK_ECHO_MAP.set(g, b);
+  }
   return b;
 }
+function nkEchoQClear(b: NkEchoBuf | undefined): void { if (b) { b.qh = 0; b.qn = 0; } }
+function nkEchoQLen(g: Game | null): number { if (!g) return 0; const b = NK_ECHO_MAP.get(g); return b ? b.qn : 0; }
+function echoBurstCols(cols: string[]): string[] { return NK_ECHOING ? NK_ECHO_BURST : cols; }
+function nkEchoMarkShot(s: Shot): Shot {
+  if (NK_ECHOING) { s.c = NK_ECHO_TEAL; s.echo = true; }
+  return s;
+}
 function nkEchoClear(g: Game): void {
-  const b = NK_ECHO_MAP.get(g); if (!b) return;
-  b.n = 0; b.i = 0; b.lastT = -1; b.key = "";
-  NK_ECHO_HASH = 0; NK_ECHO_DRAWN = false;
+  const b = NK_ECHO_MAP.get(g);
+  if (b) { b.n = 0; b.i = 0; b.lastT = -1; b.key = ""; b.qk = ""; nkEchoQClear(b); }
+  NK_ECHO_HASH = 0; NK_ECHO_DRAWN = false; NK_ECHO_HIT = 0;
 }
 function nkEchoCopy(d: NkEchoSnap, s: NkEchoSnap): void {
   d.t = s.t; d.ax = s.ax; d.ay = s.ay; d.face = s.face; d.dir = s.dir;
@@ -11937,7 +11958,8 @@ function nkEchoFill(s: NkEchoSnap, g: Game): void {
 function nkEchoSample(g: Game): void {
   if (!nkOn(g, 3) || g.mode === "dead") { NK_ECHO_DRAWN = false; return; }
   const b = nkEchoBuf(g), t = g.time || 0, k = nkKey(g);
-  if (b.key !== k) { b.n = 0; b.i = 0; b.key = k; b.lastT = -1; }
+  if (b.key !== k) { b.n = 0; b.i = 0; b.key = k; b.lastT = -1; nkEchoQClear(b); }
+  b.qk = k;
   if (t === b.lastT && b.n > 0) { nkEchoFill(b.s[(b.i + NK_ECHO_N - 1) % NK_ECHO_N], g); return; }
   nkEchoFill(b.s[b.i], g); b.s[b.i].t = t;
   b.i = (b.i + 1) % NK_ECHO_N; if (b.n < NK_ECHO_N) b.n++; b.lastT = t;
@@ -12063,6 +12085,7 @@ function nkEchoState(g: Game | null): Record<string, unknown> {
     heroAx: +h.ax.toFixed(4), heroAy: +h.ay.toFixed(4), face: has ? NK_ECHO_VIEW.face : h.face,
     pr: has ? +NK_ECHO_VIEW.pr.toFixed(4) : -1, attacking: !!(has && NK_ECHO_VIEW.pr >= 0),
     origin: NK_ECHO_HIT ? { x: +NK_ECHO_OX.toFixed(2), y: +NK_ECHO_OY.toFixed(2), t: NK_ECHO_HIT } : null,
+    queued: b ? b.qn : 0, cap: NK_ECHO_QCAP,
   };
 }
 
@@ -12087,25 +12110,32 @@ function nkTick(g: Game, dt: number): void {
   if (!s.eq.length) { if (g.nkr) g.nkr.twin = null; return; }
   const r = nkRt(g);
   const st = calc(g.lvl, g.eq);
-  // Echo Self
+  // Echo Self: pending copies fire after NK_ECHO_LAG from the ghost pose
   if (r.echoShow > 0) r.echoShow -= dt;
-  for (const ev of r.echo) ev.t -= dt;
-  while (r.echo.length && r.echo[0].t <= 0) {
-    const ev = r.echo.shift() as { t: number; id: number; x: number; y: number };
+  const eb = nkEchoBuf(g);
+  if (eb.qk !== key) { nkEchoQClear(eb); eb.qk = key; }
+  for (let i = 0; i < eb.qn; i++) eb.q[(eb.qh + i) % NK_ECHO_QCAP].t -= dt;
+  while (eb.qn && eb.q[eb.qh].t <= 1e-8) {
+    const ev = eb.q[eb.qh];
+    eb.qh = (eb.qh + 1) % NK_ECHO_QCAP; eb.qn--;
     if (!nkOn(g, 3)) continue;
     let tg = g.en.find((o: En) => o.id === ev.id && o.hp > 0) ?? null;
     if (!tg) tg = nearestEnemy(g, Math.max(2, st.range + 1));
     if (!tg) continue;
-    const dx = Math.sign(tg.x - h.x), dy = Math.sign(tg.y - h.y), dist = Math.max(Math.abs(tg.x - h.x), Math.abs(tg.y - h.y));
     const hasG = nkEchoAt(g, NK_ECHO_LAG, NK_ECHO_VIEW);
-    const ax0 = h.ax, ay0 = h.ay;
-    if (hasG) { h.ax = NK_ECHO_VIEW.ax; h.ay = NK_ECHO_VIEW.ay; }
-    NK_ECHO_OX = (hasG ? NK_ECHO_VIEW.ax : h.ax) * TS + 12; NK_ECHO_OY = (hasG ? NK_ECHO_VIEW.ay : h.ay) * TS + 12; NK_ECHO_HIT = g.time || 0;
+    const ax0 = h.ax, ay0 = h.ay, x0 = h.x, y0 = h.y, face0 = h.face;
+    if (hasG) {
+      h.ax = NK_ECHO_VIEW.ax; h.ay = NK_ECHO_VIEW.ay;
+      h.x = Math.round(NK_ECHO_VIEW.ax); h.y = Math.round(NK_ECHO_VIEW.ay);
+      h.face = NK_ECHO_VIEW.face;
+    }
+    const dx = Math.sign(tg.x - h.x), dy = Math.sign(tg.y - h.y), dist = Math.max(Math.abs(tg.x - h.x), Math.abs(tg.y - h.y));
+    NK_ECHO_OX = h.ax * TS + 12; NK_ECHO_OY = h.ay * TS + 12; NK_ECHO_HIT = g.time || 0;
     NK_SCALE = 0.5; NK_ECHOING = true;
-    try { heroAttack(g, tg, st, dist, dx, dy, true); } finally { h.ax = ax0; h.ay = ay0; NK_SCALE = 1; NK_ECHOING = false; }
-    r.echoShow = 0.35;
-    fxAdd(g, "nkburst", NK_ECHO_OX, NK_ECHO_OY, 0, 0, 0.28, NK[3].c2, "#ffffff", 1.1 * TS);
-    fxAdd(g, "nkimpact", tg.ax * TS + 12, tg.ay * TS + 12, 0, 0, 0.2, NK[3].c2, "#ffffff", 9);
+    try { heroAttack(g, tg, st, dist, dx, dy, true); } finally { h.ax = ax0; h.ay = ay0; h.x = x0; h.y = y0; h.face = face0; NK_SCALE = 1; NK_ECHOING = false; }
+    r.echoShow = NK_ECHO_LAG;
+    fxAdd(g, "nkburst", NK_ECHO_OX, NK_ECHO_OY, 0, 0, 0.28, NK_ECHO_TEAL, "#ffffff", 1.1 * TS);
+    fxAdd(g, "nkimpact", tg.ax * TS + 12, tg.ay * TS + 12, 0, 0, 0.2, NK_ECHO_TEAL, "#ffffff", 9);
     g.sfx("nkEcho");
     if (g.mode !== "play") return;
   }
@@ -12198,7 +12228,8 @@ function nkCol(i: number, t: number, k = 0): string { return i === NK_PE ? "hsl(
 function nkMulberry(seed: number): number { let t = (seed >>> 0) + 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
 function fxAddDelay(g: Game, k: string, x: number, y: number, x2: number, y2: number, max: number, c: string, c2: string, r: number, delay = 0): void {
   if (g.fx.length >= 70) return;
-  g.fx.push({ k, x, y, x2, y2, t: max + Math.max(0, delay), max, c, c2, r, seed: R() * 1000, fired: false });
+  if (NK_ECHOING) { c = NK_ECHO_TEAL; c2 = NK_ECHO_TEAL2; }
+  g.fx.push({ k, x, y, x2, y2, t: max + Math.max(0, delay), max, c, c2, r, seed: R() * 1000, fired: false, echo: NK_ECHOING || undefined });
 }
 function drawNkIcon(ctx: CanvasRenderingContext2D, i: number, x: number, y: number, sz: number, t: number): void {
   const im = nkImg(i), pe = i === NK_PE;
@@ -13466,8 +13497,16 @@ try {
     nkvReset: (): void => { const g = nkTestG(); if (g) NKV.delete(g); },
     quietHud: (): void => { const g = nkTestG(); if (!g) return; g.banner = null; g.flash = Math.min(g.flash, 0.2); g.floats = []; g.msgs = []; g.warn = ""; },
     echoLag: (): number => NK_ECHO_LAG,
+    echoCap: (): number => NK_ECHO_QCAP,
     echoGhost: (): Record<string, unknown> => nkEchoState(nkTestG()),
     echoReset: (): void => { const g = nkTestG(); if (g) nkEchoClear(g); NK_ECHO_HIT = 0; },
+    echoPause: (on = true): void => { const g = nkTestG(); if (g) g.paused = !!on; },
+    echoPlain: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const sword = makeItem(10, 0, "sword"); delete sword.ef; delete sword.spells; delete sword.pas; delete sword.ult; delete sword.sk; delete sword.set;
+      g.eq = { ...g.eq, rh: sword, lh: null };
+      return { ok: true, kind: "sword" };
+    },
     echoPrep: (): Record<string, unknown> => {
       const g = nkTestG(); if (!g) return { ok: false };
       g.paused = false;
@@ -13482,20 +13521,35 @@ try {
       for (let i = 0; i < steps; i++) { g.time = (g.time || 0) + d; visTick(g, d); nkTick(g, d); }
       return nkEchoState(g);
     },
+    echoVisuals: (): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      return {
+        ok: true,
+        shots: g.shots.map((s: Shot) => ({ x0: +s.x0.toFixed(2), y0: +s.y0.toFixed(2), x1: +s.x1.toFixed(2), y1: +s.y1.toFixed(2), c: s.c, typ: s.typ ?? 0, echo: !!s.echo, t: +s.t.toFixed(3) })),
+        fx: g.fx.map((f: Fx) => ({ k: f.k, x: +f.x.toFixed(2), y: +f.y.toFixed(2), c: f.c, echo: !!f.echo, t: +f.t.toFixed(3) })),
+        echoShots: g.shots.filter((s: Shot) => s.echo).length,
+        echoFx: g.fx.filter((f: Fx) => f.echo).length,
+        origin: NK_ECHO_HIT ? { x: +NK_ECHO_OX.toFixed(2), y: +NK_ECHO_OY.toFixed(2), t: NK_ECHO_HIT } : null,
+        queued: nkEchoQLen(g),
+      };
+    },
     echoSwing: (lag?: number): Record<string, unknown> => {
       const g = nkTestG(); if (!g) return { ok: false };
-      g.paused = true;
+      g.paused = true; NK_ECHO_HIT = 0;
       const st = calc(g.lvl, g.eq);
       const tg = nearestEnemy(g, Math.max(2, st.range + 1)) || g.en.find((e: En) => e.hp > 0) || null;
       const hp0 = tg ? tg.hp : 0;
       if (tg) heroAttack(g, tg, st, Math.max(Math.abs(tg.x - g.hero.x), Math.abs(tg.y - g.hero.y)), Math.sign(tg.x - g.hero.x), Math.sign(tg.y - g.hero.y));
       // snapshot the first frame of the swing at this exact time so the 0.35s lookup is not interpolated with a pre-attack pose
       heroAnimTick(g, 0, 0); nkEchoSample(g);
+      const queuedAt = nkEchoQLen(g);
+      const hp1 = tg ? tg.hp : 0;
       const tAtk = g.time || 0;
       const d = 1 / 60, steps = Math.max(1, Math.round((lag ?? NK_ECHO_LAG) / d));
       for (let i = 0; i < steps; i++) { g.time = tAtk + (i + 1) * d; visTick(g, d); nkTick(g, d); }
       const stt = nkEchoState(g);
-      return { ...stt, ok: true, dealt: tg ? +(hp0 - tg.hp).toFixed(2) : 0, queued: g.nkr ? g.nkr.echo.length : 0, as: g.hero.as ?? 0 };
+      const echoShots = g.shots.filter((s: Shot) => s.echo);
+      return { ...stt, ok: true, dealt: tg ? +(hp0 - hp1).toFixed(2) : 0, echoDealt: tg ? +(hp1 - tg.hp).toFixed(2) : 0, queuedAt, queued: nkEchoQLen(g), fired: !!(NK_ECHO_HIT && NK_ECHO_HIT >= tAtk), as: g.hero.as ?? 0, echoShots: echoShots.length, echoFx: g.fx.filter((f: Fx) => f.echo).length, shot0: echoShots[0] ? { x0: +echoShots[0].x0.toFixed(2), y0: +echoShots[0].y0.toFixed(2), c: echoShots[0].c } : null };
     },
     echoAttack: (): Record<string, unknown> => {
       const g = nkTestG(); if (!g) return { ok: false };
@@ -13504,7 +13558,39 @@ try {
       if (!tg) return { ok: false, error: "no target" };
       const hp0 = tg.hp;
       heroAttack(g, tg, st, Math.max(Math.abs(tg.x - g.hero.x), Math.abs(tg.y - g.hero.y)), Math.sign(tg.x - g.hero.x), Math.sign(tg.y - g.hero.y));
-      return { ok: true, id: tg.id, dealt: +(hp0 - tg.hp).toFixed(2), hp: tg.hp, as: g.hero.as ?? 0, queued: g.nkr ? g.nkr.echo.length : 0 };
+      return { ok: true, id: tg.id, dealt: +(hp0 - tg.hp).toFixed(2), hp: tg.hp, as: g.hero.as ?? 0, queued: nkEchoQLen(g), fired: false };
+    },
+    echoFillCap: (n = 40): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      g.paused = true;
+      const s = nkOf(g); if (!s.own[3]) s.own[3] = 1; s.got = true;
+      if (!s.eq.includes(3)) { while (s.eq.length >= nkCap(g)) { const old = s.eq.shift(); if (old !== undefined) nkUnwear(g, old); } s.eq.push(3); }
+      nkEchoQClear(nkEchoBuf(g));
+      const st = calc(g.lvl, g.eq);
+      const h = g.hero;
+      let tg = nearestEnemy(g, Math.max(2, st.range + 1)) || g.en.find((e: En) => e.hp > 0) || null;
+      if (!tg) { tg = mkEnemy(g, h.x + 1, h.y, 0); tg.hp = tg.mhp = 1e12; tg.def = 0; tg.awake = true; g.en.push(tg); if (g.vis) g.vis.fill(1); }
+      else { tg.hp = tg.mhp = Math.max(tg.hp, 1e12); }
+      const want = Math.max(1, Math.floor(n));
+      for (let i = 0; i < want; i++) heroAttack(g, tg, st, 1, 1, 0);
+      return { ok: true, queued: nkEchoQLen(g), cap: NK_ECHO_QCAP, tried: want };
+    },
+    echoDrop: (why: string): Record<string, unknown> => {
+      const g = nkTestG(); if (!g) return { ok: false };
+      const s = nkOf(g); if (!s.own[3]) s.own[3] = 1; s.got = true;
+      if (!s.eq.includes(3)) { while (s.eq.length >= nkCap(g)) { const old = s.eq.shift(); if (old !== undefined) nkUnwear(g, old); } s.eq.push(3); }
+      const st = calc(g.lvl, g.eq);
+      const h = g.hero;
+      let tg = g.en.find((e: En) => e.hp > 0) || null;
+      if (!tg) { tg = mkEnemy(g, h.x + 1, h.y, 0); tg.hp = tg.mhp = 1e12; g.en.push(tg); }
+      nkEchoQClear(nkEchoBuf(g));
+      heroAttack(g, tg, st, 1, 1, 0);
+      const before = nkEchoQLen(g);
+      if (why === "unequip") nkEquip(g, 3);
+      else if (why === "die") nkEchoClear(g);  // same clear heroDie uses; do not actually kill (would persist a save)
+      else if (why === "load") nkEchoClear(g);
+      else if (why === "floor") { const prev = GIB_SKIP_SAVE; GIB_SKIP_SAVE = true; try { g.depth = (g.depth || 1) + 1; nkTick(g, 0); } finally { GIB_SKIP_SAVE = prev; } }
+      return { ok: true, why, before, queued: nkEchoQLen(g) };
     },
     echoDmg: (): Record<string, unknown> => {
       const g = nkTestG(); if (!g) return { ok: false };
@@ -13518,7 +13604,7 @@ try {
       try {
         const s = nkOf(g); if (!s.own[3]) s.own[3] = 1; s.got = true;
         if (!s.eq.includes(3)) { while (s.eq.length >= nkCap(g)) { const old = s.eq.shift(); if (old !== undefined) nkUnwear(g, old); } s.eq.push(3); }
-        const r = nkRt(g); r.echo = [];
+        nkEchoQClear(nkEchoBuf(g));
         const sword = makeItem(10, 0, "sword"); delete sword.ef; delete sword.spells; delete sword.pas; delete sword.ult; delete sword.sk; delete sword.set;
         g.eq = { head: null, chest: null, arms: null, legs: null, rh: sword, lh: null, pet: null };
         const h = g.hero;
@@ -13528,7 +13614,7 @@ try {
         const st = calc(g.lvl, g.eq);
         const strike = (scale: number): number => {
           e.hp = e.mhp = 1e12; e.def = 0; e.burn = 0; e.bl = 0; e.poi = 0; e.stun = 0; e.hit = 0;
-          r.echo = [];
+          nkEchoQClear(nkEchoBuf(g));
           NK_SCALE = scale; NK_ECHOING = true;
           try { heroAttack(g, e, st, 1, 1, 0, true); } finally { NK_SCALE = 1; NK_ECHOING = false; }
           return 1e12 - e.hp;
@@ -13537,13 +13623,26 @@ try {
         let restore = seedRng(SEED); const full = strike(1); restore();
         restore = seedRng(SEED); const half = strike(0.5); restore();
         const ratio = full > 0 ? half / full : 0;
-        e.hp = e.mhp = 1e12; r.echo = [];
+        // timing: a real (non-twin) swing queues a 0.35s copy; it must not fire early, then fire at lag from the ghost
+        e.hp = e.mhp = 1e12; nkEchoQClear(nkEchoBuf(g)); NK_ECHO_HIT = 0;
+        const ax0 = h.ax, ay0 = h.ay, x0 = h.x, y0 = h.y;
+        for (let i = 0; i < 30; i++) { g.time = (g.time || 0) + 1 / 60; visTick(g, 1 / 60); nkTick(g, 1 / 60); }
         heroAttack(g, e, st, 1, 1, 0);
-        const afterFirst = e.hp, queued = r.echo.length;
+        heroAnimTick(g, 0, 0); nkEchoSample(g);
+        const afterFirst = e.hp, queued = nkEchoQLen(g);
         const t0 = g.time || 0;
-        for (let i = 0; i < 22; i++) { g.time = t0 + (i + 1) * 0.05; visTick(g, 0.05); nkTick(g, 0.05); }
+        h.x = h.ax = x0 + 5; h.y = h.ay = y0;
+        const earlySteps = 20; // 20/60 = 0.333s, still short of 0.35
+        for (let i = 0; i < earlySteps; i++) { g.time = t0 + (i + 1) / 60; visTick(g, 1 / 60); nkTick(g, 1 / 60); }
+        const midHp = e.hp, midQ = nkEchoQLen(g), midHit = NK_ECHO_HIT;
+        for (let i = earlySteps; i < 21; i++) { g.time = t0 + (i + 1) / 60; visTick(g, 1 / 60); nkTick(g, 1 / 60); }
         const queuedDmg = afterFirst - e.hp;
-        return { ok: true, full: +full.toFixed(2), half: +half.toFixed(2), ratio: +ratio.toFixed(4), scale: 0.5, queued, queuedDmg: +queuedDmg.toFixed(2), origin: { x: NK_ECHO_OX, y: NK_ECHO_OY, t: NK_ECHO_HIT } };
+        const originTileX = NK_ECHO_HIT ? NK_ECHO_OX / TS - 0.5 : null;
+        const originTileY = NK_ECHO_HIT ? NK_ECHO_OY / TS - 0.5 : null;
+        const echoShots = g.shots.filter((sh: Shot) => sh.echo);
+        const out = { ok: true, full: +full.toFixed(2), half: +half.toFixed(2), ratio: +ratio.toFixed(4), scale: 0.5, queued, midQ, midDmg: +(afterFirst - midHp).toFixed(2), midFired: midHit !== 0, queuedDmg: +queuedDmg.toFixed(2), origin: { x: NK_ECHO_OX, y: NK_ECHO_OY, t: NK_ECHO_HIT }, originTile: originTileX == null ? null : { x: +originTileX.toFixed(3), y: +(originTileY as number).toFixed(3) }, ghostAt: { x: ax0, y: ay0 }, heroAt: { x: h.ax, y: h.ay }, echoShots: echoShots.length, shot0: echoShots[0] ? { x0: +echoShots[0].x0.toFixed(2), y0: +echoShots[0].y0.toFixed(2), c: echoShots[0].c, echo: true } : null, lag: NK_ECHO_LAG };
+        h.x = h.ax = x0; h.y = h.ay = y0;
+        return out;
       } finally { g.eq = eq0; GIB_SKIP_SAVE = prevSkip; NK_SCALE = 1; NK_ECHOING = false; }
     },
     echoPixels: (): Record<string, unknown> => {
@@ -13613,7 +13712,9 @@ function lineTiles(g: Game, x0: number, y0: number, x1: number, y1: number, len:
   return out;
 }
 function fxAdd(g: Game, k: string, x: number, y: number, x2: number, y2: number, max: number, c: string, c2: string, r: number): void {
-  if (g.fx.length < 70) g.fx.push({ k, x, y, x2, y2, t: max, max, c, c2, r, seed: R() * 1000, fired: false });
+  if (g.fx.length >= 70) return;
+  if (NK_ECHOING) { c = NK_ECHO_TEAL; c2 = NK_ECHO_TEAL2; }
+  g.fx.push({ k, x, y, x2, y2, t: max, max, c, c2, r, seed: R() * 1000, fired: false, echo: NK_ECHOING || undefined });
 }
 function heal(g: Game, n: number, show: boolean): void {
   const mx = calc(g.lvl, g.eq).maxHp;
@@ -16450,14 +16551,14 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     const offW = g.eq.rh && g.eq.lh && g.eq.lh.kind !== "shield" ? g.eq.lh : null;
     const pushThrown = (it: Item, ox: number, oy: number): void => {
       const c = it.rar >= 7 ? RC[it.rar] : "#f0e0b0";
-      g.shots.push({ x0: x0 + ox, y0: y0 + oy, x1: x1 + ox * 0.3, y1: y1 + oy * 0.3, t: 0.42, max: 0.42, c, typ: 10, wep: it, path: 1 });
+      g.shots.push(nkEchoMarkShot({ x0: x0 + ox, y0: y0 + oy, x1: x1 + ox * 0.3, y1: y1 + oy * 0.3, t: 0.42, max: 0.42, c, typ: 10, wep: it, path: 1 }));
     };
     const pushBeam = (it: Item, ox: number, oy: number, spread: number): void => {
       const wel = itemWepEl(it);
       const c = wel ? ELC[wel] : "#80fff0";
       const ang = Math.atan2(y1 - y0, x1 - x0) + spread;
       const len = Math.hypot(x1 - x0, y1 - y0);
-      g.shots.push({ x0: x0 + ox, y0: y0 + oy, x1: x0 + Math.cos(ang) * len, y1: y0 + Math.sin(ang) * len, t: 0.32, max: 0.32, c, typ: 11, wep: it, path: 2 });
+      g.shots.push(nkEchoMarkShot({ x0: x0 + ox, y0: y0 + oy, x1: x0 + Math.cos(ang) * len, y1: y0 + Math.sin(ang) * len, t: 0.32, max: 0.32, c, typ: 11, wep: it, path: 2 }));
     };
     if (isPrisThrownWep(mainW)) {
       pushThrown(mainW!, 0, 0);
@@ -16473,12 +16574,12 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
         const len = TS * (1.6 + (i % 2) * 0.5);
         const it = isPrisBeamWep(mainW) ? mainW! : offW!;
         const wel = itemWepEl(it);
-        g.shots.push({ x0, y0, x1: x0 + Math.cos(a) * len, y1: y0 + Math.sin(a) * len, t: 0.18, max: 0.18, c: wel ? ELC[wel] : "#80fff0", typ: 11, wep: it, path: 2 });
+        g.shots.push(nkEchoMarkShot({ x0, y0, x1: x0 + Math.cos(a) * len, y1: y0 + Math.sin(a) * len, t: 0.18, max: 0.18, c: wel ? ELC[wel] : "#80fff0", typ: 11, wep: it, path: 2 }));
       }
       g.sfx("prisBeam");
     } else {
       const sc = atkEl && st.magic ? ELC[atkEl] : st.magic ? "#d080ff" : st.range > 0 ? "#f0e0b0" : "#d0d8e0";
-      g.shots.push({ x0, y0, x1, y1, t: 0.14, max: 0.14, c: sc, typ: heroShotTyp(g.eq, st.magic) });
+      g.shots.push(nkEchoMarkShot({ x0, y0, x1, y1, t: 0.14, max: 0.14, c: sc, typ: heroShotTyp(g.eq, st.magic) }));
     }
   }
   const hitIds = new Set<number>();
@@ -16578,6 +16679,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
 
 function heroDie(g: Game): void {
   if (g.swarm) endSwarm(g, true);
+  nkEchoClear(g);
   g.mode = "dead"; g.deadT = 0; g.hero.hp = 0;
   g.flash = 0.6; g.flashC = "#ff0000"; g.shake = 6;
   burst(g, g.hero.ax * TS + 12, g.hero.ay * TS + 12, 80, ["#ff3030", "#a01010", SKIN], 100, 80);
@@ -20427,7 +20529,7 @@ function drawFx(ctx: CanvasRenderingContext2D, f: Fx, camX: number, camY: number
   if (f.t > f.max) return;
   const p = 1 - f.t / f.max;
   const x = f.x - camX, y = f.y - camY, x2 = f.x2 - camX, y2 = f.y2 - camY;
-  const fade = Math.min(1, (f.t / f.max) * 2.2);
+  const fade = Math.min(1, (f.t / f.max) * 2.2) * (f.echo ? NK_ECHO_A : 1);
   ctx.globalAlpha = fade;
   if (f.k === "ring" || f.k === "ward") {
     const r = Math.max(2, f.r * (f.k === "ward" ? 1 : Math.min(1, p * 1.4)));
@@ -25550,6 +25652,7 @@ export default function App() {
         const maxT = s.max && s.max > 0 ? s.max : 0.15;
         const pr = 1 - s.t / maxT;
         const typ = s.typ ?? 0;
+        const eA = s.echo ? NK_ECHO_A : 1;
         if (typ === 10 && s.wep) {
           const u = Math.min(1, Math.max(0, pr));
           const f = u < 0.55 ? (u / 0.55) : (1 - (u - 0.55) / 0.45);
@@ -25557,10 +25660,10 @@ export default function App() {
           const spin = (1 - s.t) * 22;
           ctx.save();
           ctx.globalCompositeOperation = "lighter";
-          ctx.globalAlpha = 0.45;
+          ctx.globalAlpha = 0.45 * eA;
           ctx.fillStyle = s.c;
           ctx.beginPath(); ctx.arc(x, y, 14, 0, 6.2832); ctx.fill();
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = eA;
           ctx.globalCompositeOperation = "source-over";
           drawWeaponAt(ctx, s.wep, x, y, 1.35, 1, spin);
           ctx.restore();
@@ -25568,7 +25671,7 @@ export default function App() {
         }
         if (typ === 11) {
           const x0 = s.x0 - camX, y0 = s.y0 - camY, x1 = s.x1 - camX, y1 = s.y1 - camY;
-          const fade = Math.max(0.25, Math.min(1, s.t / maxT + 0.2));
+          const fade = Math.max(0.25, Math.min(1, s.t / maxT + 0.2)) * eA;
           ctx.save();
           ctx.globalCompositeOperation = "lighter";
           ctx.strokeStyle = s.c;
@@ -25584,13 +25687,13 @@ export default function App() {
         ctx.save();
         ctx.translate(Math.round(x), Math.round(y));
         ctx.rotate(ang);
-        ctx.globalAlpha = 0.35; ctx.fillStyle = s.c;
+        ctx.globalAlpha = 0.35 * eA; ctx.fillStyle = s.c;
         ctx.fillRect(-5, -3, 10, 6);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = eA;
         if (typ === 4) {
-          ctx.globalAlpha = 0.45; ctx.fillStyle = s.c;
+          ctx.globalAlpha = 0.45 * eA; ctx.fillStyle = s.c;
           ctx.beginPath(); ctx.arc(-2, 0, 5, 0, 6.2832); ctx.fill();
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = eA;
           ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(0, 0, 3.2, 0, 6.2832); ctx.fill();
           ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(1, 0, 1.6, 0, 6.2832); ctx.fill();
           ctx.fillStyle = s.c; ctx.fillRect(-7, -1, 6, 2);
