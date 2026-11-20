@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
+import { passOwnerGate } from "./_owner.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = process.env.ED16_ROOT || path.resolve(__dirname, "..");
@@ -46,6 +47,7 @@ async function open(browser) {
 
 async function waitReady(page) {
   await page.waitForSelector(".dc-root", { timeout: 25000 });
+  await passOwnerGate(page);
   await page.waitForFunction(() => {
     const t = document.body.innerText || "";
     return (t.includes("Profiles") || t.includes("Choose a profile") || t.includes("Save Game")) && !t.includes("Loading saves");

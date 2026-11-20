@@ -4,6 +4,7 @@ import path from "path";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
+import { passOwnerGate } from "./_owner.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = process.env.ED16_ROOT || path.resolve(__dirname, "..");
@@ -55,6 +56,7 @@ async function open(browser, url = BASE) {
 
 async function waitReady(page) {
   await page.waitForSelector(".dc-root", { timeout: 25000 });
+  await passOwnerGate(page);
   await page.waitForFunction(() => {
     const t = document.body.innerText || "";
     return (
@@ -65,8 +67,9 @@ async function waitReady(page) {
       t.includes("Enter your PIN") ||
       t.includes("Restore save") ||
       t.includes("Saves") ||
-      t.includes("Opening")
-    ) && !t.includes("Loading saves");
+      t.includes("Opening") ||
+      t.includes("Owner passcode")
+    ) && !t.includes("Loading saves") && !document.querySelector("[data-ed16-owner-gate]");
   }, { timeout: 20000 });
   await sleep(400);
 }
@@ -303,6 +306,8 @@ async function main() {
     );
     record("Mike Back up save button on picker", layout860.backup, "");
     record("Mike Restore save button on picker", layout860.restore, "");
+    const hasLock = await page.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent || "").trim() === "Lock"));
+    record("owner Lock button on picker", hasLock, "");
     await page.screenshot({ path: SHOT, fullPage: false });
     record("picker screenshot written", fs.existsSync(SHOT) && fs.statSync(SHOT).size > 1000, SHOT + " " + (fs.existsSync(SHOT) ? fs.statSync(SHOT).size : 0));
 
@@ -457,15 +462,15 @@ async function main() {
     const restoreSrc = filePayload && filePayload.trim();
     record("backup payload is a real ED16 code or raw save", !!(restoreSrc && (/ED16-|ED2-/i.test(restoreSrc) || restoreSrc.startsWith("{"))), restoreSrc ? restoreSrc.slice(0, 12) : "missing");
 
-    await page.evaluate(async () => {
-      try { localStorage.clear(); } catch {}
-      try { sessionStorage.clear(); } catch {}
-      try {
-        const dbs = (indexedDB.databases && (await indexedDB.databases())) || [];
-        for (const d of dbs) if (d && d.name) indexedDB.deleteDatabase(d.name);
-      } catch {}
-    });
-    ({ browser, page } = await cycleBrowser(browser, DIR));
+    try { await page.close(); } catch {}
+    try { await browser.close(); } catch {}
+    // Simulate erasing browser data: drop this profile's storage, then reopen (owner gate + Restore still work).
+    for (const sub of ["Default/Local Storage", "Default/Session Storage", "Default/IndexedDB", "Default/Service Worker"]) {
+      fs.rmSync(path.join(DIR, sub), { recursive: true, force: true });
+    }
+    browser = await launch(DIR);
+    page = (await open(browser)).page;
+    await waitReady(page);
     const afterWipe = await allProfKeys(page);
     record("p5 empty after localStorage wipe", !afterWipe["ed16_save_v1_p5"], "p5=" + (afterWipe["ed16_save_v1_p5"] ? "present" : "empty"));
 

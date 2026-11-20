@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
+import { passOwnerGate } from "./_owner.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = path.join(__dirname, "screenshots");
@@ -62,6 +63,7 @@ async function openFreshPage(browser) {
 
 async function waitReady(page) {
   await page.waitForSelector(".dc-root", { timeout: 25000 });
+  await passOwnerGate(page);
   await page.waitForFunction(() => {
     const t = document.body.innerText || "";
     return (t.includes("Profiles") || t.includes("Save Game") || t.includes("Choose a profile")) &&
@@ -486,17 +488,22 @@ async function runSharedBrowserIndependence(userDir) {
     const afterJ = await slotSnap(page);
     record(prefix + " Jax saved", !!afterJ.p2, fp(afterJ.p2));
 
-    // Piper stand-in import
+    // Piper stand-in import. The stand-in can share the same starting depth/level as the
+    // Jax seed; play this slot longer so the fingerprints diverge. If slots were merged,
+    // Jax's p2 snapshot would also change here.
+    const jaxBeforePiper = afterJ.p2;
     await tapProfile(page, "Piper");
     await sleep(300);
     await loadCode(page, PIPER_CODE);
     const pipImportTxt = await bodyText(page);
     record(prefix + " Piper import message", /Imported/i.test(pipImportTxt) && /press Save Game/i.test(pipImportTxt),
       pipImportTxt.match(/Imported[^\n]{0,120}/)?.[0] || "");
-    await playABit(page, 24);
+    await playABit(page, 48);
     await pressSaveGame(page);
     const afterP = await slotSnap(page);
     record(prefix + " Piper saved", !!afterP.p3, fp(afterP.p3));
+    record(prefix + " Piper import/play did not overwrite the Jax slot", sameSnap(jaxBeforePiper, afterP.p2),
+      "J before=" + fp(jaxBeforePiper) + " after=" + fp(afterP.p2));
 
     const wantR = afterP.p1, wantJ = afterP.p2, wantP = afterP.p3;
     const distinct = fp(wantR) !== fp(wantJ) && fp(wantR) !== fp(wantP) && fp(wantJ) !== fp(wantP);

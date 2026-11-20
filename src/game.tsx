@@ -3,7 +3,9 @@ import { useState, useEffect, useRef, useGrokTheme } from "grok/canvas";
 // STORAGE KEYS ARE STABLE ACROSS DEPLOYS. Never rename these, or existing
 // player saves will not load: ed16_save_v1_p1/p2/p3/p5 and their _bak keys,
 // ed16_stash_v1_pN / _bak, ed16_profile_mig_v1, ed16_best, ed16_lvl, ed16_lock,
-// ed16_mike_bak_at, ed16_mike_lock, ed16_mike_pin. p4 (Tester) is ephemeral and must never be written.
+// ed16_mike_bak_at, ed16_mike_lock, ed16_mike_pin, ed16_owner_ok, ed16_owner_fail, ed16_owner_until.
+// p4 (Tester) is ephemeral and must never be written.
+// Owner-gate verifier is PBKDF2-SHA256 only; the passcode is never stored in source.
 // Future edits belong in /workspace/ed16-web/src, not the Cursor canvas.
 
 const TS = 24;
@@ -9400,6 +9402,13 @@ const MIKE_BAK_AT = "ed16_mike_bak_at";
 const MIKE_LOCK_KEY = "ed16_mike_lock";
 const MIKE_PIN_KEY = "ed16_mike_pin";
 const MIKE_LINK_HASH = "a1b28c746be0d6fac5b9407ed5ccb02bc2e08af6fbaf1b2d3d3d658ba2259543";
+const OWNER_OK_KEY = "ed16_owner_ok";
+const OWNER_FAIL_KEY = "ed16_owner_fail";
+const OWNER_UNTIL_KEY = "ed16_owner_until";
+const OWNER_OK_VAL = "ed16-owner-ok-v1";
+const OWNER_PBKDF2_ITER = 250000;
+const OWNER_PBKDF2_SALT = "2430ec965ca70d4a93b0d24a07aed1bd";
+const OWNER_PBKDF2_HASH = "449bcb3db0a731b6a1a784c808183a3a1f1c0cdb876c5340f2b07668b331de98";
 const PROFILES: { id: ProfId; name: string }[] = [
   { id: 1, name: "Richard" },
   { id: 2, name: "Jax" },
@@ -9675,6 +9684,50 @@ function mikePinState(): "unset" | "skip" | "set" {
 }
 async function hashMikePin(pin: string): Promise<string> {
   return sha256hex("ed16-mike-pin:" + pin);
+}
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+async function pbkdf2Sha256Hex(pass: string, saltHex: string, iter: number): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex).buffer as ArrayBuffer, iterations: iter }, key, 256);
+  return Array.from(new Uint8Array(bits)).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+}
+async function verifyOwnerPass(pass: string): Promise<boolean> {
+  try {
+    const got = await pbkdf2Sha256Hex(pass, OWNER_PBKDF2_SALT, OWNER_PBKDF2_ITER);
+    return hexEq(got, OWNER_PBKDF2_HASH);
+  } catch { return false; }
+}
+function ownerUnlockRemembered(): boolean {
+  try { return lsGet(OWNER_OK_KEY) === OWNER_OK_VAL || ssGet(OWNER_OK_KEY) === OWNER_OK_VAL; } catch { return false; }
+}
+function rememberOwnerUnlock(): void {
+  try { lsSet(OWNER_OK_KEY, OWNER_OK_VAL); } catch { /* ignore */ }
+  try { ssSet(OWNER_OK_KEY, OWNER_OK_VAL); } catch { /* ignore */ }
+  try { lsRemove(OWNER_FAIL_KEY); lsRemove(OWNER_UNTIL_KEY); } catch { /* ignore */ }
+}
+function clearOwnerUnlock(): void {
+  try { lsRemove(OWNER_OK_KEY); ssRemove(OWNER_OK_KEY); } catch { /* ignore */ }
+}
+function ownerFailCount(): number { try { return Number(lsGet(OWNER_FAIL_KEY) || "0") || 0; } catch { return 0; } }
+function ownerBackoffUntil(): number { try { return Number(lsGet(OWNER_UNTIL_KEY) || "0") || 0; } catch { return 0; } }
+function recordOwnerFail(): number {
+  let n = ownerFailCount() + 1;
+  try { lsSet(OWNER_FAIL_KEY, String(n)); } catch { /* ignore */ }
+  if (n >= 5) {
+    try { lsSet(OWNER_UNTIL_KEY, String(Date.now() + 30000)); } catch { /* ignore */ }
+    try { lsSet(OWNER_FAIL_KEY, "0"); } catch { /* ignore */ }
+    n = 0;
+  }
+  return n;
+}
+function skipOwnerGateNow(): boolean {
+  if (isMikeLocked() || mikeLinkVerdict === "pending" || mikeLinkVerdict === "yes") return true;
+  try { if (mikeQueryToken().length >= 24 && mikeLinkVerdict !== "no") return true; } catch { /* ignore */ }
+  return false;
 }
 try {
   if (typeof window !== "undefined" && readMikeLocked()) {
@@ -20667,6 +20720,11 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
 .dc-pin-grid .dc-b { min-height: 48px; font-size: 18px; font-weight: 800; }
 .dc-mike-saves { position: absolute; inset: 0; z-index: 45; background: rgba(6, 4, 12, 0.82); display: flex; align-items: center; justify-content: center; padding: 12px; }
 .dc-mike-saves-card { width: min(360px, 100%); max-height: 100%; overflow-y: auto; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 14px 12px; }
+.dc-ownergate { position: absolute; inset: 0; z-index: 80; background: #120c14; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dc-ownergate-card { width: min(340px, 100%); background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 20px 16px; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+.dc-ownergate-card h1 { font-size: 18px; font-weight: 800; text-align: center; margin: 0 0 8px; }
+.dc-ownergate input { width: 100%; box-sizing: border-box; min-height: 44px; font-size: 18px; letter-spacing: 4px; text-align: center; margin: 10px 0; border-radius: 8px; border: 1px solid #6a5a90; background: #0c0a12; color: #e8e0d0; }
+.dc-ownergate .dc-mike-note { text-align: center; }
 .dc-setlist { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .dc-setbon { margin-top: 4px; }
 .dc-sethd { font-weight: 800; color: #40e070; font-size: 12px; }
@@ -24162,6 +24220,12 @@ export default function App() {
   const [mikePinFirst, setMikePinFirst] = useState<string>("");
   const [mikePinNote, setMikePinNote] = useState<string>("");
   const [mikeToolsOpen, setMikeToolsOpen] = useState<boolean>(false);
+  const [ownerUnlocked, setOwnerUnlocked] = useState<boolean>(() => skipOwnerGateNow() || ownerUnlockRemembered());
+  const [ownerCodeTxt, setOwnerCodeTxt] = useState<string>("");
+  const [ownerNote, setOwnerNote] = useState<string>("");
+  const [ownerBusy, setOwnerBusy] = useState<boolean>(false);
+  const [ownerUntil, setOwnerUntil] = useState<number>(() => ownerBackoffUntil());
+  const [ownerNow, setOwnerNow] = useState<number>(() => Date.now());
   const [recList, setRecList] = useState<RecoverCand[] | null>(null);
   const [recBusy, setRecBusy] = useState<boolean>(false);
   const [recNote, setRecNote] = useState<string>("");
@@ -24450,6 +24514,48 @@ export default function App() {
       else submitMikePinSetup(next);
     }
   };
+  const showOwnerGate = !skipOwnerGateNow() && !ownerUnlocked;
+  useEffect(() => {
+    if (ownerUntil <= Date.now()) return;
+    const id = window.setInterval(() => setOwnerNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [ownerUntil]);
+  const submitOwnerGate = (): void => {
+    if (showOwnerGate === false) return;
+    const wait = ownerUntil - Date.now();
+    if (wait > 0) { setOwnerNote("Try again in " + Math.ceil(wait / 1000) + "s."); return; }
+    const pass = ownerCodeTxt;
+    setOwnerCodeTxt("");
+    setOwnerBusy(true);
+    setOwnerNote("Checking…");
+    void verifyOwnerPass(pass).then((ok: boolean) => {
+      if (ok) {
+        rememberOwnerUnlock();
+        setOwnerUnlocked(true);
+        setOwnerNote("");
+        setOwnerUntil(0);
+      } else {
+        const n = recordOwnerFail();
+        const until = ownerBackoffUntil();
+        if (until > Date.now()) {
+          setOwnerUntil(until);
+          setOwnerNote("Too many tries. Wait 30 seconds.");
+        } else {
+          setOwnerNote("That code is not right." + (n ? " (" + n + "/5)" : ""));
+        }
+      }
+      setOwnerBusy(false);
+      bump();
+    }, () => { setOwnerBusy(false); setOwnerNote("Could not verify just now. Try again."); bump(); });
+  };
+  const lockOwnerDevice = (): void => {
+    clearOwnerUnlock();
+    setOwnerUnlocked(false);
+    setOwnerCodeTxt("");
+    setOwnerNote("");
+    setProfOpen(true);
+    bump();
+  };
   const startOrRestart = (): boolean => {
     const g = gRef.current;
     if (profOpen) return true;
@@ -24615,6 +24721,7 @@ export default function App() {
           mikeLinkVerdict = "no";
           try { ensureJaxSeed(); } catch { /* ignore */ }
           setMikeBoot("off"); setProfOpen(true);
+          if (!ownerUnlockRemembered()) setOwnerUnlocked(false);
           bump();
         }
       } catch {
@@ -26571,7 +26678,7 @@ export default function App() {
       saveNow();
       if (ac) { void ac.close(); }
     };
-  }, []);
+  }, [showOwnerGate]);
 
   // ---------- inventory view ----------
   const g = gRef.current;
@@ -26692,6 +26799,17 @@ export default function App() {
   return (
     <div className="dc-root" style={{ background: theme.bg.base, color: theme.text.primary, fontFamily: theme.font.family, overflow: "hidden", touchAction: "none", padding: 0, userSelect: "none", WebkitUserSelect: "none", WebkitTapHighlightColor: "transparent" }}>
       <style>{CSS}</style>
+      {showOwnerGate ? (
+        <div className="dc-ownergate" data-ed16-owner-gate="1" role="dialog" aria-modal="true" aria-label="Owner passcode">
+          <div className="dc-ownergate-card">
+            <h1>Endless Depths 16</h1>
+            <div className="dc-sm" style={{ textAlign: "center" }}>Enter the owner passcode to continue.</div>
+            <input type="password" inputMode="numeric" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={ownerCodeTxt} disabled={ownerBusy || ownerUntil > ownerNow} onChange={(e) => { setOwnerCodeTxt(e.target.value); setOwnerNote(""); }} onKeyDown={(e) => { if (e.key === "Enter") submitOwnerGate(); }} aria-label="Owner passcode" />
+            <button className="dc-b go" style={{ ...btn, width: "100%", minHeight: 44 }} disabled={ownerBusy || !ownerCodeTxt || ownerUntil > ownerNow} onClick={submitOwnerGate}>{ownerUntil > ownerNow ? ("Wait " + Math.max(1, Math.ceil((ownerUntil - ownerNow) / 1000)) + "s") : (ownerBusy ? "Checking…" : "Unlock")}</button>
+            {ownerNote ? <div className="dc-mike-note" style={{ marginTop: 8 }}>{ownerNote}</div> : null}
+          </div>
+        </div>
+      ) : (<>
       <div className="dc-wrap">
         <div className="dc-stage">
           <canvas ref={cvRef} tabIndex={0} className="dc-cv" />
@@ -26821,7 +26939,8 @@ export default function App() {
                   </div>
                 )}
                 <div className="dc-stor-rpt" style={{ width: "100%", marginTop: 8, fontSize: 11, opacity: 0.85, textAlign: "center", lineHeight: 1.35 }}>{storageReportLine()}</div>
-                {g && g.mode === "play" && <button className="dc-b" style={{ ...btn, marginTop: 10, width: "100%" }} onClick={() => setProfOpen(false)}>Cancel</button>}
+                <button className="dc-b" style={{ ...btn, marginTop: 10, width: "100%" }} onClick={lockOwnerDevice} aria-label="Lock">Lock</button>
+                {g && g.mode === "play" && <button className="dc-b" style={{ ...btn, marginTop: 8, width: "100%" }} onClick={() => setProfOpen(false)}>Cancel</button>}
               </div>
             </div>
           )}
@@ -27460,6 +27579,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
   } catch (err) {
