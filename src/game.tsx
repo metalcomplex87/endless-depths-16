@@ -149,6 +149,7 @@ interface FloorSnap {
   theme: number; campSpot?: { x: number; y: number }; gobT: number; floorTurn: number;
   cracks?: string;
   ws?: number; mw?: number; mh?: number; xp?: PortalSpot[]; sh?: Shrine | null; hz?: string; ac?: ArtCave | null;
+  bi?: BioSt; // biome (absent on old saves = no biome)
 }
 interface Splat { x: number; y: number; wall: boolean; c: string; life: number; max: number; dots: { x: number; y: number; s: number; a: number }[] }
 interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number; rest?: number; drag?: number; bounces?: number; streak?: number; age?: number; hzs?: number; sc?: number; ht?: number; burn?: number }
@@ -170,6 +171,7 @@ interface Game {
   spSw?: SpSw | null; spSwD?: number[]; // 2026-11-20 Spider Swarm: live event + depths already spent (saved)
   rt?: boolean; pcd?: number; acd?: number; qd?: number[]; wt?: number; swT?: number;
   autoCombine?: boolean;
+  bio?: BioSt | null; // 2026-11-20 biome overlay for this floor (see BIOMES)
   gemBag?: Item[];
   bagCap?: number;
   gemCap?: number;
@@ -1103,6 +1105,7 @@ function captureFloor(g: Game): FloorSnap {
     sh: packShrine(g.shrine),
     hz: packHz(g),
     ac: packArtCave(g.artCave),
+    bi: packBio(g.bio),
   };
 }
 function unpackFloorSnap(raw: unknown): FloorSnap | null {
@@ -1141,6 +1144,7 @@ function unpackFloorSnapAt(raw: unknown): FloorSnap | null {
     sh: unpackShrine(s.sh),
     hz: typeof s.hz === "string" ? s.hz : undefined,
     ac: s.ac && typeof s.ac === "object" ? packArtCave(s.ac as ArtCave) : null,
+    bi: unpackBio(s.bi, MW * MH) ?? undefined,
   };
 }
 function ensureStairTile(g: Game, tile: number, preferFar = true): { x: number; y: number } | null {
@@ -1277,6 +1281,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   g.seen = unpackMapBits(snap.seen, 1, MW * MH);
   g.hz = unpackHz(snap.hz, MW * MH); g.slide = null;
   g.artCave = snap.ac ? { ...snap.ac } : null;
+  g.bio = unpackBio(snap.bi, MW * MH);
   g.vis = new Uint8Array(MW * MH);
   g.theme = snap.theme || themeOf(g.depth);
   g.thShift = themeShift(g);
@@ -1306,6 +1311,7 @@ function restoreFloor(g: Game, snap: FloorSnap, nearTile: number): void {
   expandFeaturesOnLoad(g);
   computeVis(g);
   placeTorches(g);
+  bioOnRestore(g);
 }
 function applyActFloorOnEnter(g: Game): void {
   if (!isActFloor(g.depth) || g.area === "camp" || g.vault) return;
@@ -2546,6 +2552,7 @@ type SideStash = {
   trader: Trader | null; hx: number; hy: number; ft: number; ground: Ground[]; gobT: number;
   portal: PortalSpot | null; secret: PortalSpot | null; gobPort: PortalSpot | null;
   theme: number; cracks?: string; area: string; ws?: number; xp?: PortalSpot[]; sh?: Shrine | null; hz?: string; ac?: ArtCave | null;
+  bi?: BioSt;
 };
 function packSideStash(g: Game): string {
   syncMapSize(g);
@@ -2557,6 +2564,7 @@ function packSideStash(g: Game): string {
     portal: packPortal(g.portal), secret: packPortal(g.secret), gobPort: packPortal(g.gobPort),
     theme: g.theme, cracks: packCracks(g) || undefined, area: g.area ?? "dungeon",
     ws: g.wxs, xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p), sh: packShrine(g.shrine), hz: packHz(g), ac: packArtCave(g.artCave),
+    bi: packBio(g.bio),
   };
   return JSON.stringify(stash);
 }
@@ -2578,6 +2586,7 @@ function applySideStash(g: Game, raw: string): boolean {
     g.wxs = typeof s.ws === "number" ? s.ws : g.wxs;
     g.xps = Array.isArray(s.xp) ? s.xp.map((p: unknown) => unpackPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p) : [];
     g.shrine = unpackShrine(s.sh); g.hz = unpackHz(s.hz, MW * MH); g.artCave = s.ac ? packArtCave(s.ac) : null; g.slide = null; hzSanitize(g);
+    g.bio = unpackBio(s.bi, MW * MH); BIO_MASK_KEY = "~";
     g.hero.x = s.hx; g.hero.y = s.hy; g.hero.ax = s.hx; g.hero.ay = s.hy;
     if (typeof s.theme === "number") { g.theme = s.theme; g.tiles = makeTiles(g.theme, themeShift(g)); }
     g.cracks = unpackCracks(s.cracks, g.map);
@@ -5345,6 +5354,7 @@ let FLOOR_TIER_FORCE: number | null = null;
 function floorTierOf(g: Game): number { const i = FLOOR_SIZES.indexOf(MW); return i < 0 ? 0 : i; }
 function genFloor(g: Game): void {
   g.splats = [];
+  g.bio = null;
   g.wxs = (R() * 4294967296) >>> 0;
   setMapSize(FLOOR_SIZES[FLOOR_TIER_FORCE !== null ? Math.max(0, Math.min(FLOOR_SIZES.length - 1, FLOOR_TIER_FORCE)) : floorTierFor(g.depth, g.wxs, isActFloor(g.depth))]);
   g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
@@ -5547,6 +5557,7 @@ function genFloor(g: Game): void {
   genHazards(g);
   maybeSpawnArtifactCave(g);
   refitIfSplit(g);
+  bioGenFloor(g); // last: reads the finished layout, never changes it
 }
 const HUNTER_CHANCE = 0.025; // ~2.5% of floors
 const HUNTER_MIN_DEPTH = 4;
@@ -7059,6 +7070,719 @@ function supChestRar(): number {
   for (let i = 0; i < 5; i++) { r -= w[i]; if (r <= 0) return i; }
   return 4;
 }
+// ---------- 2026-11-20: Biomes (data-driven overlay registry) ----------
+// A biome is an optional overlay rolled once per NEW dungeon floor. It never replaces the floor's theme, enemies, chests,
+// hazards, size, shrine or bosses: it only adds a look, one signature mechanic, a small reward and (optionally) a
+// themed tag on some ordinary enemies. Every biome is one BIOMES entry; the engine below never names a biome, so new
+// entries (e.g. one unlocking every 20 depths) plug in with no engine change.
+//   Roll: depth >= BIO_MIN_DEPTH, not an act-boss floor, dungeon area only. One fixed chance per floor (BIO_CH, it does
+//   NOT grow with the pool), then a uniform pick among entries with unlockDepth <= depth that accept the floor's
+//   hazard family (bad[]). Seeded from the floor seed (g.wxs), so tests are reproducible; the result is SAVED with the
+//   floor (FloorSnap.bi / side and vault stash .bi), so going back or reloading never re-rolls it. Old saves have no
+//   .bi, so their floors simply have no biome.
+//   Swarms (shrine swarm, spider swarm): every combat-changing biome mechanic goes dormant while one is running.
+type BioSt = { k: string; f: number[]; u: number[] }; // k biome id, f feature tiles (y*MW+x), u feature tiles already used
+interface BioVariant { pre: string; ch: number; hp: number; atk: number; xp: number; fast?: boolean; col: string }
+interface BioFeat { kind: "spot" | "patch"; n: number; cap: number; size?: number; gap?: number }
+interface BioLoot { note: string; gold?: number; pots?: number; goldPile?: number }
+interface BioHook {
+  world?(g: Game, b: BiomeDef, st: Stats, calm: boolean): void; // every world tick (0.36 s, or each turn in turn mode)
+  frame?(g: Game, b: BiomeDef, dt: number, calm: boolean): void; // every frame while playing
+  touch?(g: Game, b: BiomeDef, k: number, first: boolean): void; // hero steps on (or next to, for wells) a feature tile
+  near?: number; // Chebyshev radius for touch (0 = the tile itself)
+  featOver?: boolean; // draw features from over() (e.g. above a darkness layer) instead of under entities
+  drawFeat?(ctx: CanvasRenderingContext2D, g: Game, b: BiomeDef, k: number, used: boolean, sx: number, sy: number, t: number, calm: boolean): void;
+  over?(ctx: CanvasRenderingContext2D, g: Game, b: BiomeDef, camX: number, camY: number, t: number, calm: boolean): void; // after entities, before weather
+}
+interface BiomeDef {
+  id: string; name: string; unlockDepth: number; blurb: string;
+  vis: { tint: string; col: string; part: string[]; partK: "fall" | "rise" | "drift" | "pull"; dens: number; wall?: boolean };
+  paint(x: CanvasRenderingContext2D, v: number, r: () => number, wall: boolean): void; // cached 24x24 overlay sprite, 4 variants per floor/wall
+  bad?: HzKind[]; // hazard families this biome refuses to share a floor with (the pick skips it; the chance is unchanged)
+  feat?: BioFeat;
+  hook: BioHook;
+  loot: BioLoot;
+  variant?: BioVariant;
+}
+const BIO_MIN_DEPTH = 11, BIO_CH = 0.22; // ~22% of eligible floors, whatever the pool size
+let BIO_FORCE: string | null = null; // tests: "" = never, id = always that biome (when allowed)
+const BIO_RT = { key: "", lit: 0, hg: 0, pulse: 0, amb: 0, tick: 0 };
+const BIO_TILES = new Map<string, HTMLCanvasElement>();
+const bioGoldAmt = (d: number, k: number): number => Math.max(1, Math.round((6 + d * 4) * k));
+function bioGive(g: Game, x: number, y: number, gold: number): void { collectDrop(g, { x, y, item: null, pot: false, gold }, x, y); }
+function bioCalmFoe(e: En): boolean { return e.hp > 0 && e.cls < 2 && !e.act && !e.hunt && !e.gob; }
+function bioRing(g: Game, x: number, y: number, c: string, c2: string, r: number, t = 0.5): void { fxAdd(g, "ring", x * TS + 12, y * TS + 12, 0, 0, t, c, c2, r); }
+
+const BIOMES: BiomeDef[] = [
+  { // 1. darkness: the light shrinks to a small circle; Lumen Shards bring it back
+    id: "umbral", name: "Umbral Veil", unlockDepth: 11, blurb: "darkness presses in - find Lumen Shards for light",
+    vis: { tint: "rgba(16,8,40,0.16)", col: "#b8a0ff", part: ["#6a50c0", "#a890ff", "#3a2a70"], partK: "drift", dens: 5 },
+    paint: (x, v, r, wall) => {
+      if (wall) { x.fillStyle = "rgba(10,4,30,0.35)"; x.fillRect(0, 0, TS, TS); for (let i = 0; i < 3; i++) { x.fillStyle = "rgba(150,120,255,0.35)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 1); } return; }
+      for (let i = 0; i < 3; i++) { x.fillStyle = "rgba(20,8,50,0.35)"; x.beginPath(); x.ellipse(r() * TS, r() * TS, 4 + r() * 6, 2 + r() * 3, r() * 3, 0, 6.2832); x.fill(); }
+      if (v % 2 === 0) { x.fillStyle = "rgba(190,170,255,0.55)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 1); }
+    },
+    bad: ["lava"],
+    feat: { kind: "spot", n: 4, cap: 8, gap: 7 },
+    hook: {
+      near: 0, featOver: true,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        BIO_RT.lit = 30;
+        const x = k % MW, y = (k / MW) | 0;
+        bioGive(g, x, y, bioGoldAmt(g.depth, 1.2));
+        bioRing(g, x, y, "#e0d8ff", "#8060ff", 7 * TS, 0.7);
+        burst(g, x * TS + 12, y * TS + 12, 26, ["#ffffff", "#c8b8ff", "#8060ff"], 90, -20);
+        g.sfx("sparkle");
+        msg(g, "Lumen Shard! The veil lifts for 30 seconds.", b.vis.col);
+      },
+      frame: (g, b, dt) => { if (BIO_RT.lit > 0) BIO_RT.lit = Math.max(0, BIO_RT.lit - dt); },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => {
+        if (used) return;
+        const p = 0.6 + 0.4 * Math.sin(t * 4 + k);
+        ctx.save(); ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = 0.35 * p; ctx.fillStyle = "#a080ff"; ctx.beginPath(); ctx.arc(sx + 12, sy + 12, 11, 0, 6.2832); ctx.fill();
+        ctx.globalAlpha = 1; ctx.fillStyle = "#e8e0ff";
+        ctx.beginPath(); ctx.moveTo(sx + 12, sy + 3); ctx.lineTo(sx + 17, sy + 12); ctx.lineTo(sx + 12, sy + 21); ctx.lineTo(sx + 7, sy + 12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(sx + 11, sy + 8, 2, 6);
+        ctx.restore();
+      },
+      over: (ctx, g, b, camX, camY, t, calm) => {
+        // Pure rendering: game logic, auto-targeting and enemy AI are unchanged; awake foes in sight always show glowing eyes.
+        const lit = BIO_RT.lit > 0 || calm;
+        const want = lit ? 0 : 1;
+        BIO_RT.amb += (want - BIO_RT.amb) * 0.08;
+        if (BIO_RT.amb < 0.02) return;
+        const hx = g.hero.ax * TS + 12 - camX, hy = g.hero.ay * TS + 12 - camY;
+        const r0 = 2.6 * TS, r1 = 4.6 * TS;
+        ctx.save();
+        // cached vignette sprite + 4 solid bands (one radial gradient per floor, not per frame: cheap on phones)
+        const D = bioDarkSprite(r0, r1), half = D.width / 2, x0 = Math.round(hx - half), y0 = Math.round(hy - half);
+        ctx.globalAlpha = BIO_RT.amb;
+        ctx.drawImage(D, x0, y0);
+        ctx.fillStyle = "rgba(4,2,12,0.9)";
+        ctx.fillRect(0, HUD, VW, Math.max(0, y0 - HUD));
+        ctx.fillRect(0, y0 + D.height, VW, Math.max(0, HUD + VIEWH - y0 - D.height));
+        ctx.fillRect(0, y0, Math.max(0, x0), D.height);
+        ctx.fillRect(x0 + D.width, y0, Math.max(0, VW - x0 - D.width), D.height);
+        ctx.globalAlpha = 1;
+        const blink = 0.7 + 0.3 * Math.sin(t * 5);
+        for (const e of g.en) {
+          if (e.hp <= 0 || !e.awake || !g.vis[e.y * MW + e.x]) continue;
+          const ex = e.ax * TS + 12 - camX, ey = e.ay * TS + 8 - camY;
+          if (Math.hypot(ex - hx, ey - hy) < r0) continue;
+          ctx.globalAlpha = blink * BIO_RT.amb; ctx.fillStyle = e.cls === 2 ? "#ff3030" : "#ff6080";
+          ctx.fillRect(ex - 4, ey, 2, 2); ctx.fillRect(ex + 2, ey, 2, 2);
+        }
+        ctx.globalAlpha = 1;
+        const f = g.bio ? g.bio.f : [];
+        for (const k of f) { if (!g.seen[k] || (g.bio && g.bio.u.includes(k))) continue; const sx = (k % MW) * TS - camX, sy = ((k / MW) | 0) * TS - camY; if (sx < -TS || sy < HUD - TS || sx > VW || sy > HUD + VIEWH) continue; b.hook.drawFeat!(ctx, g, b, k, false, sx, sy, t, calm); }
+        ctx.restore();
+      },
+    },
+    loot: { note: "each Lumen Shard: 30 s of light + a gold cache", gold: 1.2 },
+    variant: { pre: "Gloom", ch: 0.22, hp: 1.1, atk: 1, xp: 1.3, col: "#9a70ff" },
+  },
+  { // 2. magnetism: loot near the hero is pulled in
+    id: "lodestone", name: "Lodestone Deep", unlockDepth: 11, blurb: "the iron here pulls loot to you",
+    vis: { tint: "rgba(70,30,20,0.12)", col: "#ff9a70", part: ["#c0c8d8", "#8090a8", "#ffb080"], partK: "pull", dens: 4, wall: true },
+    paint: (x, v, r, wall) => {
+      if (wall) {
+        x.fillStyle = "rgba(60,20,10,0.28)"; x.fillRect(0, 0, TS, TS);
+        if (v % 2 === 0) { x.fillStyle = "#3a3a46"; x.fillRect(8, 8, 8, 8); x.fillStyle = "#8a98b8"; x.fillRect(9, 9, 3, 3); x.fillStyle = "rgba(140,200,255,0.8)"; x.fillRect(14, 10, 1, 4); }
+        return;
+      }
+      x.strokeStyle = "rgba(40,40,52,0.55)"; x.lineWidth = 1;
+      const cx = r() * TS, cy = r() * TS;
+      for (let i = 0; i < 3; i++) { x.beginPath(); x.arc(cx, cy, 4 + i * 4, r() * 3, r() * 3 + 2); x.stroke(); }
+      x.fillStyle = "rgba(150,60,30,0.28)"; x.fillRect(Math.floor(r() * 18), Math.floor(r() * 18), 4 + Math.floor(r() * 4), 2);
+    },
+    hook: {
+      world: (g) => {
+        // Every world tick, loot within 3 tiles (in line of sight) slides one tile toward the hero and is picked up on arrival.
+        const h = g.hero; let moved = false;
+        for (const d of g.drops) {
+          const dx = h.x - d.x, dy = h.y - d.y;
+          if ((dx === 0 && dy === 0) || Math.max(Math.abs(dx), Math.abs(dy)) > 3 || !los(g, h.x, h.y, d.x, d.y)) continue;
+          const nx = d.x + Math.sign(dx), ny = d.y + Math.sign(dy);
+          if (!inb(nx, ny) || g.map[ny * MW + nx] === 0 || hzSolid(g, nx, ny)) continue;
+          d.x = nx; d.y = ny; moved = true;
+        }
+        if (moved) { const before = g.drops.length; pickup(g); if (g.drops.length < before) burst(g, h.x * TS + 12, h.y * TS + 12, 8, ["#c0c8d8", "#ffb080"], 40, 0); }
+      },
+    },
+    loot: { note: "gold piles on the floor are 35% bigger; loot flies to you", goldPile: 1.35 },
+    variant: { pre: "Ironclad", ch: 0.25, hp: 1.3, atk: 1, xp: 1.4, col: "#a8b8d0" },
+  },
+  { // 3. ley wells: standing at a well heals; the first touch pays out
+    id: "ley", name: "Ley Nexus", unlockDepth: 11, blurb: "rest by the Ley Wells to heal",
+    vis: { tint: "rgba(10,30,60,0.12)", col: "#60f0ff", part: ["#60f0ff", "#a0ffff", "#3080ff"], partK: "rise", dens: 4 },
+    paint: (x, v, r, wall) => {
+      if (wall) { x.strokeStyle = "rgba(90,230,255,0.35)"; x.beginPath(); x.moveTo(4, 20); x.lineTo(8, 12); x.lineTo(14, 16); x.lineTo(20, 6); x.stroke(); return; }
+      x.strokeStyle = "rgba(80,220,255,0.45)"; x.lineWidth = 1;
+      if (v % 2 === 0) { x.beginPath(); x.moveTo(0, 12 + (r() - 0.5) * 6); x.lineTo(TS, 12 + (r() - 0.5) * 6); x.stroke(); }
+      else { x.beginPath(); x.moveTo(12 + (r() - 0.5) * 6, 0); x.lineTo(12 + (r() - 0.5) * 6, TS); x.stroke(); }
+      x.fillStyle = "rgba(160,255,255,0.8)"; x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 1);
+    },
+    feat: { kind: "spot", n: 3, cap: 6, gap: 9 },
+    hook: {
+      near: 1,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        const x = k % MW, y = (k / MW) | 0;
+        bioGive(g, x, y, bioGoldAmt(g.depth, 1.5));
+        bioRing(g, x, y, "#a0ffff", "#3080ff", 3 * TS, 0.6);
+        g.sfx("sparkle");
+        msg(g, "Ley Well attuned. Stand beside it to heal.", b.vis.col);
+      },
+      world: (g, b, st, calm) => {
+        if (calm || !g.bio || g.hero.hp >= st.maxHp || g.hero.hp <= 0) return;
+        const h = g.hero;
+        for (const k of g.bio.f) {
+          if (Math.max(Math.abs((k % MW) - h.x), Math.abs(((k / MW) | 0) - h.y)) > 1) continue;
+          const n = Math.max(1, Math.round(st.maxHp * 0.015));
+          h.hp = Math.min(st.maxHp, h.hp + n);
+          if (BIO_RT.tick % 3 === 0) floatTxt(g, h.x, h.y - 0.6, "+" + n, "#60f0ff");
+          break;
+        }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t, calm) => {
+        const cx = sx + 12, cy = sy + 12, R0 = TS * 1.35;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        const p = calm ? 0.25 : 0.65 + 0.35 * Math.sin(t * 2.4 + k);
+        ctx.globalAlpha = 0.22 * p; ctx.fillStyle = calm ? "#506070" : "#30d0ff"; ctx.beginPath(); ctx.arc(cx, cy, R0, 0, 6.2832); ctx.fill();
+        ctx.globalAlpha = 0.85 * p; ctx.strokeStyle = calm ? "#8090a0" : "#80f8ff"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, R0 - 2, 0, 6.2832); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, R0 - 8, 0, 6.2832); ctx.stroke();
+        const a0 = t * 0.8;
+        for (let i = 0; i < 6; i++) { const a = a0 + i * 1.0472; const gx = cx + Math.cos(a) * (R0 - 5), gy = cy + Math.sin(a) * (R0 - 5); ctx.fillStyle = "#e0ffff"; ctx.fillRect(Math.round(gx) - 1, Math.round(gy) - 1, 3, 3); }
+        ctx.beginPath(); for (let i = 0; i < 3; i++) { const a = -a0 + i * 2.0944; const px = cx + Math.cos(a) * 7, py = cy + Math.sin(a) * 7; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); ctx.stroke();
+        ctx.restore();
+      },
+    },
+    loot: { note: "first visit to each Ley Well: a gold cache (1.5x a floor pile)", gold: 1.5 },
+    variant: { pre: "Runebound", ch: 0.2, hp: 1, atk: 1.12, xp: 1.35, col: "#60f0ff" },
+  },
+  { // 4. brambles: thorn patches hurt and slow enemies (never the hero)
+    id: "bramble", name: "Bramble Warren", unlockDepth: 11, blurb: "lure foes through the thorns - they bleed, you don't",
+    vis: { tint: "rgba(20,40,10,0.10)", col: "#9ad060", part: ["#ffc0d8", "#ffffff", "#c0e080"], partK: "fall", dens: 3 },
+    paint: (x, v, r, wall) => {
+      if (wall) { x.strokeStyle = "rgba(60,110,40,0.75)"; x.lineWidth = 1.5; x.beginPath(); x.moveTo(r() * TS, 0); x.quadraticCurveTo(r() * TS, 12, r() * TS, TS); x.stroke(); return; }
+      for (let i = 0; i < 4; i++) { x.fillStyle = i % 2 ? "rgba(110,80,40,0.45)" : "rgba(70,110,40,0.45)"; x.beginPath(); x.ellipse(r() * TS, r() * TS, 2.5, 1.2, r() * 3, 0, 6.2832); x.fill(); }
+      if (v === 0) { x.fillStyle = "#ffb0d0"; x.fillRect(Math.floor(r() * 20) + 2, Math.floor(r() * 20) + 2, 2, 2); }
+    },
+    bad: ["lava"],
+    feat: { kind: "patch", n: 4, cap: 9, size: 9 },
+    hook: {
+      world: (g, b, st, calm) => {
+        if (calm || !g.bio || !BIO_MASK) return;
+        for (const e of g.en.slice()) {
+          if (!bioCalmFoe(e) || !BIO_MASK[e.y * MW + e.x]) continue;
+          const dmg = Math.max(1, Math.round(e.mhp * 0.03));
+          markHitDir(g, e);
+          applyHpDmg(e, dmg, g, { n: "Thorns", t: "", c: "#9ad060" });
+          e.hit = 0.15; e.slow = Math.max(e.slow, 2);
+          floatTxt(g, e.x, e.y - 0.2, String(dmg), "#9ad060");
+          if (e.hp <= 0) kill(g, e);
+        }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t, calm) => {
+        const s = bioSprite(b, 9 + (k % 3), false, (c) => {
+          c.strokeStyle = "#3a6a20"; c.lineWidth = 2;
+          for (let i = 0; i < 3; i++) { c.beginPath(); c.moveTo(2 + i * 7, 22); c.quadraticCurveTo(8 + i * 3, 6, 20 - i * 5, 3 + i * 3); c.stroke(); }
+          c.fillStyle = "#c8e8a0"; for (let i = 0; i < 9; i++) c.fillRect(3 + ((i * 7) % 18), 4 + ((i * 11) % 16), 1, 2);
+          c.fillStyle = "#ff80b0"; c.fillRect(5 + (k % 11), 6 + (k % 9), 2, 2);
+        });
+        ctx.globalAlpha = calm ? 0.55 : 1; ctx.drawImage(s, sx, sy); ctx.globalAlpha = 1;
+      },
+    },
+    loot: { note: "extra healing potions grow on the floor (+2, more on big floors)", pots: 2 },
+    variant: { pre: "Thornback", ch: 0.22, hp: 1.25, atk: 1, xp: 1.3, col: "#9ad060" },
+  },
+  { // 5. time: a Stillwave freezes nearby ordinary foes every 18 s; Sandglasses trigger one at once
+    id: "hourglass", name: "Hourglass Rift", unlockDepth: 11, blurb: "time stutters - every 18 s a Stillwave freezes foes",
+    vis: { tint: "rgba(90,70,20,0.12)", col: "#ffd070", part: ["#ffe0a0", "#e0b060", "#fff4d0"], partK: "fall", dens: 4 },
+    paint: (x, v, r, wall) => {
+      if (wall) { x.fillStyle = "rgba(255,210,120,0.18)"; for (let i = 0; i < 4; i++) x.fillRect(Math.floor(r() * TS), Math.floor(r() * TS), 1, 3); return; }
+      x.strokeStyle = "rgba(220,180,90,0.35)"; x.lineWidth = 1;
+      for (let i = 0; i < 2; i++) { const yy = 5 + i * 9 + r() * 4; x.beginPath(); x.moveTo(0, yy); x.quadraticCurveTo(12, yy + (r() - 0.5) * 6, TS, yy); x.stroke(); }
+      if (v % 2) { x.strokeStyle = "rgba(255,220,140,0.35)"; x.beginPath(); x.arc(12, 12, 7, 0, 6.2832); x.stroke(); x.beginPath(); x.moveTo(12, 12); x.lineTo(12, 7); x.moveTo(12, 12); x.lineTo(16, 12); x.stroke(); }
+    },
+    feat: { kind: "spot", n: 2, cap: 4, gap: 10 },
+    hook: {
+      near: 0,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        const x = k % MW, y = (k / MW) | 0;
+        bioGive(g, x, y, bioGoldAmt(g.depth, 1.2));
+        msg(g, "Sandglass shattered - time stands still!", b.vis.col);
+        bioStillwave(g, true);
+      },
+      frame: (g, b, dt, calm) => {
+        if (calm) return;
+        BIO_RT.hg += dt;
+        if (BIO_RT.pulse > 0) BIO_RT.pulse = Math.max(0, BIO_RT.pulse - dt);
+        if (BIO_RT.hg >= BIO_HG_SEC) bioStillwave(g, false);
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => {
+        if (used) return;
+        const s = bioSprite(b, 12, false, (c) => {
+          c.fillStyle = "#6a4a20"; c.fillRect(6, 3, 12, 2); c.fillRect(6, 19, 12, 2);
+          c.fillStyle = "rgba(220,240,255,0.7)"; c.beginPath(); c.moveTo(8, 5); c.lineTo(16, 5); c.lineTo(12, 12); c.lineTo(16, 19); c.lineTo(8, 19); c.lineTo(12, 12); c.closePath(); c.fill();
+          c.fillStyle = "#ffd070"; c.beginPath(); c.moveTo(9, 6); c.lineTo(15, 6); c.lineTo(12, 10); c.closePath(); c.fill(); c.fillRect(10, 16, 4, 3);
+        });
+        const bob = Math.round(Math.sin(t * 2 + k) * 1.5);
+        ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 0.3 + 0.2 * Math.sin(t * 3); ctx.fillStyle = "#ffc040"; ctx.beginPath(); ctx.arc(sx + 12, sy + 12, 10, 0, 6.2832); ctx.fill(); ctx.restore();
+        ctx.drawImage(s, sx, sy + bob);
+      },
+      over: (ctx, g, b, camX, camY, t, calm) => {
+        // frozen foes get an amber shell; a small sand clock under the HUD counts down to the next Stillwave
+        ctx.save();
+        for (const e of g.en) {
+          if (e.hp <= 0 || e.stun <= 0 || !g.vis[e.y * MW + e.x]) continue;
+          const ex = e.ax * TS - camX, ey = e.ay * TS - camY;
+          ctx.globalAlpha = 0.35; ctx.fillStyle = "#ffc040"; ctx.fillRect(ex + 3, ey + 2, 18, 20);
+          ctx.globalAlpha = 0.9; ctx.strokeStyle = "#ffe0a0"; ctx.lineWidth = 1; ctx.strokeRect(ex + 3.5, ey + 2.5, 17, 19);
+        }
+        ctx.globalAlpha = 1;
+        const fr = calm ? 0 : Math.min(1, BIO_RT.hg / BIO_HG_SEC), x0 = 6, y0 = HUD + 6;
+        ctx.fillStyle = "rgba(20,14,4,0.7)"; ctx.fillRect(x0, y0, 14, 20);
+        ctx.fillStyle = "#e0b060"; ctx.fillRect(x0 + 2, y0 + 2 + Math.round(7 * fr), 10, 7 - Math.round(7 * fr)); ctx.fillRect(x0 + 2, y0 + 18 - Math.round(7 * fr), 10, Math.round(7 * fr));
+        ctx.strokeStyle = calm ? "#806040" : "#ffe0a0"; ctx.strokeRect(x0 + 0.5, y0 + 0.5, 13, 19);
+        if (BIO_RT.pulse > 0) {
+          const u = 1 - BIO_RT.pulse / 0.8, hx = g.hero.ax * TS + 12 - camX, hy = g.hero.ay * TS + 12 - camY;
+          ctx.globalAlpha = 0.6 * (1 - u); ctx.strokeStyle = "#ffd070"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(hx, hy, 9 * TS * u, 0, 6.2832); ctx.stroke();
+        }
+        ctx.restore();
+      },
+    },
+    loot: { note: "Sandglasses: a gold cache + an instant Stillwave", gold: 1.2 },
+    variant: { pre: "Timelost", ch: 0.18, hp: 0.8, atk: 1, xp: 1.4, fast: true, col: "#ffd070" },
+  },
+];
+const BIO_HG_SEC = 18, BIO_HG_STUN = 6, BIO_HG_R = 9;
+let BIO_DARK: HTMLCanvasElement | null = null;
+const BIO_PERF = { on: false, ms: 0, n: 0 }; // test-only draw-cost meter
+function bioDarkSprite(r0: number, r1: number): HTMLCanvasElement {
+  const S = Math.ceil(r1) * 2 + 2;
+  if (BIO_DARK && BIO_DARK.width === S) return BIO_DARK;
+  const c = document.createElement("canvas"); c.width = S; c.height = S;
+  const x = c.getContext("2d")!, m = S / 2;
+  const gr = x.createRadialGradient(m, m, r0, m, m, r1);
+  gr.addColorStop(0, "rgba(4,2,12,0)"); gr.addColorStop(1, "rgba(4,2,12,0.9)");
+  x.fillStyle = gr; x.fillRect(0, 0, S, S);
+  BIO_DARK = c; return c;
+}
+function bioStillwave(g: Game, now: boolean): void {
+  BIO_RT.hg = 0; BIO_RT.pulse = 0.8;
+  const h = g.hero; let n = 0;
+  for (const e of g.en) if (bioCalmFoe(e) && Math.abs(e.x - h.x) + Math.abs(e.y - h.y) <= BIO_HG_R) { e.stun = Math.max(e.stun, BIO_HG_STUN); n++; }
+  if (n) floatTxt(g, h.x, h.y - 1, "STILLWAVE x" + n, "#ffd070");
+  if (n || now) g.sfx("sparkle");
+}
+const BIO_BY_ID = new Map<string, BiomeDef>(BIOMES.map((b: BiomeDef) => [b.id, b]));
+// Pool for a depth: entries whose unlockDepth <= depth. Cost is one pass over the registry per new floor.
+function bioPool(depth: number): BiomeDef[] { const out: BiomeDef[] = []; for (const b of BIOMES) if (depth >= b.unlockDepth) out.push(b); return out; }
+function bioEligible(g: Game): boolean {
+  return g.depth >= BIO_MIN_DEPTH && !isActFloor(g.depth) && (g.area ?? "dungeon") === "dungeon" && !g.vault && !g.arena && !g.gobCave && g.mode !== "title";
+}
+// Seeded pick. hzKinds = hazard families present on this floor; a biome listing one of them in bad[] is skipped.
+function bioRoll(depth: number, seed: number, hzKinds: HzKind[]): BiomeDef | null {
+  if (BIO_FORCE === "") return null;
+  const pool = bioPool(depth).filter((b: BiomeDef) => !(b.bad || []).some((k: HzKind) => hzKinds.includes(k)));
+  if (BIO_FORCE) return pool.find((b: BiomeDef) => b.id === BIO_FORCE) || null;
+  const r = rng32(hash32(seed, depth, 0xb10e) | 1);
+  if (r() >= BIO_CH || !pool.length) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(r() * pool.length))];
+}
+function bioOf(g: Game): BiomeDef | null {
+  const s = g.bio; if (!s) return null;
+  if ((g.area ?? "dungeon") !== "dungeon" || g.vault || g.arena || g.gobCave || g.mode === "title") return null;
+  return BIO_BY_ID.get(s.k) || null;
+}
+function bioName(g: Game): string { const b = bioOf(g); return b ? b.name : ""; }
+function bioSuffix(g: Game): string { const b = bioOf(g); return b ? " \u00b7 " + b.name : ""; }
+// "Calm": a shrine swarm or the spider swarm is running - combat-changing biome effects pause so the swarm stays as designed.
+function bioCalm(g: Game): boolean { return !!g.swarm || bioSpiderSwarmOn(g); }
+// The spider swarm (depth >= 51) keeps its live event on g.spSw (armed or running): calm from the moment it arms.
+function bioSpiderSwarmOn(g: Game): boolean { return !!(g as unknown as { spSw?: unknown }).spSw; }
+function hzKindsOf(g: Game): HzKind[] {
+  const out: HzKind[] = []; const a = g.hz; if (!a) return out;
+  let w = false, l = false, i = false;
+  for (let k = 0; k < a.length; k++) { const v = a[k]; if (v === HZ_WATER) w = true; else if (v === HZ_LAVA && !artInBlock(g, k % MW, (k / MW) | 0)) l = true; else if (v === HZ_ICE) i = true; }
+  if (w) out.push("water"); if (l) out.push("lava"); if (i) out.push("ice");
+  return out;
+}
+let BIO_MASK: Uint8Array | null = null, BIO_MASK_KEY = "";
+function bioMaskSync(g: Game): void {
+  const s = g.bio, key = s ? g.depth + ":" + s.k + ":" + MW + ":" + s.f.length + ":" + (g.wxs ?? 0) : "";
+  if (key === BIO_MASK_KEY && (!s || (BIO_MASK && BIO_MASK.length === MW * MH))) return;
+  BIO_MASK_KEY = key; BIO_MASK = null;
+  if (!s) return;
+  BIO_MASK = new Uint8Array(MW * MH);
+  for (const k of s.f) if (k >= 0 && k < MW * MH) BIO_MASK[k] = 1;
+}
+// Feature tiles: plain, reachable room floor, no hazard, clear of stairs/portals/chests/shrine/hero (hazard reserve mask).
+function bioCands(g: Game): number[] {
+  const res = hzReservedMask(g);
+  const reach = hzBfs(g, g.hz || new Uint8Array(MW * MH), g.hero.x, g.hero.y);
+  const out: number[] = [];
+  for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) {
+    const k = y * MW + x;
+    if (!reach[k] || g.map[k] !== 1 || res[k] || hzAt(g, x, y) || isCorridorCell(g.map, x, y)) continue;
+    if (Math.abs(x - g.hero.x) + Math.abs(y - g.hero.y) < 4 || chestAt(g, x, y) || portalAt(g, x, y) || shrineHit(g, x, y)) continue;
+    out.push(k);
+  }
+  return out;
+}
+function bioPlace(g: Game, b: BiomeDef, r: () => number): number[] {
+  const f = b.feat; if (!f) return [];
+  const cand = bioCands(g); if (!cand.length) return [];
+  const areaK = (MW * MH) / (BASE_MAP * BASE_MAP);
+  const n = Math.max(1, Math.min(f.cap, Math.round(f.n * areaK)));
+  const out: number[] = [];
+  if (f.kind === "spot") {
+    const gap = f.gap ?? 6;
+    for (let tries = 0; tries < n * 40 && out.length < n; tries++) {
+      const k = cand[Math.floor(r() * cand.length)];
+      const x = k % MW, y = (k / MW) | 0;
+      if (out.some((o: number) => Math.abs((o % MW) - x) + Math.abs(((o / MW) | 0) - y) < gap)) continue;
+      out.push(k);
+    }
+    return out;
+  }
+  const ok = new Uint8Array(MW * MH); for (const k of cand) ok[k] = 1;
+  const taken = new Uint8Array(MW * MH);
+  for (let j = 0; j < n; j++) {
+    const seed = cand[Math.floor(r() * cand.length)]; if (taken[seed]) continue;
+    const size = Math.max(3, Math.round((f.size ?? 8) * (0.6 + r() * 0.8)));
+    const pool = [seed]; taken[seed] = 1;
+    for (let guard = 0; pool.length < size && guard < size * 10; guard++) {
+      const from = pool[Math.floor(r() * pool.length)], d = Math.floor(r() * 4);
+      const nk = from + (d === 0 ? 1 : d === 1 ? -1 : d === 2 ? MW : -MW);
+      if (nk < 0 || nk >= MW * MH || !ok[nk] || taken[nk] || Math.abs((nk % MW) - (from % MW)) > 1) continue;
+      taken[nk] = 1; pool.push(nk);
+    }
+    out.push(...pool);
+  }
+  return out;
+}
+// Ordinary foes only (no bosses, act bosses, champions, packs, hunters, goblins or swarm spawns) and at most once each.
+function bioApplyVariants(g: Game, b: BiomeDef, r: () => number): number {
+  const v = b.variant; if (!v) return 0;
+  let n = 0;
+  for (const e of g.en) {
+    const ee = e as En & { bv?: number };
+    if (ee.bv || !bioCalmFoe(e) || e.sw || e.rare || e.pack || e.lead || e.se || e.ue || /^(Champion|Brute|Roaming) /.test(e.name)) continue;
+    if (r() >= v.ch) continue;
+    if (v.fast && e.tr.includes("fast")) continue;
+    ee.bv = 1;
+    e.name = v.pre + " " + e.name;
+    e.hp = e.mhp = Math.max(1, Math.round(e.mhp * v.hp));
+    e.atk = Math.max(1, Math.round(e.atk * v.atk));
+    e.xp = Math.max(1, Math.round(e.xp * v.xp));
+    if (v.fast) e.tr = e.tr.concat(["fast"]);
+    n++;
+  }
+  return n;
+}
+// Called at the very end of genFloor (after hazards, shrine, artifact cave and the split re-fit), so a biome can read the
+// finished layout and never changes it: features are overlays on plain floor; nothing a biome adds blocks movement.
+function bioGenFloor(g: Game): void {
+  g.bio = null; BIO_MASK_KEY = "~";
+  if (!bioEligible(g)) return;
+  const b = bioRoll(g.depth, floorSeed(g), hzKindsOf(g));
+  if (!b) return;
+  const r = rng32(hash32(floorSeed(g), g.depth, 0xb10f) | 1);
+  g.bio = { k: b.id, f: bioPlace(g, b, r), u: [] };
+  const L = b.loot, d = g.depth;
+  if (L.goldPile) for (const dr of g.drops) if (!dr.item && !dr.pot && dr.gold > 0) dr.gold = Math.round(dr.gold * L.goldPile);
+  if (L.pots) {
+    const areaK = (MW * MH) / (BASE_MAP * BASE_MAP), cand = bioCands(g), used = new Set<number>(g.bio.f);
+    for (const dr of g.drops) used.add(dr.y * MW + dr.x);
+    const n = Math.max(1, Math.min(5, Math.round(L.pots * areaK)));
+    for (let i = 0, tries = 0; i < n && tries < 60 && cand.length; tries++) { const k = cand[Math.floor(r() * cand.length)]; if (used.has(k)) continue; used.add(k); g.drops.push({ x: k % MW, y: (k / MW) | 0, item: null, pot: true, gold: 0 }); i++; }
+  }
+  void d;
+  bioApplyVariants(g, b, r);
+  bioResetRt(g);
+  bioAnnounce(g, b, true);
+}
+function bioAnnounce(g: Game, b: BiomeDef, fresh: boolean): void {
+  msg(g, "Biome: " + b.name + " - " + b.blurb + ".", b.vis.col);
+  if (fresh) setBanner(g, b.name.toUpperCase(), "Depth " + g.depth + " \u00b7 " + b.blurb, b.vis.col, 3, 2.6);
+}
+function bioResetRt(g: Game): void { BIO_RT.key = g.depth + ":" + (g.wxs ?? 0); BIO_RT.lit = 0; BIO_RT.hg = 0; BIO_RT.pulse = 0; BIO_RT.amb = 1; }
+// Floor restored from a snapshot (going back, reload): enemies are re-spawned there, so re-tag them; the biome itself
+// and its used features come from the snapshot, never from a fresh roll.
+function bioOnRestore(g: Game): void {
+  BIO_MASK_KEY = "~";
+  const b = bioOf(g); if (!b) return;
+  const r = rng32(hash32(floorSeed(g), g.depth, 0xb110 + (g.turn & 0xffff)) | 1);
+  bioApplyVariants(g, b, r);
+  bioResetRt(g);
+  bioAnnounce(g, b, false);
+}
+function packBio(s: BioSt | null | undefined): BioSt | undefined {
+  if (!s || !BIO_BY_ID.has(s.k)) return undefined;
+  return { k: s.k, f: s.f.slice(0, 240), u: s.u.slice(0, 64) };
+}
+function unpackBio(raw: unknown, len: number): BioSt | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as { k?: unknown; f?: unknown; u?: unknown };
+  if (typeof o.k !== "string" || !BIO_BY_ID.has(o.k)) return null; // unknown/removed biome id: the floor just has none
+  const okK = (v: unknown): v is number => typeof v === "number" && isFinite(v) && v >= 0 && v < len && Math.floor(v) === v;
+  const f = Array.isArray(o.f) ? (o.f as unknown[]).filter(okK).slice(0, 240) : [];
+  const u = Array.isArray(o.u) ? (o.u as unknown[]).filter(okK).filter((k: number) => f.includes(k)).slice(0, 64) : [];
+  return { k: o.k, f, u };
+}
+// Hero stepped (walk, run or slide).
+function bioStep(g: Game): void {
+  const b = bioOf(g), s = g.bio; if (!b || !s || !b.hook.touch || !s.f.length) return;
+  const h = g.hero, R0 = b.hook.near ?? 0;
+  for (const k of s.f) {
+    if (Math.max(Math.abs((k % MW) - h.x), Math.abs(((k / MW) | 0) - h.y)) > R0) continue;
+    const first = !s.u.includes(k);
+    if (first) { s.u.push(k); for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.bi = packBio(s); }
+    b.hook.touch(g, b, k, first);
+  }
+}
+function bioWorld(g: Game, st: Stats): void {
+  const b = bioOf(g); if (!b || g.mode !== "play") return;
+  BIO_RT.tick++;
+  bioMaskSync(g);
+  if (b.hook.world) b.hook.world(g, b, st, bioCalm(g));
+}
+function bioFrame(g: Game, dt: number): void {
+  const b = bioOf(g); if (!b) return;
+  if (BIO_RT.key !== g.depth + ":" + (g.wxs ?? 0)) bioResetRt(g);
+  if (g.mode !== "play" || g.paused) return;
+  if (b.hook.frame) b.hook.frame(g, b, dt, bioCalm(g));
+  // ambient particles (capped like themeAmbient)
+  if (g.parts.length < 260 && Math.random() < b.vis.dens * dt * 2) {
+    const h = g.hero, x = h.x + ri(15) - 7, y = h.y + ri(11) - 5;
+    if (inb(x, y) && g.vis[y * MW + x] && g.map[y * MW + x] !== 0) {
+      const px = x * TS + Math.random() * TS, py = y * TS + Math.random() * TS, c = pick(b.vis.part), k = b.vis.partK;
+      if (k === "fall") g.parts.push({ x: px, y: py - 10, vx: (Math.random() - 0.5) * 10, vy: 8 + Math.random() * 8, life: 2, max: 2, c, s: Math.random() < 0.3 ? 2 : 1, g: 2 });
+      else if (k === "rise") g.parts.push({ x: px, y: py, vx: (Math.random() - 0.5) * 4, vy: -10 - Math.random() * 8, life: 1.8, max: 1.8, c, s: 1, g: -3 });
+      else if (k === "pull") { const hx = h.x * TS + 12, hy = h.y * TS + 12, dx = hx - px, dy = hy - py, L = Math.max(1, Math.hypot(dx, dy)); g.parts.push({ x: px, y: py, vx: dx / L * 30, vy: dy / L * 30, life: Math.min(1.4, L / 30), max: 1.4, c, s: 1, g: 0 }); }
+      else g.parts.push({ x: px, y: py, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 2.6, max: 2.6, c, s: Math.random() < 0.3 ? 2 : 1, g: 0 });
+    }
+  }
+}
+function bioSprite(b: BiomeDef, v: number, wall: boolean, paint?: (c: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+  const key = b.id + (wall ? "w" : "f") + v;
+  let c = BIO_TILES.get(key); if (c) return c;
+  c = document.createElement("canvas"); c.width = TS; c.height = TS;
+  const x = c.getContext("2d")!;
+  if (paint) paint(x); else b.paint(x, v, rng32(hash32(v + 1, b.id.length * 131 + (wall ? 7 : 0), 0xb1) | 1), wall);
+  BIO_TILES.set(key, c);
+  return c;
+}
+// Under entities: per-tile overlay sprites (cached, only on seen tiles in view) + feature art.
+function drawBioFloor(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const b = bioOf(g); if (!b) return;
+  const t0 = BIO_PERF.on ? performance.now() : 0;
+  drawBioFloorIn(ctx, g, b, camX, camY, t);
+  if (BIO_PERF.on) { BIO_PERF.ms += performance.now() - t0; BIO_PERF.n++; }
+}
+function drawBioFloorIn(ctx: CanvasRenderingContext2D, g: Game, b: BiomeDef, camX: number, camY: number, t: number): void {
+  const tx0 = Math.max(0, Math.floor(camX / TS)), ty0 = Math.max(0, Math.floor((camY + HUD) / TS));
+  const tx1 = Math.min(MW - 1, Math.ceil((camX + VW) / TS)), ty1 = Math.min(MH - 1, Math.ceil((camY + HUD + VIEWH) / TS));
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    const i = ty * MW + tx; if (!g.seen[i]) continue;
+    const v = g.map[i], hh = hash32(tx, ty, g.depth + 77);
+    if (v === 0) { if (b.vis.wall !== false && hh % 3 === 0 && ty + 1 < MH && g.map[i + MW] !== 0) ctx.drawImage(bioSprite(b, hh % 4, true), tx * TS - camX, ty * TS - camY); }
+    else if (v === 1 && hh % 2 === 0) ctx.drawImage(bioSprite(b, (hh >>> 3) % 4, false), tx * TS - camX, ty * TS - camY);
+  }
+  const s = g.bio, calm = bioCalm(g);
+  if (s && b.hook.drawFeat && !b.hook.featOver) for (const k of s.f) {
+    if (!g.seen[k]) continue;
+    const sx = (k % MW) * TS - camX, sy = ((k / MW) | 0) * TS - camY;
+    if (sx < -TS * 2 || sy < HUD - TS * 2 || sx > VW + TS || sy > HUD + VIEWH + TS) continue;
+    b.hook.drawFeat(ctx, g, b, k, s.u.includes(k), sx, sy, t, calm);
+  }
+}
+// Over entities, before weather: colour wash, biome HUD bits, darkness, variant marks.
+function drawBioOver(ctx: CanvasRenderingContext2D, g: Game, camX: number, camY: number, t: number): void {
+  const b = bioOf(g); if (!b) return;
+  const t0 = BIO_PERF.on ? performance.now() : 0;
+  drawBioOverIn(ctx, g, b, camX, camY, t);
+  if (BIO_PERF.on) BIO_PERF.ms += performance.now() - t0;
+}
+function drawBioOverIn(ctx: CanvasRenderingContext2D, g: Game, b: BiomeDef, camX: number, camY: number, t: number): void {
+  ctx.save();
+  ctx.fillStyle = b.vis.tint; ctx.fillRect(0, HUD, VW, VIEWH);
+  if (b.variant) {
+    ctx.fillStyle = b.variant.col;
+    for (const e of g.en) {
+      if (e.hp <= 0 || !(e as En & { bv?: number }).bv || !g.vis[e.y * MW + e.x]) continue;
+      const ex = Math.round(e.ax * TS - camX) + 12, ey = Math.round(e.ay * TS - camY) - 3;
+      ctx.beginPath(); ctx.moveTo(ex, ey - 3); ctx.lineTo(ex + 3, ey); ctx.lineTo(ex, ey + 3); ctx.lineTo(ex - 3, ey); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
+  if (b.hook.over) b.hook.over(ctx, g, b, camX, camY, t, bioCalm(g));
+}
+
+// ---- test hooks (headless tests only; never touch saves) ----
+function bioStairsOk(g: Game): boolean {
+  const r = hzBfs(g, g.hz || new Uint8Array(MW * MH), g.hero.x, g.hero.y);
+  let any = false;
+  for (let k = 0; k < MW * MH; k++) if (g.map[k] === 2) { any = true; const x = k % MW, y = (k / MW) | 0; if (!(r[k] || [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inb(x + dx, y + dy) && r[(y + dy) * MW + x + dx]))) return false; }
+  return any || !needReturnStairs(g) || isActFloor(g.depth);
+}
+function bioInfo(g: Game): Record<string, unknown> {
+  const b = bioOf(g);
+  return { depth: g.depth, size: MW, biome: b ? b.id : null, name: b ? b.name : null, feats: g.bio ? g.bio.f.length : 0, used: g.bio ? g.bio.u.length : 0, variants: g.en.filter((e: En) => !!(e as En & { bv?: number }).bv).length, hz: hzKindsOf(g), wx: floorWx(g), shrine: !!g.shrine, act: isActFloor(g.depth), req: hzRequiredOk(g), stairs: bioStairsOk(g), hero: [g.hero.x, g.hero.y] };
+}
+try {
+  (window as unknown as { __ED16_BIO?: object }).__ED16_BIO = {
+    registry: (): Record<string, unknown>[] => BIOMES.map((b: BiomeDef) => ({ id: b.id, name: b.name, unlockDepth: b.unlockDepth, bad: b.bad || [], feat: b.feat || null, loot: b.loot.note, variant: b.variant ? b.variant.pre : null })),
+    rates: { BIO_MIN_DEPTH, BIO_CH, BIO_HG_SEC },
+    useTester: (): Record<string, unknown> => { setActiveProf(TEST_PROF); return { ok: true, prof: activeProf }; },
+    force: (id: string | null): void => { BIO_FORCE = id; },
+    roll: (depth: number, seed: number, hz?: string[]): string | null => { const b = bioRoll(depth, seed >>> 0, (hz || []) as HzKind[]); return b ? b.id : null; },
+    gen: (depth: number, o?: { tier?: number; haz?: string; wx?: string | null; id?: string | null }): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      g.depth = depth; g.front = depth; g.snapCur = null; g.snapPrev = null; g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null; g.mode = "play";
+      const prevF = BIO_FORCE, prevH = HZ_FORCE, prevW = WX_FORCE;
+      if (o && o.id !== undefined) BIO_FORCE = o.id;
+      if (o && o.haz !== undefined) HZ_FORCE = o.haz as typeof HZ_FORCE;
+      if (o && o.wx !== undefined) WX_FORCE = o.wx as WxKind | "" | null;
+      FLOOR_TIER_FORCE = o && typeof o.tier === "number" ? o.tier : null;
+      try { genFloor(g); } finally { FLOOR_TIER_FORCE = null; BIO_FORCE = prevF; HZ_FORCE = prevH; if (!(o && o.wx !== undefined && o.wx !== null)) WX_FORCE = prevW; }
+      IP.camOk = false; computeVis(g);
+      return { ok: true, ...bioInfo(g) };
+    },
+    sim: (depth: number, n: number, span = 1, tierMax?: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const res = { floors: 0, act: 0, actBio: 0, biome: 0, by: {} as Record<string, number>, reqFail: 0, stairFail: 0, bad: [] as string[], lavaClash: 0, sizes: {} as Record<string, number>, feats: 0, minFeat: 1e9 };
+      for (let i = 0; i < n; i++) {
+        const d = depth + (span > 1 ? i % span : 0);
+        g.depth = d; g.front = d; g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null; g.mode = "play";
+        if (typeof tierMax === "number") FLOOR_TIER_FORCE = i % (tierMax + 1);
+        try { genFloor(g); } finally { FLOOR_TIER_FORCE = null; }
+        res.floors++; res.sizes[String(MW)] = (res.sizes[String(MW)] || 0) + 1;
+        const b = bioOf(g);
+        if (isActFloor(d)) { res.act++; if (b) res.actBio++; }
+        if (b) {
+          res.biome++; res.by[b.id] = (res.by[b.id] || 0) + 1; res.feats += g.bio!.f.length;
+          if (b.feat) res.minFeat = Math.min(res.minFeat, g.bio!.f.length);
+          if ((b.bad || []).some((k: HzKind) => hzKindsOf(g).includes(k))) res.lavaClash++;
+          for (const k of g.bio!.f) if (g.map[k] !== 1 || hzAt(g, k % MW, (k / MW) | 0)) { res.bad.push(d + ":feat-on-" + g.map[k]); break; }
+        }
+        const rq = hzRequiredOk(g); if (!rq.ok) { res.reqFail++; if (res.bad.length < 8) res.bad.push(d + ":" + rq.bad.join("/")); }
+        if (!bioStairsOk(g)) { res.stairFail++; if (res.bad.length < 8) res.bad.push(d + ":stairs"); }
+      }
+      return res;
+    },
+    info: (): Record<string, unknown> => { const g = LIVE; return g ? bioInfo(g) : { ok: false }; },
+    roundTrip: (stripBio?: boolean): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const before = bioInfo(g);
+      let raw = buildPersistRaw(g);
+      if (stripBio) { // simulate a save written before biomes existed
+        const o = JSON.parse(raw) as Record<string, unknown>;
+        const body = JSON.parse(lzd(String(o.z)) || "{}") as Record<string, unknown>;
+        for (const k of ["fc", "fp"]) { const sn = body[k] as Record<string, unknown> | null; if (sn && typeof sn === "object") delete sn.bi; }
+        o.z = lzc(JSON.stringify(body)); raw = JSON.stringify(o);
+      }
+      const hasBi = /"bi":/.test(lzd(String((JSON.parse(raw) as Record<string, unknown>).z)) || "");
+      const prevQ = QUIET_ANNOUNCE; QUIET_ANNOUNCE++;
+      let g2: Game | null = null;
+      try { g2 = loadGame(null, raw); } finally { QUIET_ANNOUNCE = prevQ; }
+      if (!g2) return { ok: false, before };
+      const after = { depth: g2.depth, biome: g2.bio ? g2.bio.k : null, feats: g2.bio ? g2.bio.f.length : 0, used: g2.bio ? g2.bio.u.length : 0, lvl: g2.lvl, gold: g2.gold };
+      syncMapSize(g);
+      return { ok: true, hasBi, before, after };
+    },
+    loadCode: (code: string): Record<string, unknown> => {
+      const raw = persistRawFromCode(code); if (!raw) return { ok: false, why: "code" };
+      const prevQ = QUIET_ANNOUNCE; QUIET_ANNOUNCE++;
+      let g2: Game | null = null;
+      try { g2 = loadGame(null, raw); } finally { QUIET_ANNOUNCE = prevQ; }
+      const live = LIVE; if (live) syncMapSize(live);
+      return g2 ? { ok: true, depth: g2.depth, lvl: g2.lvl, biome: g2.bio ? g2.bio.k : null, snapBi: !!(g2.snapCur && g2.snapCur.bi) } : { ok: false, why: "load" };
+    },
+    touchAll: (): Record<string, unknown> => {
+      const g = LIVE; if (!g || !g.bio) return { ok: false };
+      const out: number[] = [];
+      for (const k of g.bio.f.slice(0, 3)) { const x = k % MW, y = (k / MW) | 0; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; bioStep(g); out.push(k); }
+      IP.camOk = false; computeVis(g);
+      return { ok: true, touched: out.length, used: g.bio.u.length, lit: BIO_RT.lit, gold: g.gold };
+    },
+    tick: (n: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; const st = calc(g.lvl, g.eq); for (let i = 0; i < n; i++) bioWorld(g, st); return { ok: true, hp: g.hero.hp, en: g.en.length, drops: g.drops.length }; },
+    frames: (n: number, dt: number): void => { const g = LIVE; if (!g) return; for (let i = 0; i < n; i++) bioFrame(g, dt); },
+    rt: (): Record<string, unknown> => ({ ...BIO_RT }),
+    perf: (on: boolean): Record<string, unknown> => { const r = { ms: BIO_PERF.ms, n: BIO_PERF.n, per: BIO_PERF.n ? BIO_PERF.ms / BIO_PERF.n : 0 }; BIO_PERF.on = !!on; BIO_PERF.ms = 0; BIO_PERF.n = 0; return r; },
+    park: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.en = []; g.pend = []; g.hero.hp = calc(g.lvl, g.eq).maxHp; return { ok: true }; },
+    toggle: (on: boolean): Record<string, unknown> => { const g = LIVE as (Game & { bioOff?: BioSt | null }) | null; if (!g) return { ok: false }; if (on) { if (g.bioOff) g.bio = g.bioOff; } else { g.bioOff = g.bio; g.bio = null; } return { ok: true, biome: g.bio ? g.bio.k : null }; },
+    // pool-growth check: temporarily add n clone entries unlocking every 20 depths, roll many seeds, then remove them
+    mockPool: (n: number, depth: number, seeds: number): Record<string, unknown> => {
+      const base = BIOMES.length;
+      for (let i = 0; i < n; i++) BIOMES.push({ ...BIOMES[i % base], id: "mock" + i, name: "Mock " + i, unlockDepth: 20 * (i + 1) });
+      let hit = 0; const by: Record<string, number> = {};
+      try { for (let s0 = 0; s0 < seeds; s0++) { const b = bioRoll(depth, hash32(s0, 99, 5), []); if (b) { hit++; by[b.id] = (by[b.id] || 0) + 1; } } }
+      finally { BIOMES.length = base; }
+      return { pool: bioPool(depth).length + n, rate: hit / seeds, kinds: Object.keys(by).length };
+    },
+    calm: (): boolean => { const g = LIVE; return !!g && bioCalm(g); },
+    // mechanic probes on the current (forced) biome floor
+    mech: (): Record<string, unknown> => {
+      const g = LIVE; const b = g ? bioOf(g) : null; if (!g || !b || !g.bio) return { ok: false };
+      const st = calc(g.lvl, g.eq), h = g.hero, out: Record<string, unknown> = { id: b.id };
+      const free = (x0: number, y0: number, r: number): number[] | null => { for (let rr = 1; rr <= r; rr++) for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { const x = x0 + dx, y = y0 + dy; if (walkable(g, x, y) && (x !== h.x || y !== h.y)) return [x, y]; } return null; };
+      const mk = (x: number, y: number, cls: number): En => { const e = mkEnemy(g, x, y, cls); e.awake = true; e.stun = 0; g.en.push(e); return e; };
+      if (b.id === "ley") {
+        const k = g.bio.f[0], wx = k % MW, wy = (k / MW) | 0;
+        g.en = []; h.x = h.ax = wx; h.y = h.ay = wy; h.hp = Math.max(1, Math.round(st.maxHp * 0.3)); const hp0 = h.hp;
+        for (let i = 0; i < 5; i++) bioWorld(g, st);
+        out.healed = h.hp - hp0;
+        const sw = g.swarm; g.swarm = { t: 30, kills: 0, acc: 0, spawned: 0, pool: [] }; const hp1 = h.hp;
+        for (let i = 0; i < 5; i++) bioWorld(g, st);
+        out.healedDuringSwarm = h.hp - hp1; g.swarm = sw ?? null;
+        h.hp = st.maxHp;
+      } else if (b.id === "bramble") {
+        const k = g.bio.f[0], x = k % MW, y = (k / MW) | 0;
+        g.en = []; const e = mk(x, y, 0); e.hp = e.mhp = 1000; const boss = mk(g.bio.f[1] % MW, (g.bio.f[1] / MW) | 0, 2); const bhp = boss.hp;
+        e.x = x; e.y = y; for (let i = 0; i < 3; i++) bioWorld(g, st);
+        out.foeLost = 1000 - e.hp; out.foeSlow = e.slow; out.bossLost = bhp - boss.hp;
+        const hp0 = h.hp; h.x = x; h.y = y; for (let i = 0; i < 3; i++) bioWorld(g, st); out.heroLost = hp0 - h.hp;
+        g.en = [];
+      } else if (b.id === "hourglass") {
+        g.en = []; const p1 = free(h.x, h.y, 3), p2 = free(h.x + 2, h.y, 4);
+        const e = p1 ? mk(p1[0], p1[1], 0) : null; const boss = p2 ? mk(p2[0], p2[1], 2) : null;
+        BIO_RT.hg = 0; g.paused = false;
+        for (let i = 0; i < Math.ceil(BIO_HG_SEC / 0.05) + 2; i++) bioFrame(g, 0.05);
+        out.foeStun = e ? e.stun : -1; out.bossStun = boss ? boss.stun : -1;
+        g.en = [];
+      } else if (b.id === "lodestone") {
+        g.drops = []; const p = free(h.x, h.y, 3); const g0 = g.gold;
+        if (p) { const dx = Math.sign(p[0] - h.x), dy = Math.sign(p[1] - h.y); let x = p[0], y = p[1]; if (walkable(g, x + dx, y + dy)) { x += dx; y += dy; } g.drops.push({ x, y, item: null, pot: false, gold: 50 }); out.dist = Math.max(Math.abs(x - h.x), Math.abs(y - h.y)); }
+        for (let i = 0; i < 4; i++) bioWorld(g, st);
+        out.collected = g.drops.length === 0; out.goldGain = g.gold - g0;
+      } else if (b.id === "umbral") {
+        BIO_RT.lit = 0; const k = g.bio.f[0]; h.x = h.ax = k % MW; h.y = h.ay = (k / MW) | 0; bioStep(g);
+        out.lit = BIO_RT.lit; out.used = g.bio.u.length; bioStep(g); out.usedAgain = g.bio.u.length;
+      }
+      IP.camOk = false; computeVis(g);
+      return out;
+    },
+    view: (): Record<string, unknown> => {
+      // screenshot helper: put the hero next to a feature (or in a room) and reveal the area around it
+      const g = LIVE; if (!g) return { ok: false };
+      if (g.mode === "dead") g.mode = "play"; g.hero.hp = calc(g.lvl, g.eq).maxHp;
+      const f = g.bio && g.bio.f.length ? g.bio.f[0] : -1;
+      if (f >= 0) { const fx = f % MW, fy = (f / MW) | 0; for (const [dx, dy] of [[2, 1], [-2, 1], [1, 2], [2, 0], [0, 2], [-1, -2], [3, 0]]) if (walkable(g, fx + dx, fy + dy) && !g.bio!.f.includes((fy + dy) * MW + fx + dx)) { g.hero.x = g.hero.ax = fx + dx; g.hero.y = g.hero.ay = fy + dy; break; } }
+      for (let k = 0; k < MW * MH; k++) { const x = k % MW, y = (k / MW) | 0; if (Math.abs(x - g.hero.x) <= 10 && Math.abs(y - g.hero.y) <= 9) g.seen[k] = 1; }
+      IP.camOk = false; computeVis(g);
+      return { ok: true, hero: [g.hero.x, g.hero.y] };
+    },
+  };
+} catch { /* no window (tests in node) */ }
+
 function caveDrops(g: Game): Drop[] {
   return (g.drops || []).filter((d: Drop) => d && inb(d.x, d.y) && (d.pot || (d.gold || 0) > 0 || d.item)).map((d: Drop) => packDrop(d)).slice(0, SAVE_DROP_CAP);
 }
@@ -7066,6 +7790,7 @@ function enterVault(g: Game): void {
   const ent = packPortal(g.portal);
   const sup = !!(ent && ent.sup), cs = ent ? ent.cs : undefined;
   const stash = { map: u8s(g.map), seen: u8s(g.seen), en: g.en.filter((e: En) => e.hp > 0).concat(g.pend), chests: g.chests, drops: g.drops, trader: g.trader, hx: g.hero.x, hy: g.hero.y, ft: g.floorTurn, ground: g.ground, gobT: g.gobT, portal: ent, ws: g.wxs, xp: (g.xps || []).map((p: PortalSpot) => packPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p), sh: packShrine(g.shrine), hz: packHz(g), ac: packArtCave(g.artCave) };
+  (stash as Record<string, unknown>).bi = packBio(g.bio);
   setMapSize(BASE_MAP);
   g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
   g.vault = JSON.stringify(stash);
@@ -7137,6 +7862,7 @@ function exitVault(g: Game): void {
       g.wxs = typeof s.ws === "number" ? s.ws : g.wxs;
       g.xps = Array.isArray(s.xp) ? s.xp.map((p: unknown) => unpackPortal(p)).filter((p: PortalSpot | null): p is PortalSpot => !!p) : [];
       g.shrine = unpackShrine(s.sh); g.hz = unpackHz(s.hz, MW * MH); g.artCave = s.ac ? packArtCave(s.ac) : null; g.slide = null; hzSanitize(g);
+      g.bio = unpackBio((s as { bi?: unknown }).bi, MW * MH); BIO_MASK_KEY = "~";
       ok = true;
     }
   } catch { ok = false; }
@@ -9075,6 +9801,7 @@ function mineBtnEl() { return <span />; }
 function genCamp(g: Game): void {
   setMapSize(BASE_MAP);
   g.xps = []; g.shrine = null; g.swarm = null; g.hz = null; g.slide = null; g.artCave = null; g.artAlert = null;
+  g.bio = null;
   g.splats = [];
   clearCracks(g);
   const map = new Uint8Array(MW * MH);
@@ -14757,6 +15484,7 @@ function passiveTick(g: Game, st: Stats): void {
 }
 function worldTick(g: Game, st: Stats): void {
   const h = g.hero;
+  bioWorld(g, st);
   for (const gr of g.ground) {
     gr.t--;
     const e = enemyAt(g, gr.x, gr.y);
@@ -17875,6 +18603,7 @@ function visTick(g: Game, dt: number): void {
   if (needsFit(g)) fitBigObjects(g);
   if (g.spSw) spSwTick(g, dt);
   if (dt > 0) { swarmTick(g, dt); slideTick(g, dt); hzFxTick(dt); ultShowTick(g, dt); }
+  if (dt > 0) bioFrame(g, dt);
   const h = g.hero;
   if (IP.h !== h) { IP.h = h; IP.hp = null; IP.camOk = false; IP.em.clear(); }
   const ox = h.ax, oy = h.ay;
@@ -17902,6 +18631,7 @@ function visOf(g: Game, x: number, y: number): number[] {
 }
 
 function pickup(g: Game): void {
+  bioStep(g);
   const h = g.hero;
   const keep: Drop[] = [];
   for (const dr of g.drops) {
@@ -27140,6 +27870,7 @@ export default function App() {
         }
       }
       drawArtCave(ctx, g, camX, camY, t);
+      drawBioFloor(ctx, g, camX, camY, t);
       for (const tch of (g.torches ?? [])) {
         const tsx = tch.x * TS - camX, tsy = tch.y * TS - camY;
         if (tsx < -TS || tsy < HUD - TS || tsx > VW + TS || tsy > HUD + VIEWH + TS) continue;
@@ -27406,6 +28137,7 @@ export default function App() {
       drawUltShows(ctx, camX, camY);
       drawNkWorld(ctx, g, camX, camY, t);
       ctx.globalAlpha = 1;
+      drawBioOver(ctx, g, camX, camY, t);
       drawWeather(ctx, g, t, FRAME_VDT, camX, camY);
       drawTorchLights(ctx, g, camX, camY, t);
       drawNkBeams(ctx, g, camX, camY, t, text);
@@ -27591,7 +28323,7 @@ export default function App() {
         text(goldS, goldR, 25, GOLD, "right", 6);
         text(bestS, xR, 25, "#8a80a8", "right", 5);
         HUD_ROW = { pl: [3, 3 + plW], gold: [goldR - goldW, goldR], best: [xR - bestW, xR], area: [0, 0] };
-        let area = g.vault ? "Treasure Vault" : themeName(g);
+        let area = g.vault ? "Treasure Vault" : (bioName(g) || themeName(g));
         const ax = Math.max(52, 3 + plW + 5), room = goldR - goldW - 5 - ax;
         if (room > 12) {
           while (area.length > 3 && wOf(area, 6) > room) area = area.slice(0, -2) + "\u2026";
