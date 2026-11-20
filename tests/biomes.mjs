@@ -262,7 +262,13 @@ async function main() {
     await B("toggle", false); await sleep(200); const off = await meas();
     await B("toggle", true); await B("perf", true); await sleep(200); const on = await meas(); const dc = await B("perf", false);
     ft[id] = { size: (await B("info")).size, off: off.avg, on: on.avg, drawMsPerFrame: +dc.per.toFixed(3) };
-    if (on.avg > off.avg * 1.25 + 2) perfBad.push(id);
+    if (on.avg > off.avg * 1.25 + 2 || dc.per > 1.5) {
+      // rAF timing is vsync-quantised: re-measure once before calling it a regression
+      await B("toggle", false); await sleep(200); const off2 = await meas();
+      await B("toggle", true); await sleep(200); const on2 = await meas();
+      ft[id].retry = { off: off2.avg, on: on2.avg };
+      if (on2.avg > off2.avg * 1.25 + 2 || dc.per > 1.5) perfBad.push(id);
+    }
   }
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
   record("same 72x72 floor, biome on vs off (4x CPU throttle): frame time within 25%", perfBad.length === 0, ft);
