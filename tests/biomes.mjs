@@ -88,6 +88,21 @@ async function main() {
   record("Bramble Warren: thorns hurt + slow ordinary foes, never bosses or the hero", mech.bramble.foeLost > 0 && mech.bramble.foeSlow > 0 && mech.bramble.bossLost === 0 && mech.bramble.heroLost === 0, mech.bramble);
   record("Hourglass Rift: an 18 s Stillwave freezes ordinary foes, never bosses", mech.hourglass.foeStun > 0 && mech.hourglass.bossStun === 0, mech.hourglass);
 
+  // 4b. spider swarm (depth >= 51): floors that arm a swarm still generate valid biome layouts, and biome combat
+  //     mechanics go dormant from the moment the swarm arms until it ends
+  if (await page.evaluate(() => !!window.__ED16_SPSW)) {
+    await page.evaluate(() => window.__ED16_SPSW.force(true));
+    const sw = await B("sim", 51, 240, 60);
+    await page.evaluate(() => window.__ED16_SPSW.force(false));
+    record("240 swarm-armed floors at depths 51-110 with biomes: valid layouts, every biome appears", sw.reqFail === 0 && sw.stairFail === 0 && sw.bad.length === 0 && IDS.every((id) => (sw.by[id] || 0) > 0), { by: sw.by, reqFail: sw.reqFail, stairFail: sw.stairFail });
+    await B("gen", 61, { id: "ley", haz: "water" });
+    const armed = await page.evaluate(() => window.__ED16_SPSW.arm());
+    const calmOn = await B("calm");
+    const healArmed = await page.evaluate(() => { const B = window.__ED16_BIO; const i0 = B.info(); return i0; });
+    await B("clearSpider");
+    const calmOff = await B("calm");
+    record("spider swarm armed -> biome mechanics dormant; swarm over -> they resume", armed.ok && calmOn === true && calmOff === false, { armed: armed.ok, calmOn, calmOff, biome: healArmed.biome });
+  }
   // 5. save/reload + old saves
   const rt = {};
   for (const id of IDS) { await B("gen", 71, { id, haz: "ice" }); await B("touchAll"); rt[id] = await B("roundTrip", false); }

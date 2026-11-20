@@ -7474,7 +7474,7 @@ function bioApplyVariants(g: Game, b: BiomeDef, r: () => number): number {
   let n = 0;
   for (const e of g.en) {
     const ee = e as En & { bv?: number };
-    if (ee.bv || !bioCalmFoe(e) || e.sw || e.rare || e.pack || e.lead || e.se || e.ue || /^(Champion|Brute|Roaming) /.test(e.name)) continue;
+    if (ee.bv || !bioCalmFoe(e) || e.sw || e.ssw || e.rare || e.pack || e.lead || e.se || e.ue || /^(Champion|Brute|Roaming) /.test(e.name)) continue;
     if (r() >= v.ch) continue;
     if (v.fast && e.tr.includes("fast")) continue;
     ee.bv = 1;
@@ -7729,6 +7729,7 @@ try {
       return { pool: bioPool(depth).length + n, rate: hit / seeds, kinds: Object.keys(by).length };
     },
     calm: (): boolean => { const g = LIVE; return !!g && bioCalm(g); },
+    clearSpider: (): void => { const g = LIVE; if (g) g.spSw = null; },
     // mechanic probes on the current (forced) biome floor
     mech: (): Record<string, unknown> => {
       const g = LIVE; const b = g ? bioOf(g) : null; if (!g || !b || !g.bio) return { ok: false };
