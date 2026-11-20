@@ -39,3 +39,7 @@ tests/hazmove-results.json
 tests/_gemprobe.mjs
 tests/_gemboss.mjs
 tests/_gemsave.mjs
+
+# save-backup e2e + restore artifacts: box-only, never published
+tests/_bk*
+saves/restore-*/

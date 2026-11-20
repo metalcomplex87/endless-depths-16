@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useGrokTheme } from "grok/canvas";
+import { ED16_BK_URL, ED16_BK_KEY } from "./bk-config";
 
 // STORAGE KEYS ARE STABLE ACROSS DEPLOYS. Never rename these, or existing
 // player saves will not load: ed16_save_v1_p1/p2/p3/p5 and their _bak keys,
@@ -10069,6 +10070,7 @@ function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
   });
   if (id === activeProf) memSave = c.raw; else memSaveBy[id] = c.raw;
   const ok = writeDurable(profSaveKey(id), c.raw);
+  if (ok) bkAfterRestore(id, c.raw);
   RECOVERED.push(id);
   return ok || lsGet(profSaveKey(id)) === c.raw || hookGet(profSaveKey(id)) === c.raw;
 }
@@ -10603,6 +10605,111 @@ function writeDurable(key: string, raw: string): boolean {
   }
   return durable;
 }
+// ---------- save backups (2026-11-20) ----------
+// Richard (p1), Jax (p2), Piper (p3) and Mike (p5); never Tester (p4). After every successful save (manual Save Game,
+// autosave, import, Recover) the profile's Save Code (the exact string the Save Code button makes) is:
+//  1. kept on this device in ed16_bk_hist_pN: the last 5 distinct codes with time, level and depth, listed under
+//     Profiles > Recover from backup. Works without the webhook.
+//  2. POSTed, if ED16_BK_URL is set, as {player, slot, savedAt, code} with Authorization: Bearer <key>, keepalive.
+// Autosaves are debounced to at most one capture per 60 s per profile; manual saves and restores always capture.
+// The work runs after the save returns (idle callback), every error is swallowed, nothing is shown to the player.
+// A failed POST leaves one queued send per profile in ed16_bk_pending_pN, retried on the next capture or load.
+const BK_SLOTS: Partial<Record<ProfId, string>> = { 1: "p1", 2: "p2", 3: "p3", 5: "p5" };
+const BK_DEBOUNCE_MS = 60000;
+const BK_HIST_N = 5;
+const BK_TIMEOUT_MS = 8000;
+const bkLastCap: Partial<Record<ProfId, number>> = {};
+const bkSched: Partial<Record<ProfId, boolean>> = {};
+const bkInFlight: Partial<Record<ProfId, boolean>> = {};
+const BK_STATS = { captured: 0, sent: 0, failed: 0, skipped: 0, hist: 0 };
+type BkHist = { t: number; lvl: number; depth: number; h: string; code: string };
+function bkHistKey(id: ProfId): string { return "ed16_bk_hist_p" + id; }
+function bkPendKey(id: ProfId): string { return "ed16_bk_pending_p" + id; }
+function bkHash(s: string): string { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + "." + s.length; }
+function bkHistOf(id: ProfId): BkHist[] {
+  try { const a = JSON.parse(lsGet(bkHistKey(id)) || "[]") as BkHist[]; return Array.isArray(a) ? a.filter((e: BkHist) => e && typeof e.code === "string" && typeof e.t === "number") : []; } catch { return []; }
+}
+function bkHistPush(id: ProfId, e: BkHist): void {
+  let a = bkHistOf(id).filter((x: BkHist) => x.h !== e.h);
+  a.unshift(e); a = a.slice(0, BK_HIST_N);
+  // Never compete with the real save for space: on a failed write keep fewer entries, never more.
+  while (a.length > 0) { if (lsSet(bkHistKey(id), JSON.stringify(a))) { BK_STATS.hist++; return; } a = a.slice(0, a.length - 1); }
+}
+function bkWebhookOn(): boolean { return !!ED16_BK_URL && typeof fetch === "function"; }
+function bkSendPending(id: ProfId): void {
+  try {
+    if (!bkWebhookOn() || bkInFlight[id]) return;
+    const body = lsGet(bkPendKey(id));
+    if (!body) return;
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const to = setTimeout(() => { try { if (ctl) ctl.abort(); } catch { /* ignore */ } }, BK_TIMEOUT_MS);
+    bkInFlight[id] = true;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (ED16_BK_KEY) headers["Authorization"] = "Bearer " + ED16_BK_KEY;
+    // keepalive lets a send started by the save-on-close finish after the tab goes away (browsers cap it at 64 KB).
+    void fetch(ED16_BK_URL, { method: "POST", headers, body, mode: "cors", credentials: "omit", cache: "no-store", keepalive: body.length < 60000, signal: ctl ? ctl.signal : undefined })
+      .then((r: Response) => r.ok, () => false)
+      .then((ok: boolean) => {
+        clearTimeout(to); bkInFlight[id] = false;
+        try { if (ok) { BK_STATS.sent++; if (lsGet(bkPendKey(id)) === body) lsRemove(bkPendKey(id)); } else BK_STATS.failed++; } catch { /* ignore */ }
+      }, () => { clearTimeout(to); bkInFlight[id] = false; BK_STATS.failed++; });
+  } catch { bkInFlight[id] = false; }
+}
+function bkCapture(id: ProfId, getCode: () => string, always: boolean): void {
+  try {
+    if (!BK_SLOTS[id]) return;
+    const now = Date.now();
+    if (!always && now - (bkLastCap[id] ?? 0) < BK_DEBOUNCE_MS) { BK_STATS.skipped++; return; }
+    if (!always && bkSched[id]) return;
+    bkLastCap[id] = now; bkSched[id] = true;
+    const work = (): void => {
+      bkSched[id] = false;
+      try {
+        const code = getCode();
+        if (!code) return;
+        let lvl = 0, depth = 0;
+        try { const o = JSON.parse(lzd(code.replace(/^ED2-/, "")) || "{}") as { l?: number; d?: number }; lvl = Number(o.l) || 0; depth = Number(o.d) || 0; } catch { /* stats are display-only */ }
+        const savedAt = new Date().toISOString();
+        bkHistPush(id, { t: Date.now(), lvl, depth, h: bkHash(code), code });
+        BK_STATS.captured++;
+        if (bkWebhookOn()) {
+          const player = (PROFILES.find((p: { id: ProfId; name: string }) => p.id === id) || PROFILES[0]).name;
+          lsSet(bkPendKey(id), JSON.stringify({ player, slot: BK_SLOTS[id], savedAt, code }));
+          bkSendPending(id);
+        }
+      } catch { /* never surfaces */ }
+    };
+    const ric = (typeof window !== "undefined" ? (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback : undefined);
+    if (typeof ric === "function") ric(work, { timeout: 1500 }); else setTimeout(work, 0);
+  } catch { /* never surfaces */ }
+}
+function bkAfterSave(g: Game, manual: boolean): void {
+  try { const id = activeProf; bkCapture(id, () => (activeProf === id && g.mode === "play" ? makeCode(g) : ""), manual); } catch { /* ignore */ }
+}
+function bkAfterRestore(id: ProfId, raw: string): void {
+  try { bkCapture(id, () => { const l = loadGame(null, raw); return l ? makeCode(l) : ""; }, true); } catch { /* ignore */ }
+}
+function bkRetryAllPending(): void { try { for (const k of Object.keys(BK_SLOTS)) bkSendPending(Number(k) as ProfId); } catch { /* ignore */ } }
+// Recover from backup: put a history entry back into its profile. The current save is kept under
+// ed16_recover_prev_pN_<time> first (same as Recover lost profiles); nothing is deleted.
+function bkRestoreHist(id: ProfId, e: BkHist): boolean {
+  try {
+    if (!BK_SLOTS[id]) return false;
+    const g = decodeCode(e.code, null);
+    if (!g) return false;
+    g.mode = "play";
+    const raw = buildPersistRaw(g);
+    if (!parseSaveRaw(raw)) return false;
+    const existing = profBlob(id);
+    const keep: string[] = [];
+    for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== raw && keep.indexOf(r) < 0) keep.push(r);
+    keep.forEach((r: string, i: number) => { const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : ""); void idbPutDone(k, r); lsSet(k, r); });
+    if (id === activeProf) memSave = raw; else memSaveBy[id] = raw;
+    const ok = writeDurable(profSaveKey(id), raw) || lsGet(profSaveKey(id)) === raw;
+    if (ok) bkAfterRestore(id, raw);
+    return ok;
+  } catch { return false; }
+}
 function saveGame(g: Game, quiet = false, force = false): boolean {
   syncMapSize(g);
   if (!profPersists(activeProf)) return false;
@@ -10634,6 +10741,7 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
     // Only show "Saved" after a verified durable write.
     // A failed write used to toast anyway, so a stale slot (e.g. the level-1 beginNew) looked saved.
     if (ok && !quiet) g.toast = 1.4;
+    if (ok) bkAfterSave(g, SAVE_MANUAL);
     return ok;
   } catch (err) {
     lastPersistErr = viewerBlocksSaving() ? "this viewer blocks saving" : ("save threw: " + storeDeniedReason("save", err));
@@ -22120,6 +22228,8 @@ try {
     artAlertReset: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (g.artCave) g.artCave.al = 0; g.artAlert = null; ART_ALERT_LOG.length = 0; return { ok: true }; },
     mute: (on?: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (on === true || on === false) g.muted = on; return { ok: true, muted: !!g.muted }; },
     saveCode: (): string => { const g = LIVE; return g ? saveCodeOf(g) : ""; },
+    bkStats: (): Record<string, unknown> => ({ ...BK_STATS, webhook: bkWebhookOn(), hist: Object.keys(BK_SLOTS).map((k: string) => [k, bkHistOf(Number(k) as ProfId).length]) }),
+    bkAutoSave: (): boolean => { const g = LIVE; return g ? saveGame(g, true) : false; },
     goto: (x: number, y: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.slide = null; IP.camOk = false; computeVis(g); return { ok: true }; },
     gotoFront: (back = 1): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a || a.ox === undefined) return { ok: false }; const x = a.ox - a.sx! * back, y = a.oy - a.sy! * back; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); return { ok: true, x, y, dir: [a.sx, a.sy] }; },
     ww: (on: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (!g.eq.chest) g.eq.chest = makeItem(g.depth, 3, "chest" as Kind); if (on) g.eq.chest.ww = 1; else { for (const k of EQK) { const it = g.eq[k]; if (it) delete it.ww; } } bustIcon(g.eq.chest); return { ok: true, ww: heroWW(g) }; },
@@ -24809,6 +24919,23 @@ export default function App() {
     setTitleNote(hasSaveBlob() ? (nm + "'s save is still here but could not be opened. It was kept safe - do NOT start a New Game. Open Profiles and tap Recover lost profiles.") : ("No save on " + nm + " yet. " + (isMikeProf(id) ? "Tap Restore save under Mike to load your backup, or start a New Game." : "Paste a Save Code with LOAD, or start a New Game.")));
     bump();
   };
+  const [bkList, setBkList] = useState<{ id: ProfId; e: BkHist }[] | null>(null);
+  const [bkNote, setBkNote] = useState("");
+  const openBkHist = (): void => {
+    if (isMikeLocked()) return;
+    if (bkList) { setBkList(null); return; }
+    const out: { id: ProfId; e: BkHist }[] = [];
+    for (const k of Object.keys(BK_SLOTS)) { const id = Number(k) as ProfId; for (const e of bkHistOf(id)) out.push({ id, e }); }
+    setBkNote(""); setBkList(out); bump();
+  };
+  const doBkRestore = (id: ProfId, e: BkHist): void => {
+    if (isMikeLocked()) return;
+    const nm = PROFILES[id - 1] ? PROFILES[id - 1].name : "profile";
+    if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm("Put " + nm + "'s backup from " + fmtProfTime(e.t) + " (Lv " + e.lvl + " / Depth " + e.depth + ") back into " + nm + "? The current save is kept as a backup, not deleted.")) return;
+    const ok = bkRestoreHist(id, e);
+    setBkNote(ok ? ("Restored " + nm + " (Lv " + e.lvl + ", Depth " + e.depth + "). Tap " + nm + " to play.") : "Could not restore that backup. Nothing was changed.");
+    bump();
+  };
   const openRecover = (): void => {
     if (isMikeLocked()) return;
     setRecBusy(true); setRecNote("");
@@ -26265,6 +26392,7 @@ export default function App() {
       markStorageReady();
       const g2 = gRef.current; if (g2) g2.notify();
       bump();
+      try { setTimeout(bkRetryAllPending, 3000); } catch { /* backup retry is best-effort */ }
     }, () => { markStorageReady(); bump(); });
 
     // title demo gear
@@ -27379,6 +27507,18 @@ export default function App() {
                             <button key={p.id} className="dc-b" style={{ ...btn, flex: 1, padding: "4px 2px", fontSize: 11 }} onClick={() => doRecover(c, p.id)}>{"To " + p.name}</button>
                           ))}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button className="dc-b dc-bkhist" style={{ ...btn, marginTop: 8, width: "100%" }} disabled={stor === "checking" || !storageReady} onClick={openBkHist}>{"\ud83d\uddc2 Recover from backup"}</button>
+                {bkList !== null && (
+                  <div className="dc-bk" style={{ width: "100%", marginTop: 8, maxHeight: 260, overflowY: "auto", fontSize: 12, lineHeight: 1.35 }}>
+                    {bkNote ? <div className="dc-sm" style={{ textAlign: "center", marginBottom: 6 }}>{bkNote}</div> : null}
+                    {bkList.length === 0 ? <div className="dc-sm" style={{ textAlign: "center" }}>No backups on this device yet. Every save of Richard, Jax, Piper and Mike keeps one here (last 5 each).</div> : bkList.map((r: { id: ProfId; e: BkHist }, i: number) => (
+                      <div key={r.id + "-" + r.e.h + "-" + i} className="dc-bk-row" style={{ borderTop: "1px solid rgba(255,255,255,0.15)", padding: "6px 0", display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ flex: 1 }}><b>{PROFILES[r.id - 1].name}</b>{" · Lv " + r.e.lvl + " · Depth " + r.e.depth}<div style={{ opacity: 0.75, fontSize: 11 }}>{fmtProfTime(r.e.t)}</div></div>
+                        <button className="dc-b" style={{ ...btn, padding: "4px 8px", fontSize: 11 }} onClick={() => doBkRestore(r.id, r.e)}>Restore</button>
                       </div>
                     ))}
                   </div>
