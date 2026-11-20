@@ -31,6 +31,9 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const dest = event.request.destination;
   const url = new URL(event.request.url);
+  // Cross-origin fetches (GitHub gist API / raw) must not be intercepted — the
+  // worker would hide CORS headers and #rg= restore would fail on the live site.
+  if (url.origin !== self.location.origin) return;
   const networkFirst = dest === "document" || dest === "script" ||
     url.pathname.endsWith(".html") || url.pathname.endsWith(".js") ||
     url.pathname.endsWith("/") || url.pathname.endsWith("/endless-depths-16");
