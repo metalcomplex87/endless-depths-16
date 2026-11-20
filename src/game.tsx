@@ -10105,21 +10105,77 @@ function b64urlDecode(s: string): string | null {
     return atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
   } catch { return null; }
 }
-function peekRestoreHash(): string | null {
+function hashBody(): string {
   try {
-    if (typeof location === "undefined") return null;
+    if (typeof location === "undefined") return "";
     const h = String(location.hash || "");
-    const body = h.charAt(0) === "#" ? h.slice(1) : h;
-    if (!body.startsWith("restore=")) return null;
-    return body.slice(8);
-  } catch { return null; }
+    return h.charAt(0) === "#" ? h.slice(1) : h;
+  } catch { return ""; }
+}
+function peekRestoreHash(): string | null {
+  const body = hashBody();
+  if (!body.startsWith("restore=")) return null;
+  return body.slice(8);
+}
+const GIST_ID_RE = /^[0-9a-f]{8,64}$/i;
+function peekRestoreGist(): { id: string } | { invalid: true } | null {
+  const body = hashBody();
+  if (!body.startsWith("rg=")) return null;
+  const id = body.slice(3).trim();
+  if (!GIST_ID_RE.test(id)) return { invalid: true };
+  return { id: id.toLowerCase() };
+}
+function hasRestoreHash(): boolean {
+  const body = hashBody();
+  return body.startsWith("restore=") || body.startsWith("rg=");
 }
 function clearRestoreHash(): void {
   try {
     if (typeof history === "undefined" || typeof location === "undefined") return;
-    if (!peekRestoreHash()) return;
+    if (!hasRestoreHash()) return;
     history.replaceState(null, "", location.pathname + location.search);
   } catch { /* ignore */ }
+}
+async function fetchGistRestorePayload(id: string): Promise<string> {
+  if (!GIST_ID_RE.test(id)) throw new Error("invalid gist id");
+  const api = "https://api.github.com/gists/" + id;
+  let content = "";
+  let rawUrl = "";
+  let truncated = false;
+  const timed = (url: string, init?: RequestInit): Promise<Response> => {
+    const ctrl = new AbortController();
+    const t = window.setTimeout(() => { try { ctrl.abort(); } catch { /* ignore */ } }, 8000);
+    const opts: RequestInit = { ...(init || {}), signal: ctrl.signal };
+    return fetch(url, opts).finally(() => window.clearTimeout(t));
+  };
+  try {
+    const r = await timed(api, { headers: { Accept: "application/vnd.github+json" } });
+    if (r.ok) {
+      const data = await r.json() as { files?: Record<string, { content?: string; truncated?: boolean; raw_url?: string; filename?: string }> };
+      const files = data && data.files ? data.files : {};
+      const f = files["r.txt"] || files[Object.keys(files)[0]] || null;
+      if (f) {
+        truncated = !!f.truncated;
+        rawUrl = typeof f.raw_url === "string" ? f.raw_url : "";
+        if (typeof f.content === "string") content = f.content;
+      }
+    }
+  } catch { /* fall through to raw */ }
+  if (truncated || !content) {
+    const fallbacks = [rawUrl, "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw/r.txt", "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw"];
+    let lastErr = "";
+    for (const u of fallbacks) {
+      if (!u) continue;
+      try {
+        const raw = await timed(u);
+        if (!raw.ok) { lastErr = "HTTP " + raw.status; continue; }
+        content = await raw.text();
+        if (content && content.trim()) break;
+      } catch (e) { lastErr = e instanceof Error ? e.message : "network"; }
+    }
+    if (!content || !content.trim()) throw new Error(lastErr || "gist download failed");
+  }
+  return content.trim();
 }
 function decodeRestorePayload(payload: string): Partial<Record<"p1" | "p2" | "p3", string>> | null {
   if (!payload) return null;
@@ -10191,6 +10247,16 @@ function consumeRestoreHash(): { names: string[] } | null {
   const map = decodeRestorePayload(payload);
   clearRestoreHash();
   if (!map) return { names: [] };
+  return applyRestoreMap(map);
+}
+async function consumeRestoreGist(id: string): Promise<{ names: string[]; error?: string }> {
+  if (mikeHoldsOtherProfiles() || isMikeLocked()) { clearRestoreHash(); return { names: [] }; }
+  let payload = "";
+  try { payload = await fetchGistRestorePayload(id); }
+  catch { return { names: [], error: "Could not download the restore. Check the link and try again." }; }
+  const map = decodeRestorePayload(payload);
+  if (!map) return { names: [], error: "Restore data was not valid. Nothing was changed." };
+  clearRestoreHash();
   return applyRestoreMap(map);
 }
 
@@ -24897,16 +24963,45 @@ export default function App() {
   useEffect(() => {
     if (showOwnerGate || !ownerUnlocked) return;
     if (stor === "checking" || !storageReady) return;
-    if (isMikeLocked() || mikeHoldsOtherProfiles()) {
-      if (peekRestoreHash()) clearRestoreHash();
-      return;
-    }
-    const res = consumeRestoreHash();
-    if (res && res.names.length) {
-      showSaveNote("ok", "Restored: " + res.names.join(", "), "Saved to this device.");
-      setProfOpen(true);
-      bump();
-    }
+    let cancelled = false;
+    const run = async (): Promise<void> => {
+      if (isMikeLocked() || mikeHoldsOtherProfiles()) {
+        if (hasRestoreHash()) clearRestoreHash();
+        return;
+      }
+      if (peekRestoreHash()) {
+        const res = consumeRestoreHash();
+        if (cancelled) return;
+        if (res && res.names.length) {
+          showSaveNote("ok", "Restored: " + res.names.join(", "), "Saved to this device.");
+          setProfOpen(true);
+          bump();
+        }
+        return;
+      }
+      const gist = peekRestoreGist();
+      if (!gist) return;
+      if ("invalid" in gist) {
+        showSaveNote("err", "Restore link is not valid", "Nothing was changed.");
+        clearRestoreHash();
+        bump();
+        return;
+      }
+      const res = await consumeRestoreGist(gist.id);
+      if (cancelled) return;
+      if (res.error) {
+        showSaveNote("err", "Could not load restore", res.error);
+        bump();
+        return;
+      }
+      if (res.names.length) {
+        showSaveNote("ok", "Restored: " + res.names.join(", "), "Saved to this device.");
+        setProfOpen(true);
+        bump();
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
   }, [ownerUnlocked, stor, showOwnerGate]);
   const startOrRestart = (): boolean => {
     const g = gRef.current;
@@ -28146,7 +28241,9 @@ try {
       return restoreCandidate({ src: "test", key: "write-" + id, raw, lvl: Math.floor(Number(s.lvl) || 1), depth: Math.floor(Number(s.depth) || 1), t: typeof s.t === "number" && isFinite(s.t) ? s.t : 0, prof: id }, id);
     },
     peekRestoreHash,
+    peekRestoreGist,
     consumeRestoreHash,
+    consumeRestoreGist,
     keys: (ids?: ProfId[]): Record<string, string | null> => {
       const out: Record<string, string | null> = {};
       const list = ids && ids.length ? ids : ([1, 2, 3, 4, 5] as ProfId[]);
