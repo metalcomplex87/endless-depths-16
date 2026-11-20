@@ -127,7 +127,7 @@ interface Ult { n: string; el: El; pat: number; c2: string; i: number; fx?: numb
 interface Item { id: number; seed: number; kind: Kind; rar: number; ilvl: number; name: string; atk: number; def: number; block: number; bonus: Partial<Record<Bonus, number>>; d: number[]; spells?: Spell[]; pas?: Passive[]; ult?: number; ef?: number[][]; pt?: number; set?: number; st?: number[][]; wel?: El; sk?: { c: number; g?: { typ: number; rar: number; s?: number } }[]; gt?: number; gs?: number; golden?: boolean; pab?: number; prt?: number; ww?: number; mvv?: number }
 interface WInfo { n: string; two: boolean; dmg: number; spd: number; crit: number; reach: number; range: number; magic: boolean; cleave: boolean; pierce: number; stun: number; knock: number; grip: number; note: string; bases: string[] }
 interface Fam { n: string; v: string[]; h: number[]; s: number; e: string; hp: number; atk: number; def: number; min: number; tr: Trait | null }
-interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number; o6?: number; o6m?: number; o6ph?: number; o6inv?: number; o6t?: number; o6b?: number; o6rt?: number; efw?: number }
+interface En { id: number; x: number; y: number; ax: number; ay: number; f: number; v: number; cls: number; hp: number; mhp: number; atk: number; def: number; xp: number; name: string; tr: Trait[]; stun: number; child: boolean; hit: number; bump: number; bdx: number; bdy: number; awake: boolean; face: number; pal: string[]; burn: number; burnD: number; slow: number; weak: number; fear: number; gob?: number; hunt?: number; bl?: number; blD?: number; poi?: number; poD?: number; doom?: number; doomD?: number; chm?: number; mk?: number; dis?: number; at?: number; ra?: number; rare?: number; pack?: number; lead?: number; elW?: El; elR?: El[]; shd?: number; mshd?: number; act?: number; phase?: number; abt?: number; abc?: number; abCd?: number; abIntro?: boolean; se?: number; ue?: number; bN?: number; packId?: number; ovn?: number; ovm?: number; ovhp?: number; ovmhp?: number; pm?: number; pmShown?: boolean; ct?: number; sgc?: number; sw?: number; gat?: number; o6?: number; o6m?: number; o6ph?: number; o6inv?: number; o6t?: number; o6b?: number; o6rt?: number; efw?: number; ssw?: number }
 interface Drop { x: number; y: number; item: Item | null; pot: boolean; gold: number }
 interface Chest { x: number; y: number; open: boolean; rar: number; starter?: boolean; items?: Item[]; bur?: boolean; fit?: number } // fit 1 = 2x2 footprint at x..x+1,y..y+1; 2 = legacy 1x1 (no room for 2x2)
 interface Torch { x: number; y: number; typ: number; dir: number; ph: number }
@@ -167,6 +167,7 @@ interface Game {
   campSpot?: { x: number; y: number }; stashAt?: { x: number; y: number }; restAt?: { x: number; y: number }; fireAt?: { x: number; y: number }; pk?: PeakTrack; pkShow?: PeakTrack | null; bpm?: { k: string; v: number[] } | null;
   gambler?: { x: number; y: number } | null; gambPity?: number;
   mvAcc?: number; es?: ES; pshots?: PShot[]; petDmg?: number; pSnap?: [En, number][]; pDps?: number; thSeen?: number[]; thShift?: number; thNew?: boolean; wxs?: number; mw?: number; mh?: number; xps?: PortalSpot[]; shrine?: Shrine | null; swarm?: Swarm | null; arts?: number[]; artCave?: ArtCave | null; shrUsedD?: number; trophyOpen?: boolean; hz?: Uint8Array | null; slide?: { dx: number; dy: number; t: number } | null; trophyAt?: { x: number; y: number };
+  spSw?: SpSw | null; spSwD?: number[]; // 2026-11-20 Spider Swarm: live event + depths already spent (saved)
   rt?: boolean; pcd?: number; acd?: number; qd?: number[]; wt?: number; swT?: number;
   autoCombine?: boolean;
   gemBag?: Item[];
@@ -4918,7 +4919,7 @@ function mkEnemy(g: Game, x: number, y: number, cls: number, opts?: { full?: boo
   const d = g.depth;
   const avail: number[] = [];
   FAMS.forEach((f: Fam, i: number) => { if (f.min <= d) avail.push(i); });
-  const fi = pick(avail);
+  const fi = FAM_FORCE >= 0 && FAM_FORCE < FAMS.length ? FAM_FORCE : pick(avail);
   const f = FAMS[fi];
   const tier = Math.floor((d - 1) / 5);
   let v = Math.max(0, Math.min(4, tier + (R() < 0.3 ? 1 : 0) - (R() < 0.25 ? 1 : 0)));
@@ -10492,7 +10493,7 @@ function codeBodyOf(g: Game): Record<string, unknown> {
   return {
     v: 2, d: g.depth, l: g.lvl, x: Math.round(g.xp), g: g.gold, p: g.potions, b: g.best, bl: g.bestLvl, k: g.kills, dt: g.deaths || 0,
     u: Math.max(0, Math.round(g.ultAt - Date.now())), ua: Math.max(0, Math.round((g.ultAtA ?? 0) - Date.now())), ucs: packUltCds(g), pa: Math.max(0, Math.round((g.paraAt ?? 0) - Date.now())), ae: g.autoEq ? 1 : 0, mu: g.muted ? 1 : 0, mo: g.music ? 1 : 0, gm: g.gems ?? 0, ac: g.autoCombine === false ? 0 : 1, cs: packChestShop(g), ct: packChestTypes(g), ctm: g.chestTypeMig ? 1 : 0, wb: g.wallBreak ? 1 : 0, ck: packCracks(g),
-    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0, aal: g.artCave && g.artCave.al ? 1 : 0,
+    e: EQK.map((k: EqKey) => packItem(g.eq[k])), s: g.bag.slice(0, bagCap).map((it: Item) => packItem(it)), gb: ensureGemBag(g).slice(0, gemCap).map((it: Item) => packItem(it)), bc: bagCap, gc: gemCap, ts: thSeenCode(g), afx: packArts(g.arts), sud: g.shrUsedD ?? 0, ssd: packSpSwD(g), aal: g.artCave && g.artCave.al ? 1 : 0,
     stsh: [], stg: bankGoldOf(g), bg: bankGoldOf(g),
     ad: g.actCleared ?? 0, bkd: g.bkd && g.bkd.length ? g.bkd : undefined, fr: floorFront(g), fp: pruneFloorSnap(g.snapPrev ?? null), fc: persistCurSnap(g), ms: unpackMerchSub(g.merchSub),
     hx: g.hero.x, hy: g.hero.y, hp: g.hero.hp, dir: heroDir(g.hero), tn: g.turn,
@@ -10526,7 +10527,7 @@ function fullSnapOf(g: Game): Record<string, unknown> {
     ground: g.ground, allies: g.allies, ward: g.ward, autoEq: g.autoEq, music: g.music, autoCombine: g.autoCombine !== false,
     trader: g.trader, ultAt: g.ultAt, ultAtA: g.ultAtA ?? 0, ultAts: g.ultAts ?? {}, paraAt: g.paraAt ?? 0, floorTurn: g.floorTurn, best: g.best, bestLvl: g.bestLvl, deaths: g.deaths, portal: g.portal, vault: g.vault, gobT: g.gobT, locked: g.locked, thSeen: g.thSeen ?? [],
     area: g.area ?? "dungeon", actCleared: g.actCleared ?? 0, bkd: g.bkd ?? [], actCampAt: g.actCampAt ?? 0, front: floorFront(g), snapPrev: g.snapPrev ?? null, snapCur: persistCurSnap(g), gemBag: ensureGemBag(g), bagCap: g.bagCap ?? BAG, gemCap: g.gemCap ?? GEM_BAG, stash: [], stashGold: bankGoldOf(g), bankGold: bankGoldOf(g), campSpot: g.campSpot, stashAt: g.stashAt, restAt: g.restAt, fireAt: g.fireAt, pk: g.pk ?? null, pkShow: g.pkShow ?? null, bpm: g.bpm ?? null, gems: g.gems ?? 0, chestShop: packChestShop(g), chestTypes: packChestTypes(g), chestTypeMig: !!g.chestTypeMig, merchSub: unpackMerchSub(g.merchSub), merchant: g.merchant ?? null,
-    wallBreak: !!g.wallBreak, cracks: packCracks(g), arts: artsOf(g).slice(), shrUsedD: g.shrUsedD ?? 0,
+    wallBreak: !!g.wallBreak, cracks: packCracks(g), arts: artsOf(g).slice(), shrUsedD: g.shrUsedD ?? 0, spSwD: packSpSwD(g),
     secret: packPortal(g.secret), gobPort: packPortal(g.gobPort), arena: g.arena ?? null, gobCave: g.gobCave ?? null,
     nk: nkPackSt(g),
     hasPrismatic: !!g.hasPrismatic, firstPrismaticAt: g.firstPrismaticAt || 0,
@@ -11151,7 +11152,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     normUltCds(g);
     syncLegacyUlt(g);
     g.thSeen = thSeenParse(s.ts);
-    g.arts = unpackArts(s.afx); g.shrUsedD = typeof s.sud === "number" && isFinite(s.sud) ? Math.floor(s.sud) : 0;
+    g.arts = unpackArts(s.afx); g.shrUsedD = typeof s.sud === "number" && isFinite(s.sud) ? Math.floor(s.sud) : 0; g.spSwD = unpackSpSwD((s as Record<string, unknown>).ssd);
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
     g.bkd = cleanBkd(s.bkd);
     g.mine = mineUnpack(s.mn);
@@ -11382,7 +11383,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
     g.splats = [];
     g.map = map; g.seen = seen; g.vis = new Uint8Array(MW * MH);
     g.thSeen = thSeenParse(s.thSeen);
-    g.arts = unpackArts(s.arts); g.shrUsedD = typeof s.shrUsedD === "number" && isFinite(s.shrUsedD) ? Math.floor(s.shrUsedD as number) : 0;
+    g.arts = unpackArts(s.arts); g.shrUsedD = typeof s.shrUsedD === "number" && isFinite(s.shrUsedD) ? Math.floor(s.shrUsedD as number) : 0; g.spSwD = unpackSpSwD((s as Record<string, unknown>).spSwD);
     g.theme = themeOf(g.depth);
     THDREAD = (g.area === "camp" || g.vault) ? 0 : dreadT(g.depth);
     if (!g.thSeen.includes(g.theme)) g.thSeen.push(g.theme);
@@ -12069,6 +12070,7 @@ function killLoot(g: Game, e: En): void {
   const d = g.depth;
   const cx = e.ax * TS + 12, cy = e.ay * TS + 12;
   g.kills++;
+  if (e.ssw && g.spSw && g.spSw.on) g.spSw.kills++; // spider swarm: counted; the spider still drops its normal loot below
   sockOnKill(g, e);
   petHarvestOnKill(g);
   const gm = efGoldMul(g, e);
@@ -17543,6 +17545,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
 
 function heroDie(g: Game): void {
   if (g.swarm) endSwarm(g, true);
+  if (g.spSw) endSpiderSwarm(g, "died");
   nkEchoClear(g);
   g.mode = "dead"; g.deadT = 0; g.hero.hp = 0;
   g.flash = 0.6; g.flashC = "#ff0000"; g.shake = 6;
@@ -17652,6 +17655,7 @@ function enemyTurn(g: Game, e: En, st: Stats): void {
     else if (swarmToShrine(g, e)) return;
     else e.gat = 1;
   }
+  if (e.ssw && md > 14 && spSwMove(g, e)) return; // spider swarm: shared path field to the hero
   if (e.hunt || (e.sw && md > 14)) { huntMove(g, e); return; }
   if (md > 14) return;
   const sx = Math.sign(dx), sy = Math.sign(dy);
@@ -17819,6 +17823,7 @@ function camXY(): number[] { return [Math.round(IP.camX * PX) / PX, Math.round(I
 function visTick(g: Game, dt: number): void {
   floorCrackTick(g, dt);
   if (needsFit(g)) fitBigObjects(g);
+  if (g.spSw) spSwTick(g, dt);
   if (dt > 0) { swarmTick(g, dt); slideTick(g, dt); hzFxTick(dt); ultShowTick(g, dt); }
   const h = g.hero;
   if (IP.h !== h) { IP.h = h; IP.hp = null; IP.camOk = false; IP.em.clear(); }
@@ -18860,6 +18865,7 @@ function shrineHit(g: Game, x: number, y: number): boolean { const s = g.shrine;
 function shrineAt(g: Game, x: number, y: number): boolean { return shrineHit(g, x, y) || !!(g.artCave && !g.artCave.taken && g.artCave.cx === x && g.artCave.cy === y); }
 let SHRINE_FORCE = false, ART_FORCE = false, ART_PRIZE: "" | "art" | "chest" = "";
 function maybeSpawnShrine(g: Game): boolean {
+  if (maybeArmSpiderSwarm(g)) return false; // depth >= 51: the next 5% band of the shrine roll is a Spider Swarm instead
   if (g.area === "camp" || g.vault || (g.area ?? "dungeon") !== "dungeon" || isActFloor(g.depth)) return false;
   if (!SHRINE_FORCE && (g.depth < SHRINE_MIN_DEPTH || g.depth === g.shrUsedD)) return false;
   if (!SHRINE_FORCE && rng32(hash32(floorSeed(g), g.depth, 0x5821) | 1)() >= SHRINE_CH) return false;
@@ -19056,6 +19062,279 @@ function drawSwarmHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
   ctx.fillStyle = "#ff3060"; ctx.fillRect(VW / 2 - 74, HUD + 56, Math.max(0, 148 * S.t / SWARM_SEC), 2);
   ctx.restore();
 }
+// ---------- 2026-11-20: Spider Swarm event ----------
+// Depth 51 and deeper (every depth >= 51, not only 51). It uses the same per-floor roll as the event shrine:
+// u = rng32(hash32(floorSeed, depth, 0x5821))(). The shrine keeps u < SHRINE_CH (5%) unchanged; on a depth >= 51 floor
+// the next 5% band (SHRINE_CH <= u < SHRINE_CH + SPSW_CH) becomes a Spider Swarm instead of an empty floor.
+// So a floor gets a shrine OR a swarm, never both, and each is about 5% of eligible floors.
+// A swarm arms on arrival and starts SPSW_ARM seconds later. It runs SPSW_SEC seconds of game time (the clock stops
+// while the game is paused, a menu is open, or the hero is inside a vault / side cave), spawning spiders off screen
+// from all 8 compass directions (farthest reachable tiles first, so they pour in from the map edges and corners).
+// Spiders drop their normal loot. Surviving the minute adds a cache scaled by kills.
+// One per depth, forever: the depth is written to g.spSwD (saved as "ssd" / "spSwD") the moment the swarm starts,
+// so dying, respawning, reloading mid-swarm or revisiting the depth never re-triggers it. Other depths still roll.
+type SpSw = { d: number; on: number; arm: number; t: number; kills: number; acc: number; spawned: number; pool: number[]; sec: number; dirs: number[]; tiers: number[]; maxLive: number; bonus?: { items: number; gold: number; gems: number } };
+const SPSW_MIN_DEPTH = 51, SPSW_CH = SHRINE_CH, SPSW_SEC = 60, SPSW_ARM = 4;
+const SPSW_BURST = 24, SPSW_RATE = 5, SPSW_CAP = 45, SPSW_MAX_TOTAL = 330, SPSW_SE_CAP = 4, SPSW_UE_CAP = 2;
+const SPSW_TIER_W = [0.72, 0.20, 0.06, 0.02]; // regular, elite, super elite, ultra elite
+const SPSW_KEEP = 400; // remembered depths (oldest dropped first)
+let SPSW_FORCE = false, SPSW_GOD = false, FAM_FORCE = -1;
+const SPIDER_FI = FAMS.findIndex((f: Fam) => f.n === "Spider");
+function spSwDone(g: Game, d: number): boolean { return Array.isArray(g.spSwD) && g.spSwD.includes(d); }
+function packSpSwD(g: Game): number[] | undefined { const a = Array.isArray(g.spSwD) ? g.spSwD : []; return a.length ? a.slice(-SPSW_KEEP) : undefined; }
+function unpackSpSwD(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out: number[] = [];
+  for (const v of raw) if (typeof v === "number" && isFinite(v) && v >= 1 && !out.includes(Math.floor(v))) out.push(Math.floor(v));
+  return out.slice(-SPSW_KEEP);
+}
+function spSwEligible(g: Game): boolean {
+  // every depth >= 51 (boss and act floors included: one per depth, so a death there can never loop it)
+  if (g.depth < SPSW_MIN_DEPTH || spSwDone(g, g.depth)) return false;
+  if (g.area === "camp" || g.vault || g.arena || g.gobCave || (g.area ?? "dungeon") !== "dungeon") return false;
+  return true;
+}
+// The roll itself (shared with the shrine): "shrine" below SHRINE_CH, "swarm" in the next SPSW_CH band at depth >= 51.
+function spSwRollOf(seed: number, depth: number): "shrine" | "swarm" | "none" {
+  const u = rng32(hash32(seed, depth, 0x5821) | 1)();
+  if (u < SHRINE_CH) return "shrine";
+  if (depth >= SPSW_MIN_DEPTH && u < SHRINE_CH + SPSW_CH) return "swarm";
+  return "none";
+}
+// Called at the top of maybeSpawnShrine (the shrine's roll slot). Returns true when this floor became a swarm floor.
+function maybeArmSpiderSwarm(g: Game): boolean {
+  if (SHRINE_FORCE || SPIDER_FI < 0) return false;
+  g.spSw = null;
+  if (!spSwEligible(g)) return false;
+  if (!SPSW_FORCE && spSwRollOf(floorSeed(g), g.depth) !== "swarm") return false;
+  g.spSw = { d: g.depth, on: 0, arm: SPSW_ARM, t: SPSW_SEC, kills: 0, acc: 0, spawned: 0, pool: [], sec: 0, dirs: [0, 0, 0, 0, 0, 0, 0, 0], tiers: [0, 0, 0, 0], maxLive: 0 };
+  msg(g, "The walls begin to skitter... something is coming.", "#ff9070");
+  return true;
+}
+function spSwLive(g: Game): number { let n = 0; for (const e of g.en) if (e.ssw && e.hp > 0) n++; return n; }
+function startSpiderSwarm(g: Game): void {
+  const S = g.spSw; if (!S || S.on) return;
+  S.on = 1; S.t = SPSW_SEC;
+  if (!Array.isArray(g.spSwD)) g.spSwD = [];
+  if (!g.spSwD.includes(S.d)) g.spSwD.push(S.d);
+  if (g.spSwD.length > SPSW_KEEP) g.spSwD = g.spSwD.slice(-SPSW_KEEP);
+  const reach = reachFromHero(g);
+  for (let k = 0; k < reach.length; k++) if (reach[k] && g.map[k] === 1) S.pool.push(k);
+  for (let i = 0; i < SPSW_BURST; i++) spSwSpawnOne(g);
+  setBanner(g, "SPIDER SWARM!", "Survive 60 seconds \u00b7 they come from every side", "#ff5030", 8, 3.2);
+  msg(g, "A SPIDER SWARM erupts from every corner of the depth! Survive for 60 seconds!", "#ff8060");
+  g.flash = 0.6; g.flashC = "#ff3010"; g.shake = Math.max(g.shake, 10);
+  g.sfx("boss");
+  saveGame(g, true);
+}
+function spSwTierRoll(g: Game): number {
+  const r = R(); let t = SPSW_TIER_W.length - 1, acc = 0;
+  for (let i = 0; i < SPSW_TIER_W.length; i++) { acc += SPSW_TIER_W[i]; if (r < acc) { t = i; break; } }
+  if (t === 3 && g.en.filter((e: En) => e.ssw && e.hp > 0 && e.ue).length >= SPSW_UE_CAP) t = 2;
+  if (t === 2 && g.en.filter((e: En) => e.ssw && e.hp > 0 && e.se).length >= SPSW_SE_CAP) t = 1;
+  return t;
+}
+function spSwSpawnOne(g: Game): boolean {
+  const S = g.spSw; if (!S || !S.on || !S.pool.length || S.spawned >= SPSW_MAX_TOTAL) return false;
+  const cam = camTarget(g), h = g.hero;
+  for (let pass = 0; pass < 2; pass++) {
+    const want = S.sec % 8;
+    let best = -1, bd = -1;
+    for (let tries = 0, ok = 0; tries < 60 && ok < 6; tries++) {
+      const k = S.pool[ri(S.pool.length)];
+      const x = k % MW, y = (k / MW) | 0, dx = x - h.x, dy = y - h.y;
+      const d = Math.abs(dx) + Math.abs(dy);
+      if (d < 8 || d > 34) continue;
+      if (pass === 0 && (Math.floor(((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI)) * 8) & 7) !== want) continue;
+      const sx = x * TS + 12 - cam.x, sy = y * TS + 12 - cam.y;
+      if (sx > -16 && sx < VW + 16 && sy > HUD - 16 && sy < HUD + VIEWH + 16) continue; // starts off screen
+      if (!walkable(g, x, y) || portalAt(g, x, y)) continue;
+      ok++;
+      if (d > bd) { bd = d; best = k; } // farthest of a few: they come in from the edges and corners
+    }
+    if (best < 0) { if (pass === 0) continue; return false; }
+    const x = best % MW, y = (best / MW) | 0;
+    const tier = spSwTierRoll(g);
+    let e: En;
+    FAM_FORCE = SPIDER_FI;
+    try {
+      e = tier === 3 ? mkUltraElite(g, x, y) : tier === 2 ? mkSuperElite(g, x, y) : mkEnemy(g, x, y, tier === 1 ? 1 : 0, tier === 1 ? { full: true } : undefined);
+    } finally { FAM_FORCE = -1; }
+    e.awake = true; e.ssw = 1;
+    g.en.push(e); S.spawned++; S.tiers[tier]++;
+    S.dirs[(Math.floor(((Math.atan2(y - h.y, x - h.x) + Math.PI) / (2 * Math.PI)) * 8) & 7)]++;
+    S.sec++;
+    return true;
+  }
+  return false;
+}
+function spSwTick(g: Game, dt: number): void {
+  const S = g.spSw; if (!S) return;
+  if (g.depth !== S.d) { endSpiderSwarm(g, "left"); return; } // went up/down a floor: it is over (and stays spent)
+  if (g.mode !== "play" || dt <= 0) return;
+  if (g.vault || g.arena || g.gobCave || (g.area ?? "dungeon") !== "dungeon") return; // side rooms: clock waits
+  if (!S.on) { S.arm -= dt; if (S.arm <= 0) startSpiderSwarm(g); return; }
+  if (SPSW_GOD) { g.hero.hp = calc(g.lvl, g.eq).maxHp; for (const e of g.en) if (e.ssw) e.atk = 0; } // test hook only
+  S.t -= dt;
+  if (S.t <= 0) { endSpiderSwarm(g, "won"); return; }
+  const live = spSwLive(g);
+  if (live > S.maxLive) S.maxLive = live;
+  S.acc += dt * SPSW_RATE;
+  let n = 0;
+  while (S.acc >= 1 && n < 4) { S.acc -= 1; if (live + n < SPSW_CAP && spSwSpawnOne(g)) n++; }
+  if (S.acc > 3) S.acc = 3;
+}
+// Shared distance field to the hero for far-away swarm spiders (one BFS per hero tile, not one per spider).
+let SPSW_DF: Int16Array | null = null, SPSW_DFK = "";
+function spSwMove(g: Game, e: En): boolean {
+  const h = g.hero, key = g.depth + ":" + h.x + "," + h.y + ":" + (g.wallVer || 0) + ":" + MW;
+  if (!SPSW_DF || SPSW_DFK !== key || SPSW_DF.length !== MW * MH) {
+    const df = new Int16Array(MW * MH).fill(-1), q: number[] = [h.y * MW + h.x];
+    df[q[0]] = 0;
+    for (let i = 0; i < q.length; i++) {
+      const k = q[i], x = k % MW, y = (k / MW) | 0;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + ox, ny = y + oy; if (!inb(nx, ny)) continue;
+        const nk = ny * MW + nx; if (df[nk] !== -1 || g.map[nk] === 0 || hzSolid(g, nx, ny)) continue;
+        df[nk] = df[k] + 1; q.push(nk);
+      }
+    }
+    SPSW_DF = df; SPSW_DFK = key;
+  }
+  const df = SPSW_DF, cur = df[e.y * MW + e.x];
+  if (cur < 0) return false;
+  let best: number[] | null = null, bd = cur, side: number[] | null = null;
+  for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = e.x + ox, ny = e.y + oy; if (!inb(nx, ny)) continue;
+    const d = df[ny * MW + nx];
+    if (d < 0 || !walkable(g, nx, ny) || (nx === h.x && ny === h.y)) continue;
+    if (d < bd) { bd = d; best = [nx, ny]; } else if (d === cur && !side) side = [nx, ny];
+  }
+  const mv = best || side; if (!mv) return true; // crowded: wait a beat
+  if (mv[0] !== e.x) e.face = mv[0] > e.x ? 1 : -1;
+  e.x = mv[0]; e.y = mv[1];
+  return true;
+}
+function spSwBonusOf(kills: number): { items: number; goldMul: number; gems: number } | null {
+  if (kills < 20) return null;
+  return { items: Math.min(8, 2 + Math.floor(kills / 40)), goldMul: 3 + Math.min(25, kills * 0.1), gems: kills >= 160 ? 2 : kills >= 80 ? 1 : 0 };
+}
+function endSpiderSwarm(g: Game, why: "won" | "died" | "left"): void {
+  const S = g.spSw; if (!S) return;
+  g.spSw = null;
+  if (!S.on) return; // armed but never started (left the floor first): nothing happened, the depth is not spent
+  if (why !== "left") {
+    for (const e of g.en) if (e.ssw && e.hp > 0) { burst(g, e.x * TS + 12, e.y * TS + 12, 6, ["#ff5030", "#300800"], 30, 30); e.hp = 0; }
+    g.en = g.en.filter((e: En) => e.hp > 0);
+  }
+  if (why === "died") { msg(g, "The spider swarm overwhelmed you after " + S.kills + " kills. It will not return to depth " + S.d + ".", "#ff6060"); return; }
+  if (why === "left") { msg(g, "You fled the spider swarm. Depth " + S.d + " stays quiet now.", "#c0a0a0"); return; }
+  const B = spSwBonusOf(S.kills);
+  SPSW_LAST = { kills: S.kills, spawned: S.spawned, tiers: S.tiers.slice(), dirs: S.dirs.slice(), maxLive: S.maxLive, bonus: null };
+  if (!B) {
+    setBanner(g, "SWARM SURVIVED!", S.kills + " spiders slain \u00b7 the rest flee into the walls", "#ffb070", 8, 4);
+    msg(g, "You survived the spider swarm! " + S.kills + " spiders slain.", "#ffb070");
+    g.sfx("levelup"); saveGame(g, true); return;
+  }
+  const d = g.depth, x = g.hero.x, y = g.hero.y;
+  for (let i = 0; i < B.items; i++) giveItem(g, makeItem(d + 1, Math.min(7, Math.max(2, rollRar(1.3, 2, d)))), x, y);
+  for (let i = 0; i < B.gems; i++) giveDroppedGem(g, x, y, d + 1, true);
+  const gd = swarmGoldPay(g, B.goldMul);
+  g.gold += gd;
+  S.bonus = { items: B.items, gold: gd, gems: B.gems };
+  SPSW_LAST.bonus = S.bonus;
+  setBanner(g, "SWARM SURVIVED!", S.kills + " spiders slain \u00b7 " + B.items + " items" + (B.gems ? " + " + B.gems + " gems" : "") + " \u00b7 +" + gd + "g", "#ffb070", 10, 4.5);
+  msg(g, "You survived the spider swarm! " + S.kills + " spiders slain - survivor's cache: " + B.items + " items" + (B.gems ? ", " + B.gems + " gems" : "") + ", +" + gd + " gold.", "#ffb070");
+  g.flash = 0.5; g.flashC = "#ffb070"; g.sfx("levelup");
+  saveGame(g, true);
+}
+let SPSW_LAST: Record<string, unknown> | null = null;
+function drawSpSwHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
+  const S = g.spSw; if (!S || !S.on || g.depth !== S.d) return;
+  const secs = Math.max(0, Math.ceil(S.t));
+  ctx.save();
+  ctx.fillStyle = "rgba(24,6,0,0.8)"; ctx.fillRect(VW / 2 - 78, HUD + 26, 156, 34);
+  ctx.strokeStyle = secs <= 10 && Math.floor(t * 4) % 2 ? "#ffffff" : "#ff5030"; ctx.lineWidth = 1; ctx.strokeRect(VW / 2 - 77.5, HUD + 26.5, 155, 33);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold 9px monospace"; ctx.fillStyle = "#ff9060";
+  ctx.fillText("SPIDER SWARM", VW / 2, HUD + 33);
+  ctx.font = "bold 13px monospace"; ctx.fillStyle = secs <= 10 ? "#ff6060" : "#ffffff";
+  ctx.fillText(Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0"), VW / 2 - 38, HUD + 46);
+  ctx.font = "bold 9px monospace"; ctx.fillStyle = "#ffd040";
+  ctx.fillText(S.kills + " SLAIN", VW / 2 + 34, HUD + 46);
+  ctx.fillStyle = "#ff5030"; ctx.fillRect(VW / 2 - 74, HUD + 56, Math.max(0, 148 * S.t / SPSW_SEC), 2);
+  ctx.restore();
+}
+try {
+  (window as unknown as { __ED16_SPSW?: object }).__ED16_SPSW = {
+    rates: { SPSW_MIN_DEPTH, SPSW_CH, SHRINE_CH, SHRINE_MIN_DEPTH, SPSW_SEC, SPSW_ARM, SPSW_BURST, SPSW_RATE, SPSW_CAP, SPSW_MAX_TOTAL, SPSW_SE_CAP, SPSW_UE_CAP, SPSW_TIER_W },
+    testProf: (): Record<string, unknown> => { setActiveProf(TEST_PROF); return { ok: true, prof: activeProf }; },
+    force: (on: boolean): void => { SPSW_FORCE = !!on; },
+    god: (on: boolean): void => { SPSW_GOD = !!on; },
+    // pure roll sample: n random floor seeds at one depth (respects the depth gate; act floors excluded like the real path)
+    sample: (depth: number, n: number): Record<string, unknown> => {
+      let sw = 0, sh = 0;
+      for (let i = 0; i < n; i++) { const r = spSwRollOf((Math.random() * 4294967296) >>> 0, depth); if (r === "swarm") sw++; else if (r === "shrine") sh++; }
+      return { depth, n, swarm: sw, shrine: sh, act: isActFloor(depth) };
+    },
+    // real floor generation through genFloor, n times at one depth; counts floors that armed a swarm / spawned a shrine
+    genMany: (depth: number, n: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      let armed = 0, shrine = 0, both = 0;
+      for (let i = 0; i < n; i++) {
+        g.depth = depth; g.area = "dungeon"; g.vault = null; g.arena = null; g.gobCave = null; g.mode = "play";
+        genFloor(g);
+        if (g.spSw) armed++; if (g.shrine) shrine++; if (g.spSw && g.shrine) both++;
+      }
+      g.spSw = null; computeVis(g);
+      return { ok: true, depth, n, armed, shrine, both, act: isActFloor(depth) };
+    },
+    state: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const S = g.spSw, sw = g.en.filter((e: En) => e.ssw && e.hp > 0);
+      return { ok: true, depth: g.depth, mode: g.mode, area: g.area ?? "dungeon", armed: !!S && !S.on, active: !!S && !!S.on, arm: S ? S.arm : null, t: S ? S.t : null, kills: S ? S.kills : null, spawned: S ? S.spawned : null, dirs: S ? S.dirs.slice() : null, tiers: S ? S.tiers.slice() : null, maxLive: S ? S.maxLive : null, live: sw.length, liveTiers: [sw.filter((e: En) => !e.se && !e.ue && e.cls === 0).length, sw.filter((e: En) => !e.se && !e.ue && e.cls === 1).length, sw.filter((e: En) => e.se).length, sw.filter((e: En) => e.ue).length], spiders: sw.every((e: En) => FAMS[e.f] && FAMS[e.f].n === "Spider"), done: (g.spSwD || []).slice(), last: SPSW_LAST, gold: g.gold, drops: g.drops.length, bag: g.bag.length, gems: ensureGemBag(g).length, totalKills: g.kills, en: g.en.filter((e: En) => e.hp > 0).length, hero: [g.hero.x, g.hero.y], hp: g.hero.hp };
+    },
+    arm: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; SPSW_FORCE = true; try { maybeArmSpiderSwarm(g); } finally { SPSW_FORCE = false; } return { ok: !!g.spSw }; },
+    start: (): Record<string, unknown> => { const g = LIVE; if (!g || !g.spSw) return { ok: false }; startSpiderSwarm(g); return { ok: true, live: spSwLive(g) }; },
+    // kill up to n live swarm spiders through the real kill() path (loot, gold, xp)
+    killN: (n: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const gold0 = g.gold, drops0 = g.drops.length, bag0 = g.bag.length; let k = 0;
+      for (const e of g.en.slice()) { if (k >= n) break; if (!e.ssw || e.hp <= 0) continue; e.hp = 0; kill(g, e); k++; }
+      g.en = g.en.filter((e: En) => e.hp > 0);
+      return { ok: true, killed: k, gold: g.gold - gold0, drops: g.drops.length - drops0, bag: g.bag.length - bag0 };
+    },
+    // a normal encounter for comparison: kill every enemy the floor generated (no swarm) through kill()
+    killAllNormal: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const gold0 = g.gold, drops0 = g.drops.length, bag0 = g.bag.length; let k = 0;
+      const tiers = [0, 0, 0, 0];
+      for (const e of g.en.slice()) { if (e.hp <= 0 || e.cls === 2 || e.gob || e.hunt) continue; tiers[e.ue ? 3 : e.se ? 2 : e.cls === 1 ? 1 : 0]++; e.hp = 0; kill(g, e); k++; }
+      g.en = g.en.filter((e: En) => e.hp > 0);
+      return { ok: true, killed: k, tiers, gold: g.gold - gold0, drops: g.drops.length - drops0, bag: g.bag.length - bag0 };
+    },
+    clearOthers: (): void => { const g = LIVE; if (!g) return; g.en = g.en.filter((e: En) => !!e.ssw); g.drops = []; },
+    die: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; heroDie(g); return { ok: true, active: !!g.spSw, mode: g.mode }; },
+    respawn: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; respawn(g); return { ok: true, depth: g.depth, armed: !!g.spSw, mode: g.mode }; },
+    // save round trip through both formats the game loads from (compact code + raw persist blob)
+    roundTrip: (): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const code = makeCode(g);
+      const a = decodeCode(code, null);
+      const b = loadGame(null, buildPersistRaw(g));
+      return { ok: !!a && !!b, code: a ? (a.spSwD || []).slice() : null, raw: b ? (b.spSwD || []).slice() : null, codeDepth: a ? a.depth : null };
+    },
+    // eligibility of a loaded copy at a depth (without touching the live game)
+    eligibleAfterLoad: (depth: number): Record<string, unknown> => {
+      const g = LIVE; if (!g) return { ok: false };
+      const c = decodeCode(makeCode(g), null); if (!c) return { ok: false };
+      c.depth = depth; c.area = "dungeon"; c.vault = null; c.en = [];
+      return { ok: true, depth, eligible: spSwEligible(c) };
+    },
+    setDone: (a: number[]): void => { const g = LIVE; if (g) g.spSwD = a.slice(); },
+    pauseArea: (side: boolean): void => { const g = LIVE; if (!g) return; g.area = side ? "vault" : "dungeon"; },
+  };
+} catch { /* test hooks only */ }
 // ---------- Item 16: hidden artifact caves + trophy case ----------
 type ArtCave = { dx: number; dy: number; cx: number; cy: number; ox?: number; oy?: number; sx?: number; sy?: number; rc?: number; open?: number; taken?: number; al?: number };
 const ARTIFACTS: { t: string; n: string; l: string }[] = [
@@ -27076,6 +27355,7 @@ export default function App() {
       ctx.globalAlpha = 1;
       ctx.restore();
       drawSwarmHud(ctx, g, t);
+      drawSpSwHud(ctx, g, t);
       drawArtReveal(ctx, FRAME_VDT, t);
 
       // boss bar (n===1 keeps the raw60 height / placement; n>1 stacks copies)
