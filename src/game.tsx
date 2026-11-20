@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useGrokTheme } from "grok/canvas";
 
 // STORAGE KEYS ARE STABLE ACROSS DEPLOYS. Never rename these, or existing
-// player saves will not load: ed16_save_v1_p1/p2/p3 and their _bak keys,
-// ed16_stash_v1_pN / _bak, ed16_profile_mig_v1, ed16_best, ed16_lvl, ed16_lock.
+// player saves will not load: ed16_save_v1_p1/p2/p3/p5 and their _bak keys,
+// ed16_stash_v1_pN / _bak, ed16_profile_mig_v1, ed16_best, ed16_lvl, ed16_lock,
+// ed16_mike_bak_at, ed16_mike_lock, ed16_mike_pin. p4 (Tester) is ephemeral and must never be written.
 // Future edits belong in /workspace/ed16-web/src, not the Cursor canvas.
 
 const TS = 24;
@@ -9346,6 +9347,7 @@ function hookGet(k: string): string | null {
 function idbPut(k: string, v: string | null): void { void idbPutDone(k, v); }
 let IDB_SIM_DOWN = false; // test hook: behave as if IndexedDB is unavailable
 function idbPutDone(k: string, v: string | null): Promise<boolean> {
+  if (v !== null && isTestStoreKey(k)) return Promise.resolve(false);
   if (IDB_SIM_DOWN) { lastIdbErr = "IndexedDB unavailable"; return Promise.resolve(false); }
   if (testIdb) {
     if (v === null) delete testIdb[k]; else testIdb[k] = v;
@@ -9391,12 +9393,37 @@ function idbGet(k: string): Promise<string | null> {
 }
 let memSave: string | null = null;
 let memBak: string | null = null;
-type ProfId = 1 | 2 | 3;
+type ProfId = 1 | 2 | 3 | 4 | 5;
+const TEST_PROF: ProfId = 4;
+const MIKE_PROF: ProfId = 5;
+const MIKE_BAK_AT = "ed16_mike_bak_at";
+const MIKE_LOCK_KEY = "ed16_mike_lock";
+const MIKE_PIN_KEY = "ed16_mike_pin";
+const MIKE_LINK_HASH = "a1b28c746be0d6fac5b9407ed5ccb02bc2e08af6fbaf1b2d3d3d658ba2259543";
 const PROFILES: { id: ProfId; name: string }[] = [
   { id: 1, name: "Richard" },
   { id: 2, name: "Jax" },
   { id: 3, name: "Piper" },
+  { id: 4, name: "Tester" },
+  { id: 5, name: "Mike" },
 ];
+const RECOVER_PROFS: { id: ProfId; name: string }[] = PROFILES.filter((p: { id: ProfId }) => p.id === 1 || p.id === 2 || p.id === 3);
+function isTestProf(id: ProfId): boolean { return id === TEST_PROF; }
+function isMikeProf(id: ProfId): boolean { return id === MIKE_PROF; }
+function profPersists(id: ProfId): boolean { return !isTestProf(id); }
+function editToolsAllowed(): boolean { return activeProf !== MIKE_PROF; }
+function isTestStoreKey(k: string): boolean { return /(?:^|_)p4(?:_|$)/.test(k); }
+function mikeLastBackupAt(): number { try { return Number(lsGet(MIKE_BAK_AT) || "0") || 0; } catch { return 0; } }
+function markMikeBackup(): void { try { lsSet(MIKE_BAK_AT, String(Date.now())); } catch { /* ignore */ } }
+function fmtBackupAge(t: number): string {
+  if (!t) return "Last backup: never";
+  const d = Math.max(0, Date.now() - t);
+  if (d < 60 * 1000) return "Last backup: just now";
+  if (d < 60 * 60 * 1000) return "Last backup: " + Math.max(1, Math.round(d / 60000)) + " min ago";
+  if (d < 36 * 60 * 60 * 1000) return "Last backup: " + Math.max(1, Math.round(d / 3600000)) + " hour" + (Math.round(d / 3600000) === 1 ? "" : "s") + " ago";
+  const days = Math.max(1, Math.round(d / 86400000));
+  return "Last backup: " + days + " day" + (days === 1 ? "" : "s") + " ago";
+}
 // Son's earlier-version run, kept as Jax's starter. Auto-imported when the Jax
 // slot is empty, a fresh starter, or behind this seed (level/depth/XP). A Jax
 // save that has already gone further is never overwritten. Richard and Piper
@@ -9417,6 +9444,7 @@ let jaxSeedEnabled = true;
 let jaxSeedBusy = false;
 let jaxSeedCache: { rank: number; raw: string } | null = null;
 function ensureJaxSeed(): boolean {
+  if (mikeHoldsOtherProfiles()) return false;
   // If Jax is empty, a starter, or behind the embedded seed, fill it. Never
   // clobber a Jax run that has more level/depth/XP than the seed. Never touch
   // Richard or Piper.
@@ -9463,7 +9491,7 @@ function profBakKey(id: ProfId): string { return "ed16_save_v1_p" + id + "_bak";
 function profStashKey(id: ProfId): string { return "ed16_stash_v1_p" + id; }
 function profStashBakKey(id: ProfId): string { return "ed16_stash_v1_p" + id + "_bak"; }
 function setActiveProf(id: ProfId): void {
-  if (id === activeProf) return;
+  if (id === activeProf) { try { wrapEditHooks(); } catch { /* ignore */ } return; }
   memSaveBy[activeProf] = memSave;
   memBakBy[activeProf] = memBak;
   memStashBy[activeProf] = memStash;
@@ -9471,7 +9499,189 @@ function setActiveProf(id: ProfId): void {
   memSave = memSaveBy[id] ?? null;
   memBak = memBakBy[id] ?? null;
   memStash = memStashBy[id] ?? null;
+  try { wrapEditHooks(); } catch { /* ignore */ }
 }
+function wipeTesterKeys(): void {
+  const id = TEST_PROF;
+  for (const k of [profSaveKey(id), profBakKey(id), profStashKey(id), profStashBakKey(id)]) {
+    try { lsRemove(k); } catch { /* ignore */ }
+    try { ssRemove(k); } catch { /* ignore */ }
+    try { idbPut(k, null); } catch { /* ignore */ }
+  }
+  memSaveBy[id] = null;
+  memBakBy[id] = null;
+  memStashBy[id] = null;
+  if (activeProf === id) { memSave = null; memBak = null; }
+  saveFlag = false;
+}
+function mikeExportCode(): string {
+  const raw = profBlob(MIKE_PROF);
+  if (!raw) return "";
+  return "ED16-" + b64e(raw);
+}
+function mikeBackupFilename(): string {
+  const d = new Date();
+  const pad = (n: number): string => (n < 10 ? "0" : "") + n;
+  return "ed16-mike-save-" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + ".txt";
+}
+function downloadTextFile(name: string, text: string): void {
+  try {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    window.setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* ignore */ } }, 4000);
+  } catch { /* ignore */ }
+}
+function offerMikeBackupFile(code: string, name: string): void {
+  try {
+    const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+    const file = new File([blob], name, { type: "text/plain" });
+    const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void>; canShare?: (d: ShareData) => boolean };
+    if (typeof nav.canShare === "function" && typeof nav.share === "function") {
+      try {
+        if (nav.canShare({ files: [file] })) {
+          void nav.share({ files: [file], title: name, text: "Endless Depths 16 — Mike's save" }).catch(() => downloadTextFile(name, code));
+          return;
+        }
+      } catch { /* fall through to download */ }
+    }
+    downloadTextFile(name, code);
+  } catch {
+    downloadTextFile(name, code);
+  }
+}
+function loadMikeSaveText(text: string, prev: Game | null): Game | null {
+  const t = String(text || "").trim();
+  if (!t) return null;
+  try {
+    const g = decodeCode(t, prev);
+    if (g) return g;
+  } catch { /* try raw JSON */ }
+  try {
+    if (parseSaveRaw(t)) return loadGame(prev, t);
+  } catch { /* invalid */ }
+  return null;
+}
+function restoreMikeFromText(text: string, prev: Game | null): Game | null {
+  const g = loadMikeSaveText(text, prev);
+  if (!g) return null;
+  setActiveProf(MIKE_PROF);
+  lastPersistOk = false;
+  try { lastPersistOk = commitImportedRun(g, true); } catch { lastPersistOk = false; }
+  return g;
+}
+function wrapEditHooks(): void {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as Record<string, unknown>;
+  const allow = new Set(["__ED16_BUILD", "__ED16_VIEW", "__ED16_PAD", "__ED16_LAST_MSG", "__ED16_IMPORT_MSG", "__ED16_SAVE_NOTE", "__ED16_PARA_SFX", "__ED16_PROF"]);
+  const wrapObj = (obj: unknown): void => {
+    if (!obj || typeof obj !== "object") return;
+    const rec = obj as Record<string, unknown>;
+    if (rec.__ed16Wrapped) return;
+    rec.__ed16Wrapped = true;
+    for (const k of Object.keys(rec)) {
+      const fn = rec[k];
+      if (typeof fn !== "function") continue;
+      rec[k] = function (this: unknown, ...args: unknown[]): unknown {
+        if (!editToolsAllowed()) return { ok: false, blocked: true, error: "Editing tools are hidden on the Mike profile." };
+        return (fn as (...a: unknown[]) => unknown).apply(this, args);
+      };
+    }
+  };
+  if (editToolsAllowed()) return;
+  for (const k of Object.keys(w)) {
+    if (k.indexOf("__ED16_") !== 0 || allow.has(k)) continue;
+    const v = w[k];
+    if (typeof v === "function") {
+      if ((v as { __ed16Wrapped?: boolean }).__ed16Wrapped) continue;
+      const orig = v as (...a: unknown[]) => unknown;
+      const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+        if (!editToolsAllowed()) return { ok: false, blocked: true, error: "Editing tools are hidden on the Mike profile." };
+        return orig.apply(this, args);
+      } as ((...a: unknown[]) => unknown) & { __ed16Wrapped?: boolean };
+      wrapped.__ed16Wrapped = true;
+      w[k] = wrapped;
+    } else if (v && typeof v === "object") wrapObj(v);
+  }
+}
+let mikeLockedMem = false;
+type MikeLinkVerdict = "off" | "pending" | "yes" | "no";
+let mikeLinkVerdict: MikeLinkVerdict = "off";
+try {
+  if (typeof location !== "undefined" && (new URLSearchParams(location.search).get("k") || "").trim().length >= 24 && !readMikeLocked()) mikeLinkVerdict = "pending";
+} catch { /* ignore */ }
+function mikeHoldsOtherProfiles(): boolean { return isMikeLocked() || mikeLinkVerdict === "pending" || mikeLinkVerdict === "yes"; }
+function mikeQueryToken(): string {
+  try {
+    if (typeof location === "undefined") return "";
+    return (new URLSearchParams(location.search).get("k") || "").trim();
+  } catch { return ""; }
+}
+async function sha256hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+}
+function hexEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+function readMikeLocked(): boolean {
+  try { return lsGet(MIKE_LOCK_KEY) === "1" || ssGet(MIKE_LOCK_KEY) === "1"; } catch { return false; }
+}
+function isMikeLocked(): boolean { return mikeLockedMem || readMikeLocked(); }
+function engageMikeLock(): void {
+  mikeLockedMem = true;
+  try { lsSet(MIKE_LOCK_KEY, "1"); } catch { /* ignore */ }
+  try { ssSet(MIKE_LOCK_KEY, "1"); } catch { /* ignore */ }
+  try { setActiveProf(MIKE_PROF); } catch { /* ignore */ }
+  try { wrapEditHooks(); } catch { /* ignore */ }
+}
+function installMikeManifest(token: string): void {
+  if (!token || token.length < 24 || typeof document === "undefined") return;
+  try {
+    const man = {
+      name: "Endless Depths 16",
+      short_name: "Endless Depths",
+      description: "Dive deeper, slay monsters, and save your run.",
+      start_url: "./?k=" + encodeURIComponent(token),
+      scope: "./",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#120c14",
+      theme_color: "#120c14",
+      icons: [
+        { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "icon-192-maskable.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+        { src: "icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(man)], { type: "application/manifest+json" }));
+    const link = document.querySelector('link[rel="manifest"]');
+    if (link) link.setAttribute("href", url);
+  } catch { /* ignore */ }
+}
+function mikePinState(): "unset" | "skip" | "set" {
+  try {
+    const v = (lsGet(MIKE_PIN_KEY) || ssGet(MIKE_PIN_KEY) || "").trim();
+    if (v === "skip") return "skip";
+    if (v && /^[0-9a-f]{64}$/i.test(v)) return "set";
+  } catch { /* ignore */ }
+  return "unset";
+}
+async function hashMikePin(pin: string): Promise<string> {
+  return sha256hex("ed16-mike-pin:" + pin);
+}
+try {
+  if (typeof window !== "undefined" && readMikeLocked()) {
+    mikeLockedMem = true;
+    setActiveProf(MIKE_PROF);
+  }
+} catch { /* ignore */ }
 // The running game survives a component remount (host re-render, error recovery) even when page storage is wiped.
 let LIVE: Game | null = null;
 let installTestGame: ((g: Game | null) => void) | null = null;
@@ -9480,6 +9690,7 @@ function lsGet(k: string): string | null {
   try { probeStores(); return lsHandle ? lsHandle.getItem(k) : null; } catch (err) { lastLsErr = storeDeniedReason("localStorage", err); return null; }
 }
 function lsSet(k: string, v: string): boolean {
+  if (isTestStoreKey(k)) return false;
   try {
     probeStores();
     if (!lsHandle) { if (!lastLsErr) lastLsErr = lsDenied ? "localStorage blocked by this viewer" : "localStorage unavailable"; return false; }
@@ -9523,6 +9734,7 @@ const rollLastRaw: Partial<Record<ProfId, string>> = {};
 let rollQ: Promise<unknown> = Promise.resolve();
 let rollWrites = 0;
 function pushRollingBackup(id: ProfId, raw: string, manual: boolean): Promise<boolean> {
+  if (!profPersists(id)) return Promise.resolve(false);
   const now = Date.now();
   if (!manual && now - (rollLastAt[id] ?? 0) < ROLL_AUTO_MS) return Promise.resolve(false);
   if (rollLastRaw[id] === raw) return Promise.resolve(true);
@@ -9655,7 +9867,7 @@ function fmtProfTime(t: number): string {
 // has a save gets that save copied to ed16_recover_prev_p<N>_<time> first.
 type RecoverCand = { src: string; key: string; raw: string; lvl: number; depth: number; t: number; prof: ProfId | 0 };
 function profOfKey(k: string): ProfId | 0 {
-  const m = /_p([123])(?:_|$)/.exec(k);
+  const m = /_p([1235])(?:_|$)/.exec(k);
   return m ? (Number(m[1]) as ProfId) : 0;
 }
 function isSaveishKey(k: string): boolean {
@@ -9705,6 +9917,8 @@ async function scanRecoverable(includeCurrent = false): Promise<RecoverCand[]> {
   return out;
 }
 function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
+  // Recover only writes Richard / Jax / Piper. Tester is ephemeral; Mike uses Back up / Restore.
+  if (id !== 1 && id !== 2 && id !== 3) return false;
   if (!parseSaveRaw(c.raw)) return false;
   const existing = profBlob(id);
   if (existing === c.raw) return true;
@@ -9725,10 +9939,11 @@ const RECOVERED: ProfId[] = [];
 // Automatic part: a profile that shows Empty but has a recoverable blob under one of ITS OWN keys
 // (pre-load snapshot, earlier recover copy, any other p<N> key) gets the newest one back. Never touches a non-empty slot.
 async function autoRecoverEmptyProfiles(): Promise<ProfId[]> {
+  if (mikeHoldsOtherProfiles()) return [];
   const done: ProfId[] = [];
   let cands: RecoverCand[] = [];
   try { cands = await scanRecoverable(); } catch { return done; }
-  for (const p of PROFILES) {
+  for (const p of RECOVER_PROFS) {
     if (parseSaveRaw(profBlob(p.id))) continue;
     const mine = cands.filter((c: RecoverCand) => c.prof === p.id);
     if (!mine.length) continue;
@@ -9843,6 +10058,7 @@ function importCode(code: string, prev: Game | null): Game | null {
     const g = decodeCode(code, prev);
     if (!g) return null;
     lastPersistOk = false;
+    if (!profPersists(activeProf)) return g;
     try { lastPersistOk = commitImportedRun(g, true); } catch { lastPersistOk = false; }
     return g;
   } catch { return null; }
@@ -9852,6 +10068,7 @@ function loadBest(): number[] {
   try { return [Number(lsGet("ed16_best") || "0") || 0, Number(lsGet("ed16_lvl") || "0") || 0]; } catch { return [0, 0]; }
 }
 function saveBest(g: Game): void {
+  if (!profPersists(activeProf)) return;
   try { lsSet("ed16_best", String(g.best)); lsSet("ed16_lvl", String(g.bestLvl)); } catch { /* storage unavailable */ }
 }
 
@@ -9892,12 +10109,14 @@ function isFreshSave(s: Record<string, unknown>): boolean {
   return (Number(s.depth) || 0) === 1 && (Number(s.lvl) || 0) === 1 && (Number(s.turn) || 0) <= 2 && (Number(s.kills) || 0) === 0 && (Number(s.xp) || 0) === 0;
 }
 function hasSaveBlob(): boolean {
+  if (isTestProf(activeProf)) return false;
   try {
     migrateProfiles();
     return !!(lsGet(activeSaveKey()) || hookGet(activeSaveKey()) || memSave || lsGet(activeBakKey()) || hookGet(activeBakKey()) || memBak || ssGet(activeSaveKey()) || ssGet(activeBakKey()));
   } catch { return !!(memSave || memBak); }
 }
 function hasSave(): boolean {
+  if (isTestProf(activeProf)) { saveFlag = false; return false; }
   const ok = !!(parseSaveRaw(currentRaw()) || parseSaveRaw(currentBak()));
   saveFlag = ok;
   return ok;
@@ -9909,14 +10128,14 @@ let storageReady = false;
   try { probeStores(); storageReady = !idbFactory && !testIdb; } catch { storageReady = true; }
 })();
 
-function titleMayAutoStart(): boolean { return storageReady && !hasSaveBlob(); }
+function titleMayAutoStart(): boolean { return storageReady && !hasSaveBlob() && !isMikeLocked(); }
 function markStorageReady(): void { storageReady = true; }
 function isLegacyStoreKey(k: string): boolean {
   return k === "ed16_save_v1" || k === "ed16_save_v1_bak" || k === "ed16_stash_v1" || k === "ed16_stash_v1_bak";
 }
 function isRedundantGameKey(k: string): boolean {
   // Per-profile backups only. Never the legacy keys, and never another (or this) profile's primary save/stash.
-  return /^ed16_save_v1_p[123]_bak$/.test(k) || /^ed16_stash_v1_p[123]_bak$/.test(k);
+  return /^ed16_save_v1_p[1235]_bak$/.test(k) || /^ed16_stash_v1_p[1235]_bak$/.test(k);
 }
 function lsKeys(): string[] {
   const keys: string[] = [];
@@ -10042,6 +10261,7 @@ function storageReportLine(): string {
 }
 function writeDurable(key: string, raw: string): boolean {
   // Success if ANY durable store verifies: localStorage or IndexedDB. sessionStorage is a same-session cache only.
+  if (isTestStoreKey(key)) return false;
   probeStores();
   if (viewerBlocksSaving()) {
     lastPersistErr = "this viewer blocks saving";
@@ -10077,6 +10297,7 @@ function writeDurable(key: string, raw: string): boolean {
 }
 function saveGame(g: Game, quiet = false, force = false): boolean {
   syncMapSize(g);
+  if (!profPersists(activeProf)) return false;
   if (GIB_SKIP_SAVE) return false;
   if (g.mode !== "play") return false;
   lastPersistOk = false;
@@ -10366,6 +10587,7 @@ function ssGet(k: string): string | null {
   try { probeStores(); return ssHandle ? ssHandle.getItem(k) : null; } catch { return null; }
 }
 function ssSet(k: string, v: string): boolean {
+  if (isTestStoreKey(k)) return false;
   try {
     probeStores();
     if (!ssHandle) return false;
@@ -20424,12 +20646,27 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; height: 100dvh; m
   .dc-ults .dc-ultn { font-size: 10px; }
   .dc-ults .dc-ultm { font-size: 9px; }
 }
-.dc-profs { position: absolute; inset: 0; z-index: 40; background: rgba(6, 4, 12, 0.82); display: flex; align-items: center; justify-content: center; padding: 16px; }
-.dc-profs-card { width: min(360px, 100%); background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 16px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
-.dc-profs-hd { font-size: 16px; font-weight: 800; text-align: center; margin-bottom: 10px; }
-.dc-profs-list { display: flex; flex-direction: column; gap: 8px; }
-.dc-prof { width: 100%; min-height: 56px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; padding: 8px 12px !important; }
-.dc-prof b { font-size: 15px; }
+.dc-profs { position: absolute; inset: 0; z-index: 40; background: rgba(6, 4, 12, 0.82); display: flex; align-items: center; justify-content: center; padding: 10px; }
+.dc-profs-card { width: min(360px, 100%); max-height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+.dc-profs-hd { font-size: 15px; font-weight: 800; text-align: center; margin-bottom: 8px; }
+.dc-profs-list { display: flex; flex-direction: column; gap: 6px; }
+.dc-prof-wrap { width: 100%; }
+.dc-prof { width: 100%; min-height: 48px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; padding: 6px 10px !important; }
+.dc-prof b { font-size: 14px; }
+.dc-mike-tools { margin-top: 4px; }
+.dc-mike-age, .dc-mike-note { font-size: 11px; opacity: 0.9; text-align: center; margin: 2px 0 4px; line-height: 1.3; }
+.dc-prof-actions { display: flex; gap: 6px; }
+.dc-prof-actions .dc-b { flex: 1; min-height: 40px; font-size: 12px; font-weight: 800; padding: 6px 4px !important; }
+.dc-mike-restore { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.dc-mike-restore textarea { width: 100%; min-height: 72px; font-size: 11px; box-sizing: border-box; }
+.dc-mikegate { position: absolute; inset: 0; z-index: 50; background: rgba(6, 4, 12, 0.92); display: flex; align-items: center; justify-content: center; padding: 12px; }
+.dc-mikegate-card { width: min(360px, 100%); background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 16px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+.dc-mikegate-card h2 { font-size: 16px; font-weight: 800; text-align: center; margin: 0 0 8px; }
+.dc-pin-dots { letter-spacing: 10px; text-align: center; font-size: 22px; margin: 8px 0 4px; font-weight: 800; }
+.dc-pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.dc-pin-grid .dc-b { min-height: 48px; font-size: 18px; font-weight: 800; }
+.dc-mike-saves { position: absolute; inset: 0; z-index: 45; background: rgba(6, 4, 12, 0.82); display: flex; align-items: center; justify-content: center; padding: 12px; }
+.dc-mike-saves-card { width: min(360px, 100%); max-height: 100%; overflow-y: auto; background: #161022; border: 2px solid #6a5a90; border-radius: 14px; padding: 14px 12px; }
 .dc-setlist { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .dc-setbon { margin-top: 4px; }
 .dc-sethd { font-weight: 800; color: #40e070; font-size: 12px; }
@@ -23914,10 +24151,26 @@ export default function App() {
   const [stashNote, setStashNote] = useState<string>("");
   const [bankAmt, setBankAmt] = useState<string>("");
   const [ioOpen, setIoOpen] = useState<boolean>(false);
-  const [profOpen, setProfOpen] = useState<boolean>(true);
+  const mikeLockedAtStart = typeof window !== "undefined" && readMikeLocked();
+  const mikeKeyPending = typeof window !== "undefined" && mikeQueryToken().length >= 24 && !mikeLockedAtStart;
+  const [profOpen, setProfOpen] = useState<boolean>(!mikeLockedAtStart && !mikeKeyPending);
+  const [mikeBoot, setMikeBoot] = useState<"off" | "check" | "on">(mikeLockedAtStart ? "on" : (mikeKeyPending ? "check" : "off"));
+  const [mikePinPhase, setMikePinPhase] = useState<"off" | "setup" | "confirm" | "enter" | "ok">(
+    mikeLockedAtStart ? (mikePinState() === "set" ? "enter" : mikePinState() === "unset" ? "setup" : "ok") : "off"
+  );
+  const [mikePinBuf, setMikePinBuf] = useState<string>("");
+  const [mikePinFirst, setMikePinFirst] = useState<string>("");
+  const [mikePinNote, setMikePinNote] = useState<string>("");
+  const [mikeToolsOpen, setMikeToolsOpen] = useState<boolean>(false);
   const [recList, setRecList] = useState<RecoverCand[] | null>(null);
   const [recBusy, setRecBusy] = useState<boolean>(false);
   const [recNote, setRecNote] = useState<string>("");
+  const [mikeRestOpen, setMikeRestOpen] = useState<boolean>(false);
+  const [mikeRestTxt, setMikeRestTxt] = useState<string>("");
+  const [mikeRestNote, setMikeRestNote] = useState<string>("");
+  const [mikeBakNote, setMikeBakNote] = useState<string>("");
+  const mikeFileRef = useRef<HTMLInputElement | null>(null);
+  const mikeGateBlocks = (): boolean => isMikeLocked() && mikePinPhase !== "ok";
   const [ioCode, setIoCode] = useState<string>("");
   const [ioNote, setIoNote] = useState<string>("");
   const [ioMode, setIoMode] = useState<"save" | "load">("save");
@@ -23947,6 +24200,7 @@ export default function App() {
   apiRef.current = { openInv, closeInv, closeShop, closeStash };
 
   const beginNew = (): void => {
+    if (mikeGateBlocks()) return;
     const g = gRef.current;
     if (!g) return;
     clearSave();
@@ -23960,6 +24214,7 @@ export default function App() {
     bump();
   };
   const continueRun = (): void => {
+    if (mikeGateBlocks()) return;
     const n = loadGame(gRef.current);
     if (!n) { setTitleNote("Your saved run couldn't be loaded (missing or damaged). It was left untouched - try Import save, or start a new game."); bump(); return; }
     n.mode = "play";
@@ -23970,7 +24225,7 @@ export default function App() {
     n.sfx("start");
     bump();
   };
-  const newClick = (): void => { if (hasSave() || hasSaveBlob()) setConfirmNew(true); else beginNew(); };
+  const newClick = (): void => { if (mikeGateBlocks()) return; if (hasSave() || hasSaveBlob()) setConfirmNew(true); else beginNew(); };
   // Quit: confirm first; on Yes autosave, then return to the title screen (Continue resumes the run).
   const askQuit = (): void => { const g = gRef.current; if (!g || g.mode === "title") return; holdRef.current = null; setPadHeld(""); quitRef.current = true; setConfirmQuit(true); };
   const cancelQuit = (): void => { quitRef.current = false; setConfirmQuit(false); };
@@ -24038,17 +24293,32 @@ export default function App() {
     bump();
   };
   const pickProf = (id: ProfId): void => {
+    if (isMikeLocked() && id !== MIKE_PROF) return;
     if (stor === "checking" || !storageReady) return;
     try { ensureJaxSeed(); } catch { /* */ }
     const g = gRef.current;
     // Only flush when the player is switching away from an active session (picker
     // was closed). If the picker is already open (fresh load / resume), writing
     // here would overwrite the on-disk save with any ticks that leaked first.
-    if (g && g.mode === "play" && !profOpen) { try { saveGame(g, true); } catch { /* keep the other profiles safe even if this write fails */ } }
+    if (g && g.mode === "play" && !profOpen && profPersists(activeProf)) { try { saveGame(g, true); } catch { /* keep the other profiles safe even if this write fails */ } }
     setActiveProf(id);
     setProfOpen(false);
     setConfirmNew(false);
     setTitleNote("");
+    setMikeRestOpen(false);
+    if (isTestProf(id)) {
+      try { wipeTesterKeys(); } catch { /* ignore */ }
+      const n = newGame(gRef.current);
+      n.mode = "play"; n.notify = bump;
+      if (g && g.sfx) n.sfx = g.sfx;
+      mutedRef.current = n.muted; setMuted(n.muted);
+      musicRef.current = n.music; setMusicOn(n.music);
+      gRef.current = n; LIVE = n;
+      setBanner(n, "TESTER", "New game · Level 1 · early-game testing · not saved", "#c0c0ff", 2, 2);
+      n.sfx("start");
+      bump();
+      return;
+    }
     if (hasSave() || hasSaveBlob()) {
       let n = loadGame(gRef.current);
       if (!n) { try { const b = currentBak(); if (b && parseSaveRaw(b)) n = loadGame(gRef.current, b); } catch { n = null; } }
@@ -24071,14 +24341,16 @@ export default function App() {
     t.mode = "title"; t.notify = bump;
     if (g && g.sfx) t.sfx = g.sfx;
     gRef.current = t; LIVE = t;
-    setTitleNote(hasSaveBlob() ? (nm + "'s save is still here but could not be opened. It was kept safe - do NOT start a New Game. Open Profiles and tap Recover lost profiles.") : ("No save on " + nm + " yet. Paste a Save Code with LOAD, or start a New Game."));
+    setTitleNote(hasSaveBlob() ? (nm + "'s save is still here but could not be opened. It was kept safe - do NOT start a New Game. Open Profiles and tap Recover lost profiles.") : ("No save on " + nm + " yet. " + (isMikeProf(id) ? "Tap Restore save under Mike to load your backup, or start a New Game." : "Paste a Save Code with LOAD, or start a New Game.")));
     bump();
   };
   const openRecover = (): void => {
+    if (isMikeLocked()) return;
     setRecBusy(true); setRecNote("");
     void scanRecoverable().then((list: RecoverCand[]) => { setRecList(list); setRecBusy(false); bump(); }, () => { setRecList([]); setRecBusy(false); });
   };
   const doRecover = (c: RecoverCand, id: ProfId): void => {
+    if (isMikeLocked()) return;
     const nm = PROFILES[id - 1] ? PROFILES[id - 1].name : "profile";
     const had = !profSummary(id).empty;
     if (had && typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm("Put this Lv " + c.lvl + " / Depth " + c.depth + " save into " + nm + "? " + nm + "'s current save is kept as a backup, not deleted.")) return;
@@ -24088,9 +24360,95 @@ export default function App() {
     bump();
   };
   const openProfiles = (): void => {
+    if (isMikeLocked()) { setMikeToolsOpen(true); return; }
     const g = gRef.current;
-    if (g && g.mode === "play") { try { saveGame(g, true); } catch { /* still open the picker */ } }
+    if (g && g.mode === "play" && profPersists(activeProf)) { try { saveGame(g, true); } catch { /* still open the picker */ } }
     setProfOpen(true);
+  };
+  const backupMikeSave = (): void => {
+    const code = mikeExportCode();
+    if (!code) { setMikeBakNote("No Mike save to back up yet. Play on Mike first."); bump(); return; }
+    const name = mikeBackupFilename();
+    offerMikeBackupFile(code, name);
+    markMikeBackup();
+    setMikeBakNote("Save file offered (" + name + "). Also tap Copy Code to keep a pasteable copy.");
+    bump();
+  };
+  const copyMikeCode = (): void => {
+    const code = mikeExportCode();
+    if (!code) { setMikeBakNote("No Mike save to copy yet."); bump(); return; }
+    void copyTextSafe(code).then((ok: boolean) => {
+      if (ok) { markMikeBackup(); setMikeBakNote("Copied! Paste it into Notes or a message to yourself."); }
+      else setMikeBakNote("Auto-copy is blocked here. Use the file backup, or save the code in Notes.");
+      bump();
+    });
+  };
+  const applyMikeRestore = (text: string): void => {
+    if (mikeGateBlocks()) { setMikeRestNote("Enter your PIN first."); setMikeToolsOpen(true); bump(); return; }
+    const t = (text || "").trim();
+    if (!t) { setMikeRestNote("Paste a save code or pick your backup file."); bump(); return; }
+    if (stor === "checking" || !storageReady) { setMikeRestNote("Storage is still loading — try again in a moment."); bump(); return; }
+    const g = gRef.current;
+    if (g && g.mode === "play" && profPersists(activeProf) && activeProf !== MIKE_PROF) { try { saveGame(g, true); } catch { /* keep the other profile safe */ } }
+    const n = restoreMikeFromText(t, gRef.current);
+    if (!n) { setMikeRestNote("That is not a valid Endless Depths 16 save. Nothing was changed."); bump(); return; }
+    n.mode = "play"; n.notify = bump;
+    if (g && g.sfx) n.sfx = g.sfx;
+    mutedRef.current = n.muted; setMuted(n.muted);
+    musicRef.current = n.music; setMusicOn(n.music);
+    invRef.current = false; setInv(false); setSel("");
+    gRef.current = n; LIVE = n;
+    setMikeRestOpen(false); setMikeRestTxt(""); setMikeRestNote("");
+    setProfOpen(false); setTitleNote(""); setConfirmNew(false);
+    n.sfx("start");
+    if (lastPersistOk) {
+      msg(n, "Restored Mike's save.", "#80ff80");
+      setBanner(n, "RESTORED", "Mike · Depth " + n.depth + " · Level " + n.lvl, "#80ff80", 2, 2);
+    } else {
+      msg(n, "Loaded this session, but the profile may not have saved. Tap Save Game.", "#ff8080");
+    }
+    bump();
+  };
+  const onMikeFile = (e: { target: { files: FileList | null; value: string } }): void => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (): void => { applyMikeRestore(String(reader.result || "")); };
+    reader.onerror = (): void => { setMikeRestNote("Could not read that file."); bump(); };
+    reader.readAsText(f);
+  };
+  const saveMikePinSkip = (): void => {
+    try { lsSet(MIKE_PIN_KEY, "skip"); ssSet(MIKE_PIN_KEY, "skip"); } catch { /* ignore */ }
+    setMikePinBuf(""); setMikePinFirst(""); setMikePinNote(""); setMikePinPhase("ok");
+  };
+  const submitMikePinSetup = (pin: string): void => {
+    if (!/^[0-9]{4}$/.test(pin)) { setMikePinNote("Enter 4 digits."); return; }
+    if (!mikePinFirst) { setMikePinFirst(pin); setMikePinBuf(""); setMikePinNote("Enter the same PIN again to confirm."); setMikePinPhase("confirm"); return; }
+    if (pin !== mikePinFirst) { setMikePinFirst(""); setMikePinBuf(""); setMikePinNote("Those PINs did not match. Try again."); setMikePinPhase("setup"); return; }
+    void hashMikePin(pin).then((h: string) => {
+      try { lsSet(MIKE_PIN_KEY, h); ssSet(MIKE_PIN_KEY, h); } catch { /* ignore */ }
+      setMikePinBuf(""); setMikePinFirst(""); setMikePinNote(""); setMikePinPhase("ok");
+      bump();
+    });
+  };
+  const submitMikePinEnter = (pin: string): void => {
+    if (!/^[0-9]{4}$/.test(pin)) { setMikePinNote("Enter 4 digits."); return; }
+    const stored = (lsGet(MIKE_PIN_KEY) || ssGet(MIKE_PIN_KEY) || "").trim();
+    void hashMikePin(pin).then((h: string) => {
+      if (hexEq(h, stored)) { setMikePinBuf(""); setMikePinNote(""); setMikePinPhase("ok"); }
+      else { setMikePinBuf(""); setMikePinNote("Wrong PIN. Try again."); }
+      bump();
+    });
+  };
+  const tapMikePin = (ch: string): void => {
+    if (ch === "del") { setMikePinBuf((b: string) => b.slice(0, -1)); return; }
+    const next = (mikePinBuf + ch).slice(0, 4);
+    setMikePinBuf(next);
+    if (next.length === 4) {
+      if (mikePinPhase === "enter") submitMikePinEnter(next);
+      else submitMikePinSetup(next);
+    }
   };
   const startOrRestart = (): boolean => {
     const g = gRef.current;
@@ -24230,6 +24588,59 @@ export default function App() {
       void navigator.clipboard.readText().then((t: string) => { setLoadTxt(t); doImport(t); }, () => setIoNote(blocked));
     } catch { setIoNote(blocked); }
   };
+  useEffect(() => {
+    let cancelled = false;
+    const finishLocked = (): void => {
+      mikeLinkVerdict = "yes";
+      engageMikeLock();
+      setProfOpen(false);
+      setMikeBoot("on");
+      const tok = mikeQueryToken();
+      if (tok.length >= 24) installMikeManifest(tok);
+      const st = mikePinState();
+      if (st === "set") setMikePinPhase("enter");
+      else if (st === "unset") setMikePinPhase("setup");
+      else { setMikePinPhase("ok"); }
+      bump();
+    };
+    const run = async (): Promise<void> => {
+      if (readMikeLocked()) { finishLocked(); return; }
+      const tok = mikeQueryToken();
+      if (tok.length < 24) { setMikeBoot("off"); return; }
+      try {
+        const h = await sha256hex(tok);
+        if (cancelled) return;
+        if (hexEq(h, MIKE_LINK_HASH)) { mikeLinkVerdict = "yes"; finishLocked(); }
+        else {
+          mikeLinkVerdict = "no";
+          try { ensureJaxSeed(); } catch { /* ignore */ }
+          setMikeBoot("off"); setProfOpen(true);
+          bump();
+        }
+      } catch {
+        if (!cancelled) { setMikeBoot("off"); setProfOpen(true); }
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!isMikeLocked() || mikePinPhase !== "ok" || stor === "checking" || !storageReady) return;
+    const cur = gRef.current;
+    if (cur && cur.mode === "play") return;
+    if (!(hasSave() || hasSaveBlob())) { setProfOpen(false); return; }
+    const n = loadGame(cur);
+    if (!n) { setProfOpen(false); return; }
+    n.mode = "play"; n.notify = bump;
+    if (cur && cur.sfx) n.sfx = cur.sfx;
+    mutedRef.current = n.muted; setMuted(n.muted);
+    musicRef.current = n.music; setMusicOn(n.music);
+    gRef.current = n; LIVE = n;
+    maybeFireArtCaveAlert(n);
+    setBanner(n, "WELCOME BACK", "Mike · Depth " + n.depth + " · Level " + n.lvl, "#80ff80", 2, 2);
+    setProfOpen(false);
+    bump();
+  }, [mikePinPhase, stor]);
   useEffect(() => {
     if (!ioOpen || ioMode !== "save" || !ioCode) return;
     const id = window.setTimeout(() => { const ta = codeRef.current; if (ta) { try { ta.select(); ta.setSelectionRange(0, ta.value.length); } catch { /* ignore */ } } }, 60);
@@ -26299,7 +26710,57 @@ export default function App() {
           {!inv && !ioOpen && !(g && (g.shopOpen || g.stashOpen || g.gambOpen)) && g && g.mode === "play" && (
             <button className={"dc-wbrk" + (g.wallBreak ? " on" : "")} onClick={() => { const gg = gRef.current; if (!gg) return; toggleWallBreak(gg); bump(); }} aria-label={g.wallBreak ? "Wall Breaker on - tap to turn off" : "Wall Breaker off - tap to turn on"} title={g.wallBreak ? "Wall Breaker on (K)" : "Wall Breaker off (K)"}>{"\u26CF"}</button>
           )}
-          {profOpen && (
+          <input ref={mikeFileRef} type="file" accept=".txt,text/plain,application/json,.json" style={{ display: "none" }} onChange={onMikeFile} />
+          {(mikeBoot === "check" || (isMikeLocked() && (mikePinPhase === "setup" || mikePinPhase === "confirm" || mikePinPhase === "enter"))) && (
+            <div className="dc-mikegate" role="dialog" aria-modal="true" aria-label={mikeBoot === "check" ? "Opening" : "Mike PIN"}>
+              <div className="dc-mikegate-card">
+                {mikeBoot === "check" && mikePinPhase === "off" ? (
+                  <div style={{ textAlign: "center", fontWeight: 800 }}>Opening…</div>
+                ) : (
+                  <div>
+                    <h2>{mikePinPhase === "enter" ? "Enter your PIN" : (mikePinPhase === "confirm" ? "Confirm your PIN" : "Optional 4-digit PIN")}</h2>
+                    <div className="dc-sm" style={{ textAlign: "center", marginBottom: 6 }}>
+                      {mikePinPhase === "enter" ? "Required to play and to restore a backup on this device." : "Set a PIN to protect play and Restore on this device, or skip."}
+                    </div>
+                    <div className="dc-pin-dots" aria-label="PIN digits">{(mikePinBuf + "••••").slice(0, 4).replace(/[0-9]/g, "●").replace(/•/g, "○")}</div>
+                    {mikePinNote ? <div className="dc-mike-note">{mikePinNote}</div> : null}
+                    <div className="dc-pin-grid">
+                      {["1","2","3","4","5","6","7","8","9","del","0"].map((ch: string) => (
+                        <button key={ch} className="dc-b" style={btn} onClick={() => tapMikePin(ch)}>{ch === "del" ? "⌫" : ch}</button>
+                      ))}
+                    </div>
+                    {mikePinPhase !== "enter" && mikePinPhase !== "confirm" ? (
+                      <button className="dc-b" style={{ ...btn, width: "100%", marginTop: 10 }} onClick={saveMikePinSkip}>Skip</button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {isMikeLocked() && mikeToolsOpen && mikePinPhase === "ok" && (
+            <div className="dc-mike-saves" role="dialog" aria-modal="true" aria-label="Mike save tools">
+              <div className="dc-mike-saves-card">
+                <div className="dc-profs-hd">Mike's save</div>
+                <div className="dc-mike-age">{fmtBackupAge(mikeLastBackupAt())}</div>
+                <div className="dc-prof-actions">
+                  <button className="dc-b" style={btn} disabled={stor === "checking" || !storageReady || !parseSaveRaw(profBlob(MIKE_PROF))} onClick={backupMikeSave}>Back up save</button>
+                  <button className="dc-b" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => { setMikeRestOpen((o: boolean) => !o); setMikeRestNote(""); setMikeBakNote(""); }}>{mikeRestOpen ? "Close restore" : "Restore save"}</button>
+                </div>
+                {mikeBakNote ? <div className="dc-mike-note">{mikeBakNote}</div> : null}
+                {parseSaveRaw(profBlob(MIKE_PROF)) ? <button className="dc-b" style={{ ...btn, width: "100%", marginTop: 6, minHeight: 36, fontSize: 12, fontWeight: 800 }} onClick={copyMikeCode}>Copy Code</button> : null}
+                {mikeRestOpen ? (
+                  <div className="dc-mike-restore">
+                    <textarea value={mikeRestTxt} rows={4} placeholder="Paste your Mike backup code (starts with ED16- or ED2-)" autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => { setMikeRestTxt(e.target.value); setMikeRestNote(""); }} aria-label="Paste Mike save code" />
+                    <button className="dc-b go" style={btn} disabled={!mikeRestTxt.trim()} onClick={() => applyMikeRestore(mikeRestTxt)}>Load pasted code</button>
+                    <button className="dc-b" style={btn} onClick={() => { if (mikeFileRef.current) mikeFileRef.current.click(); }}>Pick backup file</button>
+                    {mikeRestNote ? <div className="dc-mike-note">{mikeRestNote}</div> : null}
+                  </div>
+                ) : null}
+                <button className="dc-b" style={{ ...btn, width: "100%", marginTop: 10 }} onClick={() => setMikeToolsOpen(false)}>Close</button>
+              </div>
+            </div>
+          )}
+          {profOpen && !isMikeLocked() && (
             <div className="dc-profs" role="dialog" aria-modal="true" aria-label="Choose profile">
               <div className="dc-profs-card">
                 <div className="dc-profs-hd">Choose a profile</div>
@@ -26307,14 +26768,38 @@ export default function App() {
                 <div className="dc-profs-list">
                   {PROFILES.map((p: { id: ProfId; name: string }) => {
                     const s = profSummary(p.id);
-                    const line = s.empty ? (s.damaged ? "Save found but not readable — tap Recover below" : "Empty — new game or LOAD a code") : ("Lv " + s.lvl + "  ·  Depth " + s.depth);
-                    const when = s.empty ? "" : ("saved " + fmtProfTime(s.t));
+                    const isTest = isTestProf(p.id);
+                    const isMike = isMikeProf(p.id);
+                    const line = isTest ? "Test · always a brand-new Level 1 game" : (s.empty ? (s.damaged ? "Save found but not readable — tap Recover below" : (isMike ? "Empty — Restore your backup or start a New Game" : "Empty — new game or LOAD a code")) : ("Lv " + s.lvl + "  ·  Depth " + s.depth));
+                    const when = isTest || s.empty ? "" : ("saved " + fmtProfTime(s.t));
+                    const mikeHas = isMike && !s.empty && !s.damaged;
                     return (
-                      <button key={p.id} className="dc-b dc-prof" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => pickProf(p.id)}>
-                        <b>{p.id + ". " + p.name}</b>
-                        <span className="dc-sm">{line}</span>
-                        {when ? <span className="dc-prof-time">{when}</span> : null}
-                      </button>
+                      <div key={p.id} className="dc-prof-wrap">
+                        <button className="dc-b dc-prof" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => pickProf(p.id)}>
+                          <b>{p.id + ". " + p.name}{isTest ? " (test)" : ""}</b>
+                          <span className="dc-sm">{line}</span>
+                          {when ? <span className="dc-prof-time">{when}</span> : null}
+                        </button>
+                        {isMike ? (
+                          <div className="dc-mike-tools">
+                            <div className="dc-mike-age">{fmtBackupAge(mikeLastBackupAt())}</div>
+                            <div className="dc-prof-actions">
+                              <button className="dc-b" style={btn} disabled={stor === "checking" || !storageReady || !mikeHas} onClick={backupMikeSave}>Back up save</button>
+                              <button className="dc-b" style={btn} disabled={stor === "checking" || !storageReady} onClick={() => { setMikeRestOpen((o: boolean) => !o); setMikeRestNote(""); setMikeBakNote(""); }}>{mikeRestOpen ? "Close restore" : "Restore save"}</button>
+                            </div>
+                            {mikeBakNote ? <div className="dc-mike-note">{mikeBakNote}</div> : null}
+                            {mikeHas ? <button className="dc-b" style={{ ...btn, width: "100%", marginTop: 4, minHeight: 36, fontSize: 12, fontWeight: 800 }} onClick={copyMikeCode}>Copy Code</button> : null}
+                            {mikeRestOpen ? (
+                              <div className="dc-mike-restore">
+                                <textarea value={mikeRestTxt} rows={4} placeholder="Paste your Mike backup code (starts with ED16- or ED2-)" autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => { setMikeRestTxt(e.target.value); setMikeRestNote(""); }} aria-label="Paste Mike save code" />
+                                <button className="dc-b go" style={btn} disabled={!mikeRestTxt.trim()} onClick={() => applyMikeRestore(mikeRestTxt)}>Load pasted code</button>
+                                <button className="dc-b" style={btn} onClick={() => { if (mikeFileRef.current) mikeFileRef.current.click(); }}>Pick backup file</button>
+                                {mikeRestNote ? <div className="dc-mike-note">{mikeRestNote}</div> : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -26327,7 +26812,7 @@ export default function App() {
                         <div><b>{"Lv " + c.lvl + " · Depth " + c.depth}</b>{" · " + (c.t ? fmtProfTime(c.t) : "no time") + (c.prof ? " · was " + PROFILES[c.prof - 1].name + "'s" : "")}</div>
                         <div style={{ opacity: 0.7, fontSize: 10 }}>{c.src + " · " + c.key}</div>
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                          {PROFILES.map((p: { id: ProfId; name: string }) => (
+                          {RECOVER_PROFS.map((p: { id: ProfId; name: string }) => (
                             <button key={p.id} className="dc-b" style={{ ...btn, flex: 1, padding: "4px 2px", fontSize: 11 }} onClick={() => doRecover(c, p.id)}>{"To " + p.name}</button>
                           ))}
                         </div>
@@ -26361,9 +26846,10 @@ export default function App() {
                 <div className="dc-tb">
                   {hasSave() && <button className="dc-b go" style={btn} onClick={continueRun}>{"\u25b6 Continue"}</button>}
                   <button className="dc-b" style={btn} onClick={newClick}>{"\u2726 New Game"}</button>
-                  <button className="dc-b" style={btn} onClick={openProfiles}>Profiles</button>
-                  <button className={"dc-b" + (!hasSave() ? " go" : "")} style={!hasSave() ? { ...btn, order: -1 } : btn} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
-                  {!hasSave() && <div className="dc-sm" style={{ width: "100%", textAlign: "center", marginTop: 6 }}>{"No save on this profile yet. Paste a Save Code with LOAD, or start a New Game."}</div>}
+                  {!isMikeLocked() && <button className="dc-b" style={btn} onClick={openProfiles}>Profiles</button>}
+                  {isMikeLocked() && <button className="dc-b" style={btn} onClick={() => setMikeToolsOpen(true)}>Saves</button>}
+                  {!isMikeLocked() && <button className={"dc-b" + (!hasSave() ? " go" : "")} style={!hasSave() ? { ...btn, order: -1 } : btn} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>}
+                  {!hasSave() && <div className="dc-sm" style={{ width: "100%", textAlign: "center", marginTop: 6 }}>{isMikeLocked() ? "No save on this device yet. Tap Restore save, or start a New Game." : "No save on this profile yet. Paste a Save Code with LOAD, or start a New Game."}</div>}
                   <div className={"dc-st " + stor} style={{ width: "100%" }}>{storLine}</div>
                 </div>
               )}
@@ -26805,7 +27291,9 @@ export default function App() {
                 <button className="dc-b go" style={{ ...btn, minHeight: 38, fontSize: 12, fontWeight: 800 }} disabled={locked} onClick={saveToProfile}>{SAVE_GAME_LBL}</button>
                 <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} disabled={locked} onClick={showSaveCode}>{SAVE_CODE_LBL}</button>
                 <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} disabled={locked && hasSave()} onClick={openLoad}>{(locked && hasSave() ? "\ud83d\udd12" : "\ud83d\udcc2") + " LOAD code"}</button>
-                <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} onClick={openProfiles}>Profiles</button>
+                {isMikeLocked()
+                  ? <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} onClick={() => setMikeToolsOpen(true)}>Saves</button>
+                  : <button className="dc-b" style={{ ...btn, minHeight: 38, fontSize: 12 }} onClick={openProfiles}>Profiles</button>}
               </div>
               <div className={"dc-st " + stor} style={{ margin: "2px 0 4px" }}>{storLine}</div>
               {g.nk && g.nk.got && (() => {
@@ -26924,7 +27412,9 @@ export default function App() {
             <button className={"dc-b dc-savegame" + (locked ? "" : " go")} style={btn} disabled={locked || !g || g.mode === "title"} onClick={saveToProfile} aria-label={SAVE_GAME_LBL}>{SAVE_GAME_LBL}</button>
             <button className="dc-b" style={btn} disabled={locked} onClick={showSaveCode} aria-label={SAVE_CODE_LBL}>{SAVE_CODE_LBL}</button>
             <button className="dc-b" style={btn} disabled={locked && hasSave()} onClick={openLoad} aria-label={locked && hasSave() ? "Load (locked)" : "Load"}>{locked && hasSave() ? "\ud83d\udd12 LOAD" : "\ud83d\udcc2 LOAD"}</button>
-            <button className="dc-b" style={btn} onClick={openProfiles} aria-label="Profiles">Profiles</button>
+            {isMikeLocked()
+              ? <button className="dc-b" style={btn} onClick={() => setMikeToolsOpen(true)} aria-label="Saves">Saves</button>
+              : <button className="dc-b" style={btn} onClick={openProfiles} aria-label="Profiles">Profiles</button>}
           </div>
           </div>
           <div className="dc-actions">
@@ -27160,3 +27650,25 @@ try {
     end: (): void => { MINE_G = null; MINE_TEST_PRIS = 1; },
   };
 } catch { /* ignore */ }
+
+try {
+  (window as unknown as { __ED16_PROF?: object }).__ED16_PROF = {
+    ids: (): { id: ProfId; name: string }[] => PROFILES.map((p: { id: ProfId; name: string }) => ({ id: p.id, name: p.name })),
+    active: (): ProfId => activeProf,
+    locked: (): boolean => isMikeLocked(),
+    blob: (id: ProfId): string | null => profBlob(id),
+    keys: (ids?: ProfId[]): Record<string, string | null> => {
+      const out: Record<string, string | null> = {};
+      const list = ids && ids.length ? ids : ([1, 2, 3, 4, 5] as ProfId[]);
+      for (const id of list) {
+        for (const k of [profSaveKey(id), profBakKey(id), profStashKey(id), profStashBakKey(id)]) out[k] = lsGet(k) || hookGet(k) || ssGet(k);
+      }
+      out.ed16_best = lsGet("ed16_best");
+      out.ed16_lvl = lsGet("ed16_lvl");
+      out.ed16_lock = lsGet("ed16_lock");
+      out[MIKE_BAK_AT] = lsGet(MIKE_BAK_AT);
+      return out;
+    },
+  };
+} catch { /* ignore */ }
+try { wrapEditHooks(); } catch { /* ignore */ }

@@ -12,6 +12,22 @@
   <meta name="apple-mobile-web-app-title" content="Endless Depths">
   <meta name="description" content="Endless Depths 16 — dive deeper, slay monsters, and save your run.">
   <link rel="manifest" href="manifest.json">
+  <script>
+  (function () {
+    try {
+      var k = new URLSearchParams(location.search).get("k") || "";
+      if (k.length < 24) return;
+      var link = document.querySelector('link[rel="manifest"]');
+      if (!link) return;
+      fetch(link.getAttribute("href") || "manifest.json").then(function (r) { return r.json(); }).then(function (m) {
+        m.start_url = "./?k=" + encodeURIComponent(k);
+        m.scope = "./";
+        var u = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: "application/manifest+json" }));
+        link.setAttribute("href", u);
+      }).catch(function () {});
+    } catch (e) {}
+  })();
+  </script>
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Endless Depths 16</title>
