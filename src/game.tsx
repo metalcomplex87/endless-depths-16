@@ -10138,45 +10138,41 @@ function clearRestoreHash(): void {
 }
 async function fetchGistRestorePayload(id: string): Promise<string> {
   if (!GIST_ID_RE.test(id)) throw new Error("invalid gist id");
-  const api = "https://api.github.com/gists/" + id;
-  let content = "";
-  let rawUrl = "";
-  let truncated = false;
-  // No custom headers: a non-safelisted Accept value triggers a CORS preflight
-  // that api.github.com rejects (Accept is not in Access-Control-Allow-Headers).
+  // api.github.com and gist.githubusercontent.com omit CORS ACAO for requests
+  // issued from *.github.io in Chrome (curl still sees Access-Control-Allow-Origin: *).
+  // gistcdn.githack.com is a CORS-enabled raw proxy and works from the live origin.
   const timed = (url: string): Promise<Response> => {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => { try { ctrl.abort(); } catch { /* ignore */ } }, 8000);
-    return fetch(url, { method: "GET", credentials: "omit", signal: ctrl.signal }).finally(() => window.clearTimeout(t));
+    return fetch(url, { method: "GET", credentials: "omit", mode: "cors", cache: "no-store", signal: ctrl.signal }).finally(() => window.clearTimeout(t));
   };
-  try {
-    const r = await timed(api);
-    if (r.ok) {
-      const data = await r.json() as { files?: Record<string, { content?: string; truncated?: boolean; raw_url?: string; filename?: string }> };
-      const files = data && data.files ? data.files : {};
-      const f = files["r.txt"] || files[Object.keys(files)[0]] || null;
-      if (f) {
-        truncated = !!f.truncated;
-        rawUrl = typeof f.raw_url === "string" ? f.raw_url : "";
-        if (typeof f.content === "string") content = f.content;
+  const urls = [
+    "https://gistcdn.githack.com/metalcomplex87/" + id + "/raw/r.txt",
+    "https://gistcdn.githack.com/metalcomplex87/" + id + "/raw",
+    "https://api.github.com/gists/" + id,
+    "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw/r.txt",
+    "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw",
+  ];
+  let lastErr = "";
+  for (const u of urls) {
+    try {
+      const r = await timed(u);
+      if (!r.ok) { lastErr = "HTTP " + r.status; continue; }
+      const text = (await r.text()).trim();
+      if (!text) continue;
+      if (u.indexOf("api.github.com/gists") >= 0) {
+        try {
+          const data = JSON.parse(text) as { files?: Record<string, { content?: string; truncated?: boolean; raw_url?: string }> };
+          const files = data && data.files ? data.files : {};
+          const f = files["r.txt"] || files[Object.keys(files)[0]] || null;
+          if (f && typeof f.content === "string" && f.content.trim() && !f.truncated) return f.content.trim();
+        } catch { lastErr = "invalid gist json"; }
+        continue;
       }
-    }
-  } catch { /* fall through to raw */ }
-  if (truncated || !content) {
-    const fallbacks = [rawUrl, "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw/r.txt", "https://gist.githubusercontent.com/metalcomplex87/" + id + "/raw"];
-    let lastErr = "";
-    for (const u of fallbacks) {
-      if (!u) continue;
-      try {
-        const raw = await timed(u);
-        if (!raw.ok) { lastErr = "HTTP " + raw.status; continue; }
-        content = await raw.text();
-        if (content && content.trim()) break;
-      } catch (e) { lastErr = e instanceof Error ? e.message : "network"; }
-    }
-    if (!content || !content.trim()) throw new Error(lastErr || "gist download failed");
+      return text;
+    } catch (e) { lastErr = e instanceof Error ? e.message : "network"; }
   }
-  return content.trim();
+  throw new Error(lastErr || "gist download failed");
 }
 function decodeRestorePayload(payload: string): Partial<Record<"p1" | "p2" | "p3", string>> | null {
   if (!payload) return null;
