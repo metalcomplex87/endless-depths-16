@@ -10088,6 +10088,112 @@ async function autoRecoverEmptyProfiles(): Promise<ProfId[]> {
   }
   return done;
 }
+// ---------- one-tap #restore=<payload> (URL fragment only; never sent to the server) ----------
+// Writes only Richard / Jax / Piper slots named in the payload. Never touches Tester (p4) or Mike (p5).
+// Refused entirely on Mike-locked devices. Persist path matches Save Game (writeDurable + backup).
+const HASH_RESTORE_SLOTS: { key: "p1" | "p2" | "p3"; id: ProfId; name: string }[] = [
+  { key: "p1", id: 1, name: "Richard" },
+  { key: "p2", id: 2, name: "Jax" },
+  { key: "p3", id: 3, name: "Piper" },
+];
+function b64urlEncode(s: string): string {
+  try { return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); } catch { return ""; }
+}
+function b64urlDecode(s: string): string | null {
+  try {
+    const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+    return atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
+  } catch { return null; }
+}
+function peekRestoreHash(): string | null {
+  try {
+    if (typeof location === "undefined") return null;
+    const h = String(location.hash || "");
+    const body = h.charAt(0) === "#" ? h.slice(1) : h;
+    if (!body.startsWith("restore=")) return null;
+    return body.slice(8);
+  } catch { return null; }
+}
+function clearRestoreHash(): void {
+  try {
+    if (typeof history === "undefined" || typeof location === "undefined") return;
+    if (!peekRestoreHash()) return;
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch { /* ignore */ }
+}
+function decodeRestorePayload(payload: string): Partial<Record<"p1" | "p2" | "p3", string>> | null {
+  if (!payload) return null;
+  let s = payload.trim();
+  try { s = decodeURIComponent(s); } catch { /* already decoded */ }
+  let json = "";
+  if (s.startsWith("j1.")) {
+    const d = b64urlDecode(s.slice(3));
+    if (!d) return null;
+    json = d;
+  } else if (s.charAt(0) === "{") {
+    json = s;
+  } else {
+    const d = b64urlDecode(s);
+    if (!d) return null;
+    json = d;
+  }
+  try {
+    const o = JSON.parse(json) as Record<string, unknown>;
+    if (!o || typeof o !== "object") return null;
+    const out: Partial<Record<"p1" | "p2" | "p3", string>> = {};
+    for (const k of ["p1", "p2", "p3"] as const) {
+      const v = o[k];
+      if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    return (out.p1 || out.p2 || out.p3) ? out : null;
+  } catch { return null; }
+}
+function encodeRestorePayload(map: Partial<Record<"p1" | "p2" | "p3", string>>): string {
+  const o: Record<string, string> = {};
+  for (const k of ["p1", "p2", "p3"] as const) if (map[k]) o[k] = map[k] as string;
+  return "j1." + b64urlEncode(JSON.stringify(o));
+}
+function persistRawFromCode(code: string): string | null {
+  const mw = MW, mh = MH;
+  QUIET_ANNOUNCE++;
+  try {
+    const g = decodeCode(code, null);
+    if (!g) return null;
+    g.mode = "play";
+    const raw = buildPersistRaw(g);
+    return parseSaveRaw(raw) ? raw : null;
+  } catch { return null; }
+  finally { QUIET_ANNOUNCE--; try { setMapSize(mw, mh); } catch { /* ignore */ } }
+}
+function applyRestoreMap(map: Partial<Record<"p1" | "p2" | "p3", string>>): { names: string[] } {
+  const names: string[] = [];
+  if (mikeHoldsOtherProfiles() || isMikeLocked()) return { names };
+  for (const slot of HASH_RESTORE_SLOTS) {
+    const code = map[slot.key];
+    if (!code) continue;
+    const raw = persistRawFromCode(code);
+    if (!raw) continue;
+    const s = parseSaveRaw(raw);
+    if (!s) continue;
+    const cand: RecoverCand = {
+      src: "hash", key: "restore-" + slot.key, raw,
+      lvl: Math.floor(Number(s.lvl) || 1), depth: Math.floor(Number(s.depth) || 1),
+      t: typeof s.t === "number" && isFinite(s.t) ? s.t : 0, prof: slot.id,
+    };
+    if (restoreCandidate(cand, slot.id)) names.push(slot.name);
+  }
+  return { names };
+}
+function consumeRestoreHash(): { names: string[] } | null {
+  const payload = peekRestoreHash();
+  if (!payload) return null;
+  if (mikeHoldsOtherProfiles() || isMikeLocked()) { clearRestoreHash(); return { names: [] }; }
+  const map = decodeRestorePayload(payload);
+  clearRestoreHash();
+  if (!map) return { names: [] };
+  return applyRestoreMap(map);
+}
+
 // Backup-before-migrate: the first time a profile is loaded under a new build, keep the untouched blob
 // (ed16_premig_p<N>, previous generation in ed16_premig_p<N>_prev). IndexedDB only, never deleted.
 function buildIdNow(): string { try { return String((window as unknown as { __ED16_BUILD?: string }).__ED16_BUILD || ""); } catch { return ""; } }
@@ -24788,6 +24894,20 @@ export default function App() {
     setProfOpen(true);
     bump();
   };
+  useEffect(() => {
+    if (showOwnerGate || !ownerUnlocked) return;
+    if (stor === "checking" || !storageReady) return;
+    if (isMikeLocked() || mikeHoldsOtherProfiles()) {
+      if (peekRestoreHash()) clearRestoreHash();
+      return;
+    }
+    const res = consumeRestoreHash();
+    if (res && res.names.length) {
+      showSaveNote("ok", "Restored: " + res.names.join(", "), "Saved to this device.");
+      setProfOpen(true);
+      bump();
+    }
+  }, [ownerUnlocked, stor, showOwnerGate]);
   const startOrRestart = (): boolean => {
     const g = gRef.current;
     if (profOpen) return true;
@@ -28010,6 +28130,23 @@ try {
     active: (): ProfId => activeProf,
     locked: (): boolean => isMikeLocked(),
     blob: (id: ProfId): string | null => profBlob(id),
+    summaries: (): { id: ProfId; name: string; empty: boolean; damaged?: boolean; depth: number; lvl: number; t: number }[] => PROFILES.map((p: { id: ProfId; name: string }) => profSummary(p.id)),
+    encodeRestore: (map: Partial<Record<"p1" | "p2" | "p3", string>>): string => encodeRestorePayload(map),
+    applyRestore: (payload: string): { names: string[] } => {
+      const map = decodeRestorePayload(payload);
+      return map ? applyRestoreMap(map) : { names: [] };
+    },
+    writeCode: (id: ProfId, code: string): boolean => {
+      if (id !== 1 && id !== 2 && id !== 3) return false;
+      if (mikeHoldsOtherProfiles() || isMikeLocked()) return false;
+      const raw = persistRawFromCode(code);
+      if (!raw) return false;
+      const s = parseSaveRaw(raw);
+      if (!s) return false;
+      return restoreCandidate({ src: "test", key: "write-" + id, raw, lvl: Math.floor(Number(s.lvl) || 1), depth: Math.floor(Number(s.depth) || 1), t: typeof s.t === "number" && isFinite(s.t) ? s.t : 0, prof: id }, id);
+    },
+    peekRestoreHash,
+    consumeRestoreHash,
     keys: (ids?: ProfId[]): Record<string, string | null> => {
       const out: Record<string, string | null> = {};
       const list = ids && ids.length ? ids : ([1, 2, 3, 4, 5] as ProfId[]);
