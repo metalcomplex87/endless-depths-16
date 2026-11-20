@@ -1,5 +1,5 @@
 // Camp pet excavation: hiring / slots / auto-swap, offline timer (cap, rollback, multi-day), clear-rate tracking,
-// natural expected-haul simulation, the 1%-per-pet uncapped crew share (20 pets = 20%, 21+ keep adding), the full loot pool,
+// natural expected-haul simulation, the 0.5%-per-Prismatic crew share with a 10-pet cap (10 Prismatic = 5%), the full loot pool,
 // save round-trip, layout bumps and screenshots. Uses a COPY of the Richard save; never touches real saves.
 import puppeteer from "puppeteer-core";
 import fs from "fs";
@@ -27,82 +27,87 @@ async function main() {
   await page.waitForSelector(".dc-root");
   await page.waitForFunction(() => !!window.__ED16_MINE);
   const M = (fn, ...args) => page.evaluate((fn, args) => window.__ED16_MINE[fn](...args), fn, args);
+  // buy a slot when needed, then hire (no free slot any more)
+  const fill = async (ids) => { for (const id of ids) { const s0 = await M("state"); if (!s0.mine || s0.mine.slots <= s0.mine.crew) await M("buySlot"); await M("assign", id); } };
 
   // ---- setup: an old save (no excavation field) loads fine ----
   let st = await M("setup", CODE, { gold: 0 });
   rec("Richard save copy loads at camp with no excavation state (old saves fine)", st.ok && st.area === "camp" && st.mine === null, { depth: st.depth, area: st.area });
   const c = await M("consts");
-  rec("constants exposed", c.MINE_PER_PET_SHARE === 0.01 && (c.MINE_CREW_CAP === null || c.MINE_CREW_CAP >= 1e9) && c.MINE_YIELD_RAR.length === 8 && c.MINE_YIELD_RAR[7] === 1 && c.MINE_YIELD_RAR.every((v, i) => i === 0 || v > c.MINE_YIELD_RAR[i - 1]) && c.MINE_YIELD_RAR.slice(0, 7).every((v) => v < 1) && c.MINE_CAP_HOURS === 72, c);
+  rec("constants exposed", c.MINE_PER_PET_SHARE === 0.005 && c.MINE_MAX_SLOTS === 10 && c.MINE_FREE_SLOTS === 0 && (c.MINE_CREW_CAP === null || c.MINE_CREW_CAP >= 1e9) && c.MINE_YIELD_RAR.length === 8 && c.MINE_YIELD_RAR[7] === 1 && c.MINE_YIELD_RAR.every((v, i) => i === 0 || v > c.MINE_YIELD_RAR[i - 1]) && c.MINE_YIELD_RAR.slice(0, 7).every((v) => v < 1) && c.MINE_CAP_HOURS === 72, c);
 
   // ---- layout: cave / rack / chest are solid and open the panel when bumped ----
   for (const w of ["cave", "rack", "chest"]) { const b = await M("bump", w); rec("bump " + w + " opens the excavation panel and blocks the tile", b.open && b.blocked, b); }
   await M("close");
 
-  // ---- hiring fees (depth x crew size x rarity), free first slot, paid escalating slots ----
+  // ---- pricing: nothing free, depth-independent, #10 Prismatic = exactly 1B ----
   const gray0 = await M("addPets", 1, 0);
   let msg = await M("assign", gray0[0]);
   st = await M("state");
-  rec("hiring at depth 200 with no gold is refused (first Normal hire costs gold this deep)", st.mine.crew === 0 && /Not enough gold/.test(msg), msg);
-  st = await M("setup", CODE, { gold: 0, depth: 15 });
-  const gray = await M("addPets", 3, 0);
-  msg = await M("assign", gray[0]);
-  st = await M("state");
-  rec("first hire is free at low depth (depth 15, slot 1)", st.mine.crew === 1 && st.mine.slots === 1 && st.gold === 0, msg);
+  rec("no free slot: with no slot bought a pet cannot start digging", st.mine.crew === 0 && st.mine.slots === 0, msg);
+  msg = await M("buySlot");
+  rec("buying a slot without gold is refused", /Not enough gold/.test(msg), msg);
   const HP = (d, n, r, s = 0) => M("hirePrice", d, n, r, s);
   const cs = await M("consts");
   const top = {}, monoOk = {};
   for (const d of [1, 50, 200, 500]) {
-    top[d] = { slot100: await M("price", 100, d), hire100: await HP(d, 99, 7) };
-    top[d].total = top[d].slot100 + top[d].hire100;
+    top[d] = { slot10: await M("price", 10, d), hire10: await HP(d, 9, 7) };
+    top[d].total = top[d].slot10 + top[d].hire10;
     let prevS = -1, prevH = -1, prevN = -1, ok = true;
-    for (let k = 2; k <= 160; k++) { const sp = await M("price", k, d), hp = await HP(d, k - 1, 7), hn = await HP(d, k - 1, 0); if (sp <= prevS || hp <= prevH || hn < prevN) ok = false; prevS = sp; prevH = hp; prevN = hn; }
+    for (let k = 1; k <= 10; k++) { const sp = await M("price", k, d), hp = await HP(d, k - 1, 7), hn = await HP(d, k - 1, 0); if (sp <= prevS || hp <= prevH || hn <= prevN || sp <= 0 || hn <= 0) ok = false; prevS = sp; prevH = hp; prevN = hn; }
     monoOk[d] = ok;
   }
-  rec("the 100th Prismatic (slot 100 + hire) costs exactly 1,000,000,000 at depths 1, 50, 200 and 500", [1, 50, 200, 500].every((d) => top[d].total === 1e9) && cs.MINE_TOP_SLOT === 100 && cs.MINE_TOP_GOLD === 1e9, top);
-  rec("slot and hire prices rise with every slot 2..160 at depths 1, 50, 200, 500 (no cap at 100)", Object.values(monoOk).every(Boolean), monoOk);
-  const first = { slot2: await M("price", 2, 200), normal2: await HP(200, 1, 0), normal1: await HP(200, 0, 0) };
-  rec("the first paid Normal pet is cheap (slot 2 + Normal hire in the hundreds to low thousands)", first.slot2 + first.normal2 >= 100 && first.slot2 + first.normal2 <= 5000 && first.normal1 > 0 && first.normal1 < 1000, first);
-  const esc = { crew: [await HP(200, 1, 3), await HP(200, 5, 3), await HP(200, 19, 3), await HP(200, 99, 3)], rar: [] };
+  rec("the 10th Prismatic (slot 10 + hire) costs exactly 1,000,000,000 at depths 1, 50, 200 and 500", [1, 50, 200, 500].every((d) => top[d].total === 1e9) && cs.MINE_TOP_SLOT === 10 && cs.MINE_TOP_GOLD === 1e9, top);
+  rec("slot and hire prices are all paid and rise with every slot 1..10 at depths 1, 50, 200, 500", Object.values(monoOk).every(Boolean), monoOk);
+  const first = { slot1: await M("price", 1, 1), normal1: await HP(1, 0, 0), normal1d200: await HP(200, 0, 0) };
+  first.total = first.slot1 + first.normal1;
+  rec("a lone Normal pet is a real but reachable early-mid investment (25K..100K, same at every depth)", first.total >= 25000 && first.total <= 100000 && first.normal1 === first.normal1d200, first);
+  const esc = { crew: [], rar: [] };
+  for (let n = 0; n < 10; n++) esc.crew.push(await HP(200, n, 3));
   for (let r = 0; r < 8; r++) esc.rar.push(await HP(200, 4, r));
   const up = (a) => a.every((v, i) => i === 0 || v > a[i - 1]);
-  rec("hire fee rises with crew size and with rarity (a Prismatic costs more than a Normal at the same slot)", up(esc.crew) && up(esc.rar) && esc.rar[7] > esc.rar[0] * 20, esc);
-  rec("price is the same at every depth (no depth scaling)", (await HP(1, 30, 5)) === (await HP(500, 30, 5)) && (await M("price", 30, 1)) === (await M("price", 30, 500)));
-  await M("setup", CODE, { gold: 0, depth: 15 });
-  const grayB = await M("addPets", 2, 0);
-  await M("assign", grayB[0]);
-  msg = await M("assign", grayB[1]);
-  st = await M("state");
-  rec("equal-quality pet is refused when the crew is full", st.mine.crew === 1 && /Crew full/.test(msg), msg);
-  msg = await M("buySlot");
-  rec("buying a slot without gold is refused", /Not enough gold/.test(msg), msg);
-  const p2 = await M("price", 2), p3 = await M("price", 3), p10 = await M("price", 10), p60 = await M("price", 60);
-  rec("slot prices escalate (2 < 3 < 10 < 60)", p2 > 0 && p3 > p2 && p10 > p3 && p60 > p10, { p2, p3, p10, p60 });
+  rec("hire fee rises with crew size and with rarity (a Prismatic costs 30x a Normal at the same slot)", up(esc.crew) && up(esc.rar) && Math.abs(esc.rar[7] / esc.rar[0] - 30) < 0.5, esc);
+  rec("price is the same at every depth (no depth scaling)", (await HP(1, 6, 5)) === (await HP(500, 6, 5)) && (await M("price", 7, 1)) === (await M("price", 7, 500)));
 
-  // ---- no cap: 60 working pets ----
+  // ---- hard cap: 10 slots, 10 pets; the 11th pet only swaps ----
   st = await M("setup", CODE, { gold: 1e15 });
-  const many = await M("addPets", 60, 2);
-  for (let i = 0; i < 59; i++) await M("buySlot");
-  for (const id of many) await M("assign", id);
+  const ten = await M("addPets", 10, 2);
+  await fill(ten);
   st = await M("state");
-  rec("no slot limit: 60 slots bought and 60 pets digging", st.mine.slots === 60 && st.mine.crew === 60, { slots: st.mine.slots, crew: st.mine.crew, goldLeft: st.gold });
+  rec("10 slots bought and 10 pets digging", st.mine.slots === 10 && st.mine.crew === 10, { slots: st.mine.slots, crew: st.mine.crew });
+  const g11 = st.gold;
+  msg = await M("buySlot");
+  st = await M("state");
+  rec("the 11th slot is refused (maximum 10) and costs nothing", st.mine.slots === 10 && /maximum/.test(msg) && st.gold === g11, msg);
+  const eleven = await M("addPets", 1, 2);
+  msg = await M("assign", eleven[0]);
+  st = await M("state");
+  rec("an 11th pet no better than the weakest worker is refused", st.mine.crew === 10 && /Crew full/.test(msg), msg);
+  const better = await M("addPets", 1, 7);
+  msg = await M("assign", better[0]);
+  st = await M("state");
+  rec("an 11th pet that is better swaps out the weakest worker (crew stays 10)", st.mine.crew === 10 && st.mine.crewRar.includes(7), msg);
   const rep7 = (n, r = 7) => new Array(n).fill(r);
-  const cf = {}; for (const n of [1, 5, 20, 21, 40, 60, 100, 500]) cf[n] = await M("crewFrac", rep7(n));
-  rec("Prismatic crew share is 1% per pet with no cap (1 -> 1%, 20 -> 20%, 21 -> 21%, 40 -> 40%, 100 -> 100%, 500 -> 500%)", [1, 5, 20, 21, 40, 60, 100, 500].every((n) => Math.abs(cf[n] - n * 0.01) < 1e-12), cf);
+  const cf = {}; for (const n of [1, 5, 10]) cf[n] = await M("crewFrac", rep7(n));
+  rec("Prismatic crew share is 0.5% per pet (1 -> 0.5%, 5 -> 2.5%, 10 -> 5%)", [1, 5, 10].every((n) => Math.abs(cf[n] - n * 0.005) < 1e-12), cf);
   const YR = c.MINE_YIELD_RAR;
-  const mixes = { "17 mixed (5 Normal, 4 Magic, 3 Legendary, 3 Ethereal, 2 Prismatic)": [...rep7(5, 0), ...rep7(4, 1), ...rep7(3, 3), ...rep7(3, 5), ...rep7(2, 7)], "20 Normal": rep7(20, 0), "20: 10 Ethereal + 10 Prismatic": [...rep7(10, 5), ...rep7(10, 7)], "1 of each rarity": [0, 1, 2, 3, 4, 5, 6, 7] };
+  const mixes = { "10 even (1 of each rarity + 2 Prismatic)": [0, 1, 2, 3, 4, 5, 6, 7, 7, 7], "10 Normal": rep7(10, 0), "5 mixed (2 Normal, 2 Magic, 1 Rare)": [0, 0, 1, 1, 2], "3 Normal": rep7(3, 0) };
   const mixOut = {};
   let mixOk = true;
-  for (const [k, rars] of Object.entries(mixes)) { const f = await M("crewFrac", rars); const eq = rars.reduce((a, r) => a + YR[r], 0); mixOut[k] = { equivPris: +eq.toFixed(4), pct: +(f * 100).toFixed(4) }; if (Math.abs(f - eq * 0.01) > 1e-12) mixOk = false; }
-  rec("crew share = 1% x equivalent Prismatic count (sum of MINE_YIELD_RAR per pet)", mixOk, mixOut);
-  const m17 = mixes["17 mixed (5 Normal, 4 Magic, 3 Legendary, 3 Ethereal, 2 Prismatic)"];
-  rec("a 17-pet mixed crew yields less than 17% (and every non-Prismatic pet less than 1%)", (await M("crewFrac", m17)) < 0.17 && (await M("crewFrac", rep7(20, 0))) < 0.2 && [0, 1, 2, 3, 4, 5, 6].every((r) => YR[r] < 1), mixOut);
+  for (const [k, rars] of Object.entries(mixes)) { const f = await M("crewFrac", rars); const eq = rars.reduce((a, r) => a + YR[r], 0); mixOut[k] = { equivPris: +eq.toFixed(4), pct: +(f * 100).toFixed(4) }; if (Math.abs(f - eq * 0.005) > 1e-12) mixOk = false; }
+  rec("crew share = 0.5% x equivalent Prismatic count (sum of MINE_YIELD_RAR per pet)", mixOk, mixOut);
+  rec("mixed crews earn less than proportional (10 even < 5%, 10 Normal = 1%; every non-Prismatic pet < 0.5%)", (await M("crewFrac", mixes["10 even (1 of each rarity + 2 Prismatic)"])) < 0.05 && Math.abs((await M("crewFrac", rep7(10, 0))) - 0.01) < 1e-12 && [0, 1, 2, 3, 4, 5, 6].every((r) => YR[r] < 1), mixOut);
+
+  // ---- old saves from the uncapped versions: clamp to 10, extra pets back to the bag ----
+  st = await M("setup", CODE, { gold: 1e15 });
+  const cl = await M("clampTest", 15);
+  rec("an old save with 15 workers / 15 slots loads as 10 / 10; the 5 weakest go back to the bag, no pet lost", cl.crew === 10 && cl.slots === 10 && cl.bagPetsAfter === cl.bagPetsBefore + 5 && cl.allKept && cl.keptBest && cl.bagLen <= cl.bagCap, cl);
 
   // ---- auto-swap: a better pet replaces the weakest worker, which goes back to the bag ----
   st = await M("setup", CODE, { gold: 1e15 });
   const g3 = await M("addPets", 2, 0);
   const b3 = await M("addPets", 1, 3);
-  await M("buySlot"); await M("buySlot");
-  for (const id of [...g3, ...b3]) await M("assign", id);
+  await fill([...g3, ...b3]);
   const pris = await M("addPets", 1, 7);
   const before = await M("state");
   const swapFee = await M("assignPrice", pris[0]);
@@ -122,15 +127,14 @@ async function main() {
   // ---- Prismatic pet at the dig still counts as owned (no x1.5 loot boost exploit) ----
   st = await M("setup", null, { gold: 1e9 });
   const pp = await M("addPets", 1, 7);
-  await M("assign", pp[0]);
+  await fill(pp);
   st = await M("state");
   rec("a Prismatic pet working at the excavation still counts as owned Prismatic", st.owned === true && st.bagPets === 0);
 
   // ---- timer: min gap, rollback guard, cap, multi-day ----
   st = await M("setup", CODE, { gold: 1e15 });
   const tp = await M("addPets", 5, 4);
-  for (let i = 0; i < 4; i++) await M("buySlot");
-  for (const id of tp) await M("assign", id);
+  await fill(tp);
   const T0 = Date.now();
   st = await M("tick", T0, T0 + 30 * 1000);
   rec("a 30 s gap counts as still playing (no credit)", st.mine.h === 0 && st.mine.box === 0 && st.mine.gd === 0, st.mine);
@@ -158,77 +162,67 @@ async function main() {
   rec("natural haul scales with time (10 h = 10 x 1 h)", Math.abs(sum(n10.gear) / sum(n1.gear) - 10) < 1e-6 && Math.abs(n10.gold / n1.gold - 10) < 1e-6, { g1: sum(n1.gear), g10: sum(n10.gear) });
   rec("natural haul carries the real odds of boss copies (double / triple lairs) over the absence", n10.enc.lairs > 0 && n10.enc.tripleLairs > 0 && n10.enc.doubleLairs > n10.enc.tripleLairs, n10.enc);
 
-  // ---- 1% per pet: 1 pet = 1%, 20 Prismatic = exactly 20%, more pets keep adding (no stop at 20) ----
-  const yieldOf = async (n, rar, hours = 1) => {
+  // ---- yield through the real chest: 0.5% per Prismatic pet, 10 Prismatic = 5% ----
+  const yieldOf = async (rars, hours = 1) => {
     await M("setup", CODE, { gold: 1e20 });
-    const ids = await M("addPets", n, rar);
-    for (let i = 1; i < n; i++) await M("buySlot");
-    for (const id of ids) await M("assign", id);
+    const ids = [];
+    for (const r of rars) ids.push(...(await M("addPets", 1, r)));
+    await fill(ids);
     await M("clearBox");
     const r = await M("credit", hours);
     const st2 = await M("state");
-    return { crew: st2.mine.crew, frac: r.frac, gear: sum(r.gearExp) / sum(r.natural.gear), gems: sum(r.gemExp) / sum(r.natural.gems), gold: r.salv ? null : r.gold / r.natural.gold, tiers: r.gearExp.map((v, i) => v / r.natural.gear[i]), nk: r.natural.nk };
+    return { crew: st2.mine.crew, frac: r.frac, gear: sum(r.gearExp) / sum(r.natural.gear), gems: sum(r.gemExp) / sum(r.natural.gems), gold: r.salv ? null : r.gold / r.natural.gold, tiers: r.gearExp.map((v, i) => v / r.natural.gear[i]) };
   };
   const near = (v, t) => v !== null && Math.abs(v / t - 1) < 1e-4;
-  const y1 = await yieldOf(1, 7), y5 = await yieldOf(5, 7), y20 = await yieldOf(20, 7), y21 = await yieldOf(21, 7), y25 = await yieldOf(25, 7), y40 = await yieldOf(40, 7), y100 = await yieldOf(100, 7);
-  rec("100 Prismatic pets = 100% of the natural haul (credited through the real chest path)", near(y100.gear, 1) && near(y100.gems, 1) && y100.crew === 100, { gear: y100.gear, gems: y100.gems, gold: y100.gold });
-  const yN = await yieldOf(20, 0);
-  rec("20 Normal pets earn 20 x 0.2% = 4% of the natural haul (gold, gear and gem counts 4%; no tier above Normal over its 4% share)", Math.abs(yN.frac - 0.04) < 1e-12 && near(yN.gold, 0.04) && near(yN.gear, 0.04) && near(yN.gems, 0.04) && yN.tiers.slice(1).every((t) => t <= 0.04 + 1e-9), { frac: yN.frac, gear: yN.gear, gems: yN.gems, gold: yN.gold, tiers: yN.tiers });
-  rec("1 Prismatic pet = 1% of the natural haul (gear, gems, gold)", y1.crew === 1 && near(y1.gear, 0.01) && near(y1.gems, 0.01) && near(y1.gold, 0.01), y1);
-  rec("20 Prismatic pets = exactly 20% of the natural haul (gear, gems, gold; every tier incl. Prismatic)", y20.crew === 20 && near(y20.gear, 0.2) && near(y20.gems, 0.2) && near(y20.gold, 0.2) && y20.tiers.every((t) => Math.abs(t - 0.2) < 1e-6), y20);
-  const ys = [y1, y5, y20, y21, y25, y40];
-  rec("yield keeps rising past 20 pets: 1 < 5 < 20 < 21 < 25 < 40 (21 = 21%, 40 = 40%)", ys.every((y, i) => i === 0 || (y.gear > ys[i - 1].gear && y.gold > ys[i - 1].gold)) && near(y21.gear, 0.21) && near(y40.gear, 0.4) && near(y40.gold, 0.4), ys.map((y) => ({ crew: y.crew, gear: +y.gear.toFixed(4), gold: y.gold && +y.gold.toFixed(4) })));
-  rec("the Prismatic tier budget grows with crew size past 20 (40 pets find 2x the Prismatic of 20)", Math.abs(y40.tiers[7] / y20.tiers[7] - 2) < 1e-6, { p20: y20.tiers[7], p40: y40.tiers[7] });
-  const natW = [60, 25, 10, 4, 1.2, 0.5, 0.15, 0.02];
-  const mono = [];
-  for (const crew of [[0], [3], [7], [0, 3, 7]]) { const row = []; for (const n of [19, 20, 21, 25, 40]) { const rars = []; for (let i = 0; i < n; i++) rars.push(crew[i % crew.length]); row.push(sum((await M("allocate", rars, natW)).got)); } mono.push(row); }
-  rec("any crew (gray, Legendary, Prismatic, mixed): a 21st+ pet always adds yield", mono.every((r) => r.every((v, i) => i === 0 || v > r[i - 1] + 1e-9)), mono.map((r) => r.map((v) => +v.toFixed(3))));
-  const s21 = await M("price", 21, 200), s20 = await M("price", 20, 200), s41 = await M("price", 41, 200);
-  rec("no slot cap: slot 21+ is for sale, priced above slot 20 and still escalating", s21 > s20 && s41 > s21 && y40.crew === 40, { s20, s21, s41 });
+  const y1 = await yieldOf([7]), y5 = await yieldOf(rep7(5)), y10 = await yieldOf(rep7(10));
+  rec("1 Prismatic pet = 0.5% of the natural haul (gear, gems, gold)", y1.crew === 1 && near(y1.gear, 0.005) && near(y1.gems, 0.005) && near(y1.gold, 0.005), y1);
+  rec("10 Prismatic pets = exactly 5% of the natural haul (gear, gems, gold; every tier incl. Prismatic)", y10.crew === 10 && near(y10.gear, 0.05) && near(y10.gems, 0.05) && near(y10.gold, 0.05) && y10.tiers.every((t) => Math.abs(t - 0.05) < 1e-6), y10);
+  rec("yield rises with every Prismatic pet up to the cap (1 < 5 < 10)", y1.gear < y5.gear && y5.gear < y10.gear && near(y5.gold, 0.025), [y1, y5, y10].map((y) => ({ crew: y.crew, gear: +y.gear.toFixed(5), gold: y.gold && +y.gold.toFixed(5) })));
+  const yN = await yieldOf(rep7(10, 0)), yMix = await yieldOf([0, 1, 2, 3, 4, 5, 6, 7, 7, 7]);
+  rec("10 Normal pets earn 10 x 0.1% = 1% (gold, gear and gem counts; no tier above Normal over its share)", Math.abs(yN.frac - 0.01) < 1e-12 && near(yN.gold, 0.01) && near(yN.gear, 0.01) && near(yN.gems, 0.01) && yN.tiers.slice(1).every((t) => t <= 0.01 + 1e-9), yN);
+  rec("a 10-pet even mix earns less than proportional (< 5%) through the real chest", yMix.frac < 0.05 && near(yMix.gold, yMix.frac), { frac: yMix.frac, gold: yMix.gold });
 
-  // ---- 100 Prismatic pets = 100% of natural (1% each), per tier never over natural share ----
+  // ---- 10 Prismatic pets: per tier never over the crew share of natural ----
   st = await M("setup", CODE, { gold: 1e20 });
-  const hundred = await M("addPets", 100, 7);
-  for (let i = 0; i < 99; i++) await M("buySlot");
-  for (const id of hundred) await M("assign", id);
+  const crew10 = await M("addPets", 10, 7);
+  await fill(crew10);
   st = await M("state");
-  rec("100 Prismatic pets digging", st.mine.crew === 100 && st.mine.crewRar.every((r) => r === 7));
+  rec("10 Prismatic pets digging", st.mine.crew === 10 && st.mine.crewRar.every((r) => r === 7));
   await M("clearBox");
   const cr = await M("credit", 72);
   const nat = cr.natural;
-  const perTierOk = cr.gearExp.every((v, i) => v <= nat.gear[i] + 1e-9) && cr.gemExp.every((v, i) => v <= nat.gems[i] + 1e-9);
-  rec("100 Prismatic pets = 100% of the natural haul, in EVERY tier (gear and gems)", perTierOk && Math.abs(cr.frac - 1) < 1e-12, { exp: cr.gearExp.map((v) => +v.toFixed(3)), nat: nat.gear.map((v) => +v.toFixed(3)) });
+  const perTierOk = cr.gearExp.every((v, i) => v <= nat.gear[i] * 0.05 + 1e-9) && cr.gemExp.every((v, i) => v <= nat.gems[i] * 0.05 + 1e-9);
+  rec("10 Prismatic pets over 72 h: every tier (gear and gems) at most 5% of natural", perTierOk && Math.abs(cr.frac - 0.05) < 1e-12, { exp: cr.gearExp.map((v) => +v.toFixed(3)), nat: nat.gear.map((v) => +v.toFixed(3)) });
   st = await M("state");
-  const boxOk = st.mine.gearRar.every((n, i) => n <= Math.floor(nat.gear[i] + 1)) && st.mine.gemRar.every((n, i) => n <= Math.floor(nat.gems[i] + 1));
-  rec("whole finds per tier never exceed the natural expectation (Prismatic count included)", boxOk && st.mine.gearRar[7] <= Math.floor(nat.gear[7] + 1), { boxGear: st.mine.gearRar, natPris: nat.gear[7], boxGems: st.mine.gemRar });
-  rec("crew gold <= natural gold (+ salvage of chest overflow)", cr.gold <= nat.gold + 1 + (cr.salv > 0 ? 1e15 : 0) && cr.gold > 0, { gold: cr.gold, nat: nat.gold, salv: cr.salv });
+  const boxOk = st.mine.gearRar.every((n, i) => n <= Math.floor(nat.gear[i] * 0.05 + 1)) && st.mine.gemRar.every((n, i) => n <= Math.floor(nat.gems[i] * 0.05 + 1));
+  rec("whole finds per tier never exceed the crew's share of natural (Prismatic count included)", boxOk, { boxGear: st.mine.gearRar, natPris: nat.gear[7], boxGems: st.mine.gemRar });
+  rec("crew gold <= 5% of natural gold (+ salvage of chest overflow)", cr.gold <= nat.gold * 0.05 + 1 + (cr.salv > 0 ? 1e15 : 0) && cr.gold > 0, { gold: cr.gold, nat: nat.gold, salv: cr.salv });
   const natV = [60, 25, 10, 4, 1.2, 0.5, 0.15, 0.02];
-  const A100 = await M("allocate", new Array(100).fill(7), natV);
-  rec("allocator: 100 Prismatic pets take exactly the natural vector, never more in any tier", A100.got.every((v, i) => v <= natV[i] + 1e-9) && Math.abs(sum(A100.got) - sum(natV)) < 1e-6, A100.got.map((v) => +v.toFixed(4)));
+  const A10 = await M("allocate", new Array(10).fill(7), natV);
+  rec("allocator: 10 Prismatic pets take exactly 5% of the natural vector in every tier", A10.got.every((v, i) => Math.abs(v - natV[i] * 0.05) < 1e-9), A10.got.map((v) => +v.toFixed(4)));
   const Agray = await M("allocate", [0, 0, 0, 0, 0], natV);
   rec("allocator: a gray crew yields mostly Normal", Agray.got[0] / sum(Agray.got) > 0.85 && Agray.got[7] < 1e-4, Agray.got.map((v) => +v.toFixed(4)));
   const A1p = await M("allocate", [7], natV), A1g = await M("allocate", [0], natV);
   const hi = (a) => a[3] + a[4] + a[5] + a[6] + a[7];
-  rec("allocator: one Prismatic pet finds more high-tier loot than one gray pet (both 1% of natural)", hi(A1p.got) > hi(A1g.got) * 3 && A1p.got.every((v, i) => v <= natV[i] * 0.01 + 1e-9) && Math.abs(sum(A1p.got) - 0.01 * sum(natV)) < 1e-9, { pris: A1p.got.map((v) => +v.toFixed(3)), gray: A1g.got.map((v) => +v.toFixed(3)) });
+  rec("allocator: one Prismatic pet finds more high-tier loot than one gray pet (Prismatic 0.5%, gray 0.1% of natural)", hi(A1p.got) > hi(A1g.got) * 3 && A1p.got.every((v, i) => v <= natV[i] * 0.005 + 1e-9) && Math.abs(sum(A1p.got) - 0.005 * sum(natV)) < 1e-9, { pris: A1p.got.map((v) => +v.toFixed(3)), gray: A1g.got.map((v) => +v.toFixed(3)) });
   const odds0 = await M("odds", 0), odds7 = await M("odds", 7);
   rec("pet tier preference: Normal pet centers on Normal, Prismatic pet on Prismatic, all tiers non-zero", odds0[0] > 0.9 && odds7[7] > 0.5 && odds0.every((v) => v > 0), { odds0, odds7 });
 
   // ---- full loot pool: every gear tier (incl. 5-star Prismatic), every gem tier, gold ----
   st = await M("setup", CODE, { gold: 1e20 });
-  const pool = await M("addPets", 100, 7);
-  for (let i = 0; i < 99; i++) await M("buySlot");
-  for (const id of pool) await M("assign", id);
+  const pool = await M("addPets", 10, 7);
+  await fill(pool);
   await M("clearBox");
-  await M("setPrisBoost", 10); // test-only x10 on the natural Prismatic budget so a single 1 h run shows the tier
-  await M("credit", 1);
+  await M("setPrisBoost", 10); // test-only x10 on the natural Prismatic budget so one 48 h run shows the tier
+  await M("credit", 48);
   await M("setPrisBoost", 1);
   st = await M("state");
   rec("excavation chest holds every gear tier Normal..Prismatic", st.mine.gearRar.every((n) => n > 0), st.mine.gearRar);
   const gemTot = st.mine.gemRar.slice();
   await M("setPrisBoost", 10);
-  for (let h = 0; h < 40; h++) { await M("clearBoxKeepCarry"); await M("credit", 1); const s = await M("state"); s.mine.gemRar.forEach((n, i) => { gemTot[i] += n; }); }
+  for (let h = 0; h < 40; h++) { await M("clearBoxKeepCarry"); await M("credit", 20); const s = await M("state"); s.mine.gemRar.forEach((n, i) => { gemTot[i] += n; }); }
   await M("setPrisBoost", 1);
-  rec("excavation chest holds every gem tier Chipped..Prismatic (over 40 one-hour absences)", gemTot.every((n) => n > 0), gemTot);
+  rec("excavation chest holds every gem tier Chipped..Prismatic (over 40 twenty-hour absences)", gemTot.every((n) => n > 0), gemTot);
   rec("excavation chest holds gold", st.mine.gd > 0, st.mine.gd);
   const nat5 = await M("sampleFinds", 7, false, 4000, 300, 1);
   rec("Prismatic finds roll natural stars (1..4 seen at natural luck)", Object.keys(nat5.stars).length >= 3, nat5.stars);
@@ -246,7 +240,7 @@ async function main() {
   await M("resetRate");
   const deep = await M("natural", 72);
   rec("necklace expectation is 0 above depth 101 and > 0 past it (natural rule)", shallow.nk === 0 && deep.nk > 0, { shallow: shallow.nk, deep: deep.nk });
-  const nkp = await M("addPets", 1, 3); await M("assign", nkp[0]);
+  const nkp = await M("addPets", 1, 3); await fill(nkp);
   await M("giveNk", 2);
   const opNk = await M("openChest");
   rec("a necklace in the excavation chest is granted on opening (owned or melted to gold if a duplicate)", opNk.state.nkOwn && (opNk.state.nkOwn[2] === 1 || opNk.after.gold > opNk.before.gold), opNk.note);
@@ -255,9 +249,8 @@ async function main() {
   st = await M("setup", CODE, { depth: 900, gold: 1e20 });
   await M("resetRate");
   await M("ownAllNk"); // all seven owned: the state where natural play could start rolling Eternum necklaces
-  const deepCrew = await M("addPets", 100, 7);
-  for (let i = 0; i < 99; i++) await M("buySlot");
-  for (const id of deepCrew) await M("assign", id);
+  const deepCrew = await M("addPets", 10, 7);
+  await fill(deepCrew);
   const artsBefore = (await M("state")).arts;
   let nkSeen = 0, peSeen = 0;
   const kinds = new Set();
@@ -270,27 +263,26 @@ async function main() {
   }
   const opDeep = await M("openChest");
   const after2 = await M("state");
-  rec("30 x 72 h absences at depth 900, 100 Prismatic pets, all seven owned: zero Eternum necklaces (and no owned duplicates)", peSeen === 0 && nkSeen === 0 && after2.nkOwn[7] === 0 && !after2.nkPe, { regularNecklaces: nkSeen, eternum: peSeen, nkOwnAfter: after2.nkOwn, pe: after2.nkPe });
+  rec("30 x 72 h absences at depth 900, 10 Prismatic pets, all seven owned: zero Eternum necklaces (and no owned duplicates)", peSeen === 0 && nkSeen === 0 && after2.nkOwn[7] === 0 && !after2.nkPe, { regularNecklaces: nkSeen, eternum: peSeen, nkOwnAfter: after2.nkOwn, pe: after2.nkPe });
   rec("...and zero artifacts: the chest holds only gear, pets and gems, and opening it grants no artifact", [...kinds].every((k) => k !== "artifact") && JSON.stringify(after2.arts) === JSON.stringify(artsBefore), { kinds: [...kinds], artsBefore: artsBefore.length, artsAfter: after2.arts.length, note: opDeep.note });
   st = await M("setup", null, { depth: 900, gold: 1e20 });
   await M("resetRate");
-  const freshCrew = await M("addPets", 100, 7);
-  for (let i = 0; i < 99; i++) await M("buySlot");
-  for (const id of freshCrew) await M("assign", id);
+  const freshCrew = await M("addPets", 10, 7);
+  await fill(freshCrew);
   let fresh = [];
-  for (let a = 0; a < 10; a++) { await M("clearBox"); await M("credit", 72); const s3 = await M("state"); fresh = fresh.concat(s3.mine.nk); if (s3.mine.nk.length) break; }
-  rec("with no necklaces owned the chest does find regular necklaces (distinct, never Eternum)", fresh.length > 0 && fresh.every((i) => i < 7) && new Set(fresh).size === fresh.length, fresh);
+  let nkExp = 0;
+  for (let a = 0; a < 60; a++) { await M("clearBoxKeepCarry"); const cr3 = await M("credit", 72); nkExp += cr3.natural ? cr3.natural.nk * cr3.frac : 0; const s3 = await M("state"); fresh = fresh.concat(s3.mine.nk); if (s3.mine.nk.length) break; }
+  rec("with no necklaces owned the chest does find regular necklaces (distinct, never Eternum)", fresh.length > 0 && fresh.every((i) => i < 7) && new Set(fresh).size === fresh.length, { fresh, nkExp });
   await M("giveNk", 7);
   const opPe = await M("openChest");
-  rec("an Eternum necklace placed in an old chest is dropped, never granted", (await M("state")).nkOwn[7] === 0, opPe.note);
+  rec("an Eternum necklace placed in an old chest is dropped, never granted", !((await M("state")).nkOwn || [])[7], opPe.note);
 
   // ---- opening the chest + save round-trip ----
   st = await M("setup", CODE, { gold: 1e15 });
   const rp = await M("addPets", 3, 5);
-  await M("buySlot"); await M("buySlot");
-  for (const id of rp) await M("assign", id);
+  await fill(rp);
   await M("trackSession", { secs: 600, normal: 100, elite: 10, chests: 6, floors: 1 });
-  await M("credit", 6);
+  await M("credit", 24);
   const rt = await M("roundTrip");
   rec("save round-trip keeps crew, slots, timer, carries, chest and the clear-rate tracker", rt.same && rt.stable && rt.crew2 === 3 && rt.box2 > 0 && rt.mr2 > 0, rt);
   rec("a save without the new fields still loads (old saves)", rt.oldOk && rt.oldMine === null && rt.oldMr === null, rt);
@@ -300,11 +292,10 @@ async function main() {
 
   // ---- screenshots on the live renderer ----
   st = await M("setup", CODE, { gold: 1e15, live: true });
-  const vis = await M("addPets", 9, 3);
+  const vis = await M("addPets", 7, 3);
   const vis2 = await M("addPets", 3, 7);
-  for (let i = 0; i < 11; i++) await M("buySlot");
-  for (const id of [...vis, ...vis2]) await M("assign", id);
-  await M("credit", 8);
+  await fill([...vis, ...vis2]);
+  await M("credit", 72);
   await M("heroTo", 27, 18);
   await sleep(1500);
   await page.screenshot({ path: SHOTS + "/camp-excavation.png" });
@@ -338,7 +329,7 @@ async function main() {
   const after2b = await M("state");
   const ui2 = await page.evaluate(() => !!document.querySelector('[aria-label="Pet excavation"] [data-mine-grid]'));
   rec("Take All empties the chest (items, gold, necklaces) and the grid disappears", after2b.mine.box === 0 && after2b.mine.gd === 0 && after2b.mine.nk.length === 0 && !ui2, { box: after2b.mine.box, gd: after2b.mine.gd, grid: ui2 });
-  rec("panel shows crew, share, pace, chest, slot price and hire/replace fees", /Pet Excavation/.test(panelTxt) && /Crew share/.test(panelTxt) && /Your pace/.test(panelTxt) && /dig slot/.test(panelTxt) && /(Hire|Replace) [^\n]*\u00b7/.test(panelTxt), panelTxt.slice(0, 300));
+  rec("panel shows crew (max 10), share, pace, chest, maxed slots and replace / crew-full buttons", /Pet Excavation/.test(panelTxt) && /Crew share/.test(panelTxt) && /Your pace/.test(panelTxt) && /Slots maxed/.test(panelTxt) && /max 10/.test(panelTxt) && /(Replace|Crew full)/.test(panelTxt), panelTxt.slice(0, 300));
   await M("end");
 
   rec("no page errors", errs.length === 0, errs.slice(0, 3));

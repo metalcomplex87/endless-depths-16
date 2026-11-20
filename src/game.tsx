@@ -8396,45 +8396,45 @@ function restAtCamp(g: Game): void {
 // turned into the NATURAL expected haul of playing that long at that rate: measured encounters per hour x the game's real
 // drop tables at the measured depth, with the real odds of boss copies (double / triple), boss power (x1..x3 when 5+
 // Prismatics are equipped) and overshields (depth 51+ with Prismatic gear) applied as expectations, so a long absence
-// carries its share of triple bosses etc. (creator, Nov 19 7:10 / 7:11 PM) A Prismatic pet earns exactly 1% of that
-// haul; lower rarities earn 1% x MINE_YIELD_RAR[rarity]. Crew share = 1% x (equivalent Prismatic count) with no cap:
-// 20 Prismatic = 20%, 100 Prismatic = 100%, and every pet past 20 keeps adding (slot 20 is the pricing anchor only).
+// carries its share of triple bosses etc. (creator, Nov 19 9:48 PM) A Prismatic pet earns exactly 0.5% of that haul;
+// lower rarities earn 0.5% x MINE_YIELD_RAR[rarity]. Crew share = 0.5% x (equivalent Prismatic count); at most 10 pets,
+// so a full Prismatic crew brings back 5%.
 // Pet rarity steers each pet toward its own tier; each tier is budgeted at crew share x its natural expectation, so a
 // crew's mix of rarities always matches natural play's proportions (no tier, Prismatic included, is over-represented).
 // Fractions carry over between absences, so a rare tier arrives once its natural expectation adds up to one.
 // No x1.5 no-Prismatic loot boost, and stars / sets / golden keep their natural rolls. All tuning lives in this block.
-// ---- TUNABLE PRICING BLOCK (creator, Nov 19 7:23 PM): change only the constants below ----
-// One fixed point: opening slot 100 and hiring a Prismatic pet into it costs exactly MINE_TOP_GOLD (1B) at every depth.
-// Everything else is worked back from it with one smooth geometric curve (no depth scaling):
-//   T(k)      = MINE_TOP_GOLD x MINE_GROWTH^(k - MINE_TOP_SLOT)          (k = slot number = pet number, 1-based)
-//   slot fee  = T(k) x MINE_SLOT_SHARE                                    (slot 1 free; slots are permanent unlocks)
+// ---- TUNABLE PRICING BLOCK (creator, Nov 19 9:48 PM): change only the constants below ----
+// At most MINE_MAX_SLOTS (10) pets dig. One fixed point: slot 10 + a Prismatic hire into it costs exactly MINE_TOP_GOLD (1B),
+// at every depth. Everything else is worked back from it with one steep geometric curve (no depth scaling, nothing free):
+//   T(k)      = MINE_TOP_GOLD x MINE_GROWTH^(k - MINE_TOP_SLOT)          (k = slot number = pet number, 1..10)
+//   slot fee  = T(k) x MINE_SLOT_SHARE                                    (slots are permanent unlocks, max 10)
 //   hire fee  = T(k) x (1 - MINE_SLOT_SHARE) x RAR_MULT[r] / RAR_MULT[Prismatic]   (k = pets already working + 1)
 //   swap      = a better pet replacing the weakest worker pays only the difference of the two hire fees (never < 0)
-//   recall    = free, no refund (re-hiring later pays again). First hire is free at depth <= MINE_FREE_HIRE_DEPTH.
-// No hard cap: past slot 100 prices keep growing by MINE_GROWTH per slot.
-// Reference ladder (slot fee + hire fee for pet #k, any depth):   Normal      | Prismatic
-//   #1  (slot free; hire free at depth <= 20, else)               150         | 4,450
-//   #2  (first paid slot)                                         1,430       | 6,290
-//   #5                                                            2,050       | 9,070
-//   #10                                                           3,790       | 16,740
-//   #20                                                           12,810      | 56,700
-//   #30                                                           43,630      | 192,500
-//   #50                                                           502,900     | 2,213,700
-//   #75                                                           10,680,000  | 47,100,000
-//   #100                                                          226,670,000 | 1,000,000,000
-//   #101                                                          256,130,000 | 1,130,000,000
-// Filling a crew (slots + hires): 10 / 50 / 100 all-Prismatic ~101K / 19.2M / 8.69B; even rarity mix ~42K / 8.5M / 3.56B.
-const MINE_FREE_SLOTS = 1;             // the first working slot is free
-const MINE_TOP_SLOT = 100;             // the fixed point: pet / slot #100...
+//   recall    = free, no refund (re-hiring later pays again).
+// Growth x2.5 makes T(1) = 1B / 2.5^9 = 262,144, so a lone Normal pet costs ~59K (slot 52,400 + hire 6,990): about
+// 3 minutes of income at depth 200, ~14 minutes at depth 50, a couple of hours at depth 1 - a real early-mid purchase.
+// Reference ladder (computed; any depth) for pet #k:  slot fee + Normal hire = total   | slot fee + Prismatic hire = total
+//   #1          52,400 +       6,990 =        59,390 |        52,400 +       209,700 =       262,100
+//   #2         131,100 +      17,500 =       148,600 |       131,100 +       524,300 =       655,400
+//   #3         327,700 +      43,700 =       371,400 |       327,700 +     1,310,000 =     1,637,700
+//   #4         819,200 +     109,200 =       928,400 |       819,200 +     3,280,000 =     4,099,200
+//   #5       2,050,000 +     273,100 =     2,323,100 |     2,050,000 +     8,190,000 =    10,240,000
+//   #6       5,120,000 +     682,700 =     5,802,700 |     5,120,000 +    20,480,000 =    25,600,000
+//   #7      12,800,000 +   1,710,000 =    14,510,000 |    12,800,000 +    51,200,000 =    64,000,000
+//   #8      32,000,000 +   4,270,000 =    36,270,000 |    32,000,000 +   128,000,000 =   160,000,000
+//   #9      80,000,000 +  10,670,000 =    90,670,000 |    80,000,000 +   320,000,000 =   400,000,000
+//   #10    200,000,000 +  26,670,000 =   226,670,000 |   200,000,000 +   800,000,000 = 1,000,000,000
+const MINE_FREE_SLOTS = 0;             // no free slot (older saves keep slots they already have, up to 10)
+const MINE_MAX_SLOTS = 10;             // hard cap on working pets / slots
+const MINE_TOP_SLOT = 10;              // the fixed point: pet / slot #10...
 const MINE_TOP_GOLD = 1_000_000_000;   // ...slot fee + Prismatic hire = exactly 1B, at every depth
-const MINE_GROWTH = 1.13;              // x1.13 per slot / pet (first paid Normal pet, #2, ~1.4K; #100 Prismatic 1B)
+const MINE_GROWTH = 2.5;               // x2.5 per slot / pet
 const MINE_SLOT_SHARE = 0.2;           // 20% of T(k) is the slot fee, 80% the Prismatic hire fee
 const MINE_RAR_MULT = [1, 1.5, 2.5, 4, 6.5, 10, 16, 30]; // Normal..Prismatic hire fee ratio (Prismatic = 30x a Normal pet)
-const MINE_FREE_HIRE_DEPTH = 20;       // first hire (empty crew) is free at depth 20 and above ground
 const MINE_PRICE_MIN = 100;            // floor for any paid fee
-const MINE_PER_PET_SHARE = 0.01;       // a Prismatic pet earns 1% of the natural expected haul...
+const MINE_PER_PET_SHARE = 0.005;      // a Prismatic pet earns 0.5% of the natural expected haul (10 Prismatic = 5%)...
 const MINE_YIELD_RAR = [0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.85, 1.00]; // ...a pet of rarity r earns 1% x this (Normal..Prismatic; no star bonus)
-const MINE_CREW_CAP = Infinity;        // no crew cap: 20 Prismatic = 20%, 100 Prismatic = 100%, and so on
+const MINE_CREW_CAP = Infinity;        // the crew is capped by MINE_MAX_SLOTS instead (max share 10 x 0.5% = 5%)
 const MINE_CAP_HOURS = 72;             // at most 72 h (a long weekend) credited per absence
 const MINE_AWAY_MIN_SEC = 60;          // gaps shorter than this count as still playing (no credit)
 const MINE_ROLLBACK_TOL_SEC = 300;     // clock moved back more than this: no credit, timer restarts from now
@@ -8493,7 +8493,7 @@ function mineUnpack(v: unknown): MineSt | undefined {
   if (Array.isArray(o.q)) for (let i = 0; i < 17; i++) q[i] = Math.max(0, Math.min(1, num(o.q[i], 0)));
   const nk = Array.isArray(o.nk) ? (o.nk as unknown[]).filter((x: unknown): x is number => typeof x === "number" && x >= 0 && x < NK_REG).map((x: number) => x | 0).slice(0, 16) : [];
   return {
-    p, sl: Math.max(MINE_FREE_SLOTS, p.length, Math.floor(num(o.s, MINE_FREE_SLOTS))), t: Math.max(0, num(o.t, Date.now())), q,
+    p, sl: Math.min(MINE_MAX_SLOTS, Math.max(MINE_FREE_SLOTS, p.length, Math.floor(num(o.s, MINE_FREE_SLOTS)))), t: Math.max(0, num(o.t, Date.now())), q,
     box: items(o.b).slice(0, MINE_BOX_MAX), gd: Math.max(0, Math.floor(num(o.gd, 0))), nk, h: Math.max(0, num(o.h, 0)), a: Math.max(0, num(o.a, 0)), ov: Math.max(0, Math.floor(num(o.ov, 0))), rb: Math.max(0, Math.floor(num(o.rb, 0))),
   };
 }
@@ -8635,13 +8635,11 @@ function mineHireRaw(d: number, n: number, rar: number, _stars = 0): number {
 }
 // fee to hire this pet when n pets already work (0 = first hire)
 function mineHirePrice(d: number, n: number, rar: number, stars = 0): number {
-  if (n <= 0 && d <= MINE_FREE_HIRE_DEPTH) return 0;
   return minePriceRound(safeNum(mineHireRaw(d, n, rar, stars)));
 }
 // swap: the newcomer takes the weakest worker's place in a crew of the same size; pay the difference of the two fees
 function mineSwapPrice(d: number, n: number, pet: Item, old: Item): number {
   const k = Math.max(0, n - 1);
-  if (k <= 0 && d <= MINE_FREE_HIRE_DEPTH) return 0;
   const diff = mineHireRaw(d, k, pet.rar, petStars(pet)) - mineHireRaw(d, k, old.rar, petStars(old));
   return diff <= 0 ? 0 : minePriceRound(safeNum(diff));
 }
@@ -8806,6 +8804,7 @@ function mineDismiss(g: Game, id: number): string {
 function mineBuySlot(g: Game): string {
   if (g.area !== "camp") return "The excavation is at camp.";
   const m = mineOf(g);
+  if (m.sl >= MINE_MAX_SLOTS) return "All " + MINE_MAX_SLOTS + " dig slots are open (maximum).";
   const price = mineSlotPrice(m.sl + 1, mineDepth(g));
   if (g.gold < price) return "Not enough gold. Need " + fmtg(price) + ".";
   g.gold -= price;
@@ -8841,6 +8840,22 @@ function mineTakeGold(g: Game): string {
   saveGame(g, true);
   g.notify();
   return "Took " + fmtg(gold) + ".";
+}
+// Saves from the uncapped versions: keep the best MINE_MAX_SLOTS workers, return the rest to the bag (never lost; the bag grows)
+function mineClampCrew(g: Game): number {
+  const m = g.mine;
+  if (!m) return 0;
+  m.sl = Math.min(MINE_MAX_SLOTS, m.sl);
+  if (m.p.length <= MINE_MAX_SLOTS) return 0;
+  const keep = m.p.slice().sort((a: Item, b: Item) => mineQual(b) - mineQual(a)).slice(0, MINE_MAX_SLOTS);
+  const extra = m.p.filter((it: Item) => !keep.includes(it));
+  m.p = m.p.filter((it: Item) => keep.includes(it));
+  m.sl = MINE_MAX_SLOTS;
+  if (!Array.isArray(g.bag)) g.bag = [];
+  ensureBagCapacity(g, false, g.bag.length + extra.length);
+  for (const it of extra) g.bag.push(it);
+  sortInventory(g);
+  return extra.length;
 }
 function mineHasLoot(g: Game): boolean { const m = g.mine; return !!m && (m.box.length > 0 || m.gd > 0 || m.nk.length > 0); }
 function mineOpenChest(g: Game): string {
@@ -10288,6 +10303,7 @@ function decodeCode(code: string, prev: Game | null): Game | null {
     g.actCleared = typeof s.ad === "number" && isFinite(s.ad) ? Math.max(0, Math.floor(s.ad)) : 0;
     g.bkd = cleanBkd(s.bkd);
     g.mine = mineUnpack(s.mn);
+    mineClampCrew(g);
     g.mr = mrUnpack(s.mr);
     g.front = typeof s.fr === "number" && isFinite(s.fr) ? Math.max(g.depth, Math.floor(s.fr)) : g.depth;
     g.bpm = cleanBpm(s.bpm); // before the floor is restored, so respawned bosses reuse their rolls
@@ -26403,18 +26419,18 @@ export default function App() {
                   <div className="dc-shop-hd">
                     <div>
                       <b style={{ fontSize: 14 }}>{"\u26cf Pet Excavation"}</b>
-                      <div className="dc-shop-gold">{"Crew " + m.p.length + " / " + m.sl + " slots \u00b7 Gold: " + fmtg(g.gold)}</div>
+                      <div className="dc-shop-gold">{"Crew " + m.p.length + " / " + m.sl + " slots (max " + MINE_MAX_SLOTS + ") \u00b7 Gold: " + fmtg(g.gold)}</div>
                     </div>
                     <button className="dc-leave" onClick={close} aria-label="Close excavation">{"\u2715 Close"}</button>
                   </div>
                   <div className="dc-shop-bd">
-                    <div className="dc-sm">{"Pets you put to work dig while you are away (closed game or hidden tab, up to " + MINE_CAP_HOURS + " h per absence). A Prismatic pet brings back 1% of what you would find playing that long at your own pace; lower rarities bring back less (a Normal pet 0.2%). There is no limit: 20 Prismatic pets bring back 20%, 100 bring back 100%. Rarer pets also lean toward rarer finds. Their chest sits by the cave. Hiring costs gold: more for deeper camps, rarer pets and every pet already digging. Swapping a better pet in for your weakest worker costs only the difference; recalling is free."}</div>
-                    <div className="dc-sm" style={{ marginTop: 4, color: "#ffd890" }}>{"Crew share: " + Math.round(share * 1000) / 10 + "% of your natural haul (1% per Prismatic pet, less for lower rarities, no limit)" + (m.a > 0 ? " \u00b7 last absence " + mineHrsLabel(m.a) : "")}</div>
+                    <div className="dc-sm">{"Pets you put to work dig while you are away (closed game or hidden tab, up to " + MINE_CAP_HOURS + " h per absence). Up to 10 pets can dig. A Prismatic pet brings back 0.5% of what you would find playing that long at your own pace; lower rarities bring back less (a Normal pet 0.1%). A full crew of 10 Prismatic pets brings back 5%. Rarer pets also lean toward rarer finds. Their chest sits by the cave. Hiring is a major investment: slots and hires cost more for rarer pets and every pet already digging (the 10th Prismatic costs 1 billion). Swapping a better pet in for your weakest worker costs only the difference; recalling is free."}</div>
+                    <div className="dc-sm" style={{ marginTop: 4, color: "#ffd890" }}>{"Crew share: " + Math.round(share * 1000) / 10 + "% of your natural haul (0.5% per Prismatic pet, less for lower rarities, max 10 pets)" + (m.a > 0 ? " \u00b7 last absence " + mineHrsLabel(m.a) : "")}</div>
                     <div className="dc-sm" style={{ color: "#b8a888" }}>{"Your pace: ~" + fph + " floors and ~" + kph + " kills per hour at depth " + rate.depth + (rate.sec >= 60 ? " (measured over " + mineHrsLabel(rate.sec / 3600) + " of play)" : " (default pace until you play a while)")}</div>
                     {MINE_NOTE && <div style={{ color: "#ffd080", margin: "6px 0" }}>{MINE_NOTE}</div>}
                     <div className="dc-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
                       <button className="dc-b go" style={{ ...btn, minHeight: 40 }} disabled={!has} onClick={() => do_(mineOpenChest(g))} aria-label="Take all from the excavation chest">{has ? "Take All (" + (m.box.length + m.nk.length) + " finds, " + fmtg(m.gd) + ")" : "Chest empty"}</button>
-                      <button className="dc-b" style={{ ...btn, minHeight: 40 }} disabled={g.gold < price} onClick={() => do_(mineBuySlot(g))}>{"+1 dig slot \u00b7 " + fmtg(price)}</button>
+                      {m.sl >= MINE_MAX_SLOTS ? <button className="dc-b" style={{ ...btn, minHeight: 40 }} disabled aria-label="Dig slots maxed">{"Slots maxed (" + MINE_MAX_SLOTS + "/" + MINE_MAX_SLOTS + ")"}</button> : <button className="dc-b" style={{ ...btn, minHeight: 40 }} disabled={g.gold < price} onClick={() => do_(mineBuySlot(g))}>{"+1 dig slot \u00b7 " + fmtg(price)}</button>}
                     </div>
                     <div className="dc-sm" style={{ marginTop: 8 }} data-mine-chest="1"><b>{"Excavation chest: " + m.box.length + " item" + (m.box.length === 1 ? "" : "s") + (m.nk.length ? " + " + m.nk.length + " necklace" + (m.nk.length > 1 ? "s" : "") : "") + " + " + fmtg(m.gd)}</b>{" \u00b7 tap an item to inspect and take it"}</div>
                     {m.gd > 0 && <button className="dc-b" style={{ ...btn, minHeight: 32, fontSize: 11, margin: "4px 0" }} onClick={() => do_(mineTakeGold(g))}>{"Take gold \u00b7 " + fmtg(m.gd)}</button>}
@@ -26901,7 +26917,7 @@ function mineState(g: Game | null): Record<string, unknown> {
 }
 try {
   (window as unknown as { __ED16_MINE?: object }).__ED16_MINE = {
-    consts: (): Record<string, unknown> => ({ MINE_FREE_SLOTS, MINE_TOP_SLOT, MINE_TOP_GOLD, MINE_GROWTH, MINE_SLOT_SHARE, MINE_RAR_MULT, MINE_FREE_HIRE_DEPTH, MINE_PRICE_MIN, MINE_PER_PET_SHARE, MINE_YIELD_RAR, MINE_CREW_CAP, MINE_CAP_HOURS, MINE_AWAY_MIN_SEC, MINE_ROLLBACK_TOL_SEC, MINE_BOX_MAX, MINE_TIER_DOWN, MINE_TIER_UP, MINE_RATE_TAU_H, MINE_PRIOR_SEC, MINE_FLOORS_PER_HOUR, MINE_CAVE, MINE_RACK, MINE_CHEST }),
+    consts: (): Record<string, unknown> => ({ MINE_FREE_SLOTS, MINE_TOP_SLOT, MINE_TOP_GOLD, MINE_GROWTH, MINE_SLOT_SHARE, MINE_RAR_MULT, MINE_MAX_SLOTS, MINE_PRICE_MIN, MINE_PER_PET_SHARE, MINE_YIELD_RAR, MINE_CREW_CAP, MINE_CAP_HOURS, MINE_AWAY_MIN_SEC, MINE_ROLLBACK_TOL_SEC, MINE_BOX_MAX, MINE_TIER_DOWN, MINE_TIER_UP, MINE_RATE_TAU_H, MINE_PRIOR_SEC, MINE_FLOORS_PER_HOUR, MINE_CAVE, MINE_RACK, MINE_CHEST }),
     crewFrac: (rars: number[]): number => mineCrewFrac(rars.map((r: number) => ({ rar: r } as unknown as Item))),
     // a game from a Save Code (a copy of a real save) or a fresh one; parked at camp with the given carried gold
     setup: (code?: string, opts?: { depth?: number; gold?: number; live?: boolean }): Record<string, unknown> => mineHk(() => {
@@ -26937,7 +26953,7 @@ try {
     // drive the real per-frame timer: last-seen = t0, then a frame at t1
     tick: (t0: number, t1: number): Record<string, unknown> => mineHk(() => { const g = MINE_G; if (!g) return {}; mineOf(g).t = t0; mineTick(g, t1); return mineState(g); }),
     clearBoxKeepCarry: (): void => { const m = MINE_G && MINE_G.mine; if (m) { m.box = []; m.gd = 0; m.nk = []; } },
-    clearBox: (): void => { const m = MINE_G && MINE_G.mine; if (m) { m.box = []; m.gd = 0; m.nk = []; m.q = [0, 0]; m.h = 0; m.ov = 0; } },
+    clearBox: (): void => { const m = MINE_G && MINE_G.mine; if (m) { m.box = []; m.gd = 0; m.nk = []; m.q = new Array(17).fill(0); m.h = 0; m.ov = 0; } },
     openChest: (): Record<string, unknown> => mineHk(() => { const g = MINE_G; if (!g) return {}; const before = { bag: g.bag.length + ensureGemBag(g).length, gold: g.gold }; const note = mineOpenChest(g); return { note, before, after: { bag: g.bag.length + ensureGemBag(g).length, gold: g.gold }, state: mineState(g) }; }),
     odds: (rar: number, stars = 0): number[] => { const p = makePet(100, rar, 100); if (stars) forceStars(p, stars); else delete p.st; return mineTierW(p); },
     // the budget split for a crew of the given pet tiers against a natural per-tier vector
@@ -26994,6 +27010,21 @@ try {
       return { stars, kinds, golden, set };
     },
     setPrisBoost: (k: number): void => { MINE_TEST_PRIS = k; },
+    // old-save clamp: give the current game n workers / n slots (as the uncapped versions could), save, load
+    clampTest: (n: number): Record<string, unknown> => mineHk(() => {
+      const g = MINE_G; if (!g) return {};
+      const m = mineOf(g); const d = mineDepth(g);
+      m.p = []; for (let i = 0; i < n; i++) { const pt = makePet(d, i % 8, d); delete pt.st; m.p.push(pt); }
+      m.sl = n;
+      const key = (it: Item): string => it.seed + "/" + it.rar + "/" + it.pt; const ids = m.p.map(key);
+      const bagPetsBefore = mineBagPets(g).length;
+      const g2 = decodeCode(makeCode(g), null);
+      if (!g2 || !g2.mine) return { ok: false };
+      const keptIds = g2.mine.p.map(key), bagIds = mineBagPets(g2).map(key);
+      const qOf = (id: string): number => { const it = m.p.find((x: Item) => key(x) === id); return it ? mineQual(it) : -1; };
+      const back = ids.filter((id: string) => !keptIds.includes(id));
+      return { crew: g2.mine.p.length, slots: g2.mine.sl, bagPetsBefore, bagPetsAfter: bagIds.length, returned: back.length, allKept: ids.every((id: string) => keptIds.includes(id) || bagIds.includes(id)), keptBest: Math.min(...keptIds.map(qOf)) >= Math.max(-1, ...back.map(qOf)), bagLen: g2.bag.length, bagCap: g2.bagCap ?? BAG };
+    }),
     ownAllNk: (): void => { const g = MINE_G; if (g) { const st = nkOf(g); for (let i = 0; i < NK_REG; i++) st.own[i] = Math.max(1, st.own[i] | 0); } },
     giveNk: (i: number): void => { const m = MINE_G && MINE_G.mine; if (m) m.nk.push(i); },
     roundTrip: (): Record<string, unknown> => mineHk(() => {
