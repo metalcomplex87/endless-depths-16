@@ -6187,6 +6187,7 @@ function applyHeroDmg(g: Game, dmg: number, shake: number): void {
     return;
   }
   if (dmg <= 0) return;
+  if (g.bio) dmg = bioHeroDmg(g, dmg);
   if (nkPreHurt(g, dmg)) return;
   const st = calc(g.lvl, g.eq);
   const lattice = petAbiOf(g, 7);
@@ -7083,12 +7084,17 @@ function supChestRar(): number {
 //   Swarms (shrine swarm, spider swarm): every combat-changing biome mechanic goes dormant while one is running.
 type BioSt = { k: string; f: number[]; u: number[] }; // k biome id, f feature tiles (y*MW+x), u feature tiles already used
 interface BioVariant { pre: string; ch: number; hp: number; atk: number; xp: number; fast?: boolean; col: string }
-interface BioFeat { kind: "spot" | "patch"; n: number; cap: number; size?: number; gap?: number }
+interface BioFeat { kind: "spot" | "patch"; n: number; cap: number; size?: number; gap?: number; fixed?: boolean; noLavaAdj?: boolean } // fixed: n is not scaled by map area
 interface BioLoot { note: string; gold?: number; pots?: number; goldPile?: number }
 interface BioHook {
   world?(g: Game, b: BiomeDef, st: Stats, calm: boolean): void; // every world tick (0.36 s, or each turn in turn mode)
   frame?(g: Game, b: BiomeDef, dt: number, calm: boolean): void; // every frame while playing
-  touch?(g: Game, b: BiomeDef, k: number, first: boolean): void; // hero steps on (or next to, for wells) a feature tile
+  touch?(g: Game, b: BiomeDef, k: number, first: boolean): boolean | void; // hero steps on (or next to, for wells) a feature tile; return false = not used up
+  step?(g: Game, b: BiomeDef, dx: number, dy: number, calm: boolean): void; // hero took one step (dx, dy)
+  hit?(g: Game, b: BiomeDef, e: En, dmg: number, calm: boolean): number; // hero hit an ORDINARY foe for dmg: bonus damage (capped at 50%)
+  hurt?(g: Game, b: BiomeDef, dmg: number, calm: boolean): number; // hero is about to take dmg: multiplier, clamped to [0.5, 1] (biomes only ever soften)
+  kill?(g: Game, b: BiomeDef, e: En, calm: boolean): void; // an ORDINARY foe died
+  place?(g: Game, b: BiomeDef, r: () => number, cand: number[]): number[]; // custom feature layout (cand = safe plain tiles)
   near?: number; // Chebyshev radius for touch (0 = the tile itself)
   featOver?: boolean; // draw features from over() (e.g. above a darkness layer) instead of under entities
   drawFeat?(ctx: CanvasRenderingContext2D, g: Game, b: BiomeDef, k: number, used: boolean, sx: number, sy: number, t: number, calm: boolean): void;
@@ -7106,7 +7112,9 @@ interface BiomeDef {
 }
 const BIO_MIN_DEPTH = 11, BIO_CH = 0.22; // ~22% of eligible floors, whatever the pool size
 let BIO_FORCE: string | null = null; // tests: "" = never, id = always that biome (when allowed)
-const BIO_RT = { key: "", lit: 0, hg: 0, pulse: 0, amb: 0, tick: 0 };
+// Per-floor runtime state (never saved; reset on every floor change). The deep biomes share t/ph/pt/cy (bioCycle), a zone
+// (zx, zy, zt), counters (n, cd, cd2, arm), the last step (px, py, ldx, ldy), short-lived marks (list) and per-tile cooldowns (m).
+const BIO_RT = { key: "", lit: 0, hg: 0, pulse: 0, amb: 0, tick: 0, clock: 0, t: 0, ev: 10, ph: 0, pt: 0, cy: 0, zx: 0, zy: 0, zt: 0, n: 0, cd: 0, cd2: 0, arm: 0, fl: 0, px: -1, py: -1, ldx: 1, ldy: 0, busy: false, list: [] as { x: number; y: number; t: number }[], m: new Map<number, number>() };
 const BIO_TILES = new Map<string, HTMLCanvasElement>();
 const bioGoldAmt = (d: number, k: number): number => Math.max(1, Math.round((6 + d * 4) * k));
 function bioGive(g: Game, x: number, y: number, gold: number): void { collectDrop(g, { x, y, item: null, pot: false, gold }, x, y); }
@@ -7346,7 +7354,7 @@ const BIOMES: BiomeDef[] = [
           ctx.globalAlpha = 0.9; ctx.strokeStyle = "#ffe0a0"; ctx.lineWidth = 1; ctx.strokeRect(ex + 3.5, ey + 2.5, 17, 19);
         }
         ctx.globalAlpha = 1;
-        const fr = calm ? 0 : Math.min(1, BIO_RT.hg / BIO_HG_SEC), x0 = 6, y0 = HUD + 6;
+        const fr = calm ? 0 : Math.min(1, BIO_RT.hg / BIO_HG_SEC), x0 = Math.round(VW / 2 - 7), y0 = HUD + VIEWH - 26;
         ctx.fillStyle = "rgba(20,14,4,0.7)"; ctx.fillRect(x0, y0, 14, 20);
         ctx.fillStyle = "#e0b060"; ctx.fillRect(x0 + 2, y0 + 2 + Math.round(7 * fr), 10, 7 - Math.round(7 * fr)); ctx.fillRect(x0 + 2, y0 + 18 - Math.round(7 * fr), 10, Math.round(7 * fr));
         ctx.strokeStyle = calm ? "#806040" : "#ffe0a0"; ctx.strokeRect(x0 + 0.5, y0 + 0.5, 13, 19);
@@ -7360,7 +7368,662 @@ const BIOMES: BiomeDef[] = [
     loot: { note: "Sandglasses: a gold cache + an instant Stillwave", gold: 1.2 },
     variant: { pre: "Timelost", ch: 0.18, hp: 0.8, atk: 1, xp: 1.4, fast: true, col: "#ffd070" },
   },
+  // ---------- 25 depth-unlock biomes (one joins the pool every 20 depths, 20 ... 500; same BIO_CH roll) ----------
+  { // 20: bells toll on a 14 s cycle (2 s shimmer first) and stun ordinary foes near a bell or the hero
+    id: "bells", name: "Choir of Rusted Bells", unlockDepth: 20, blurb: "every 14 s the bells toll and stun nearby foes",
+    vis: { tint: "rgba(70,40,10,0.12)", col: "#e09a50", part: ["#c47a3a", "#6e8f6a", "#e0b070"], partK: "fall", dens: 3 },
+    paint: bioPaint("blot", "vein", "rgba(150,80,30,0.32)", "rgba(110,143,106,0.4)", "rgba(60,40,20,0.22)"),
+    feat: { kind: "spot", n: 3, cap: 5, gap: 8 },
+    hook: {
+      near: 0,
+      touch: (g, b, k, first) => { if (first) { bioGive(g, k % MW, (k / MW) | 0, bioGoldAmt(g.depth, 1.05)); msg(g, "A verdigris chime drops from the bell.", b.vis.col); } },
+      frame: (g, b, dt, calm) => bioCycle(dt, 14, 2, 0.6, calm, true, () => {
+        const h = g.hero, s = g.bio; let n = 0;
+        for (const e of g.en) {
+          if (!bioOrd(e)) continue;
+          const near = Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y)) <= 3 || (s ? s.f.some((k: number) => Math.max(Math.abs(e.x - k % MW), Math.abs(e.y - ((k / MW) | 0))) <= 3) : false);
+          if (near) { e.stun = Math.max(e.stun, 2); n++; }
+        }
+        if (s) for (const k of s.f) bioRing(g, k % MW, (k / MW) | 0, "#ffd090", "#c47a3a", 3 * TS, 0.5);
+        if (n) floatTxt(g, h.x, h.y - 1, "TOLL x" + n, b.vis.col); g.sfx("sparkle");
+      }),
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "bell", sx, sy, t, used, "#c47a3a", BIO_RT.ph === 1 ? "#fff0b0" : "#6e8f6a"),
+      over: (ctx, g, b, cx, cy, t, calm) => bioTicker(ctx, "TOLL", b.vis.col, calm),
+    },
+    loot: { note: "first touch of each bell: a small chime cache (gold x1.05)", gold: 1.05 },
+    variant: { pre: "Verdigris", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#6e8f6a" },
+  },
+  { // 40: stepping on a crease folds a paper ward: 25% less damage taken for 8 s
+    id: "origami", name: "Glass Origami Vault", unlockDepth: 40, blurb: "step on creases to fold a paper ward",
+    vis: { tint: "rgba(255,246,216,0.08)", col: "#fff0c0", part: ["#fff6d8", "#c8e4ff", "#ffffff"], partK: "drift", dens: 4 },
+    paint: bioPaint("crease", "facet", "rgba(255,246,216,0.32)", "rgba(200,228,255,0.35)", "rgba(255,250,235,0.1)"),
+    feat: { kind: "spot", n: 5, cap: 7, gap: 6 },
+    hook: {
+      near: 0,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        BIO_RT.cd2 = 8; bioGive(g, k % MW, (k / MW) | 0, bioGoldAmt(g.depth, 0.5));
+        bioRing(g, k % MW, (k / MW) | 0, "#ffffff", "#c8e4ff", 2 * TS, 0.5); g.sfx("sparkle");
+        msg(g, "Paper ward folded: 25% less damage for 8 s.", b.vis.col);
+      },
+      frame: (g, b, dt) => { if (BIO_RT.cd2 > 0) BIO_RT.cd2 = Math.max(0, BIO_RT.cd2 - dt); },
+      hurt: (g, b, dmg, calm) => (BIO_RT.cd2 > 0 ? (calm ? 0.88 : 0.75) : 1),
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "crease", sx, sy, t, used, "#fff6d8", "#c8e4ff"),
+      over: (ctx, g, b, cx, cy, t) => { if (BIO_RT.cd2 > 0) bioAura(ctx, g, cx, cy, "#fff6d8", BIO_RT.cd2 / 8); },
+    },
+    loot: { note: "each crease: a few folded-glass shards (gold) + the ward", gold: 0.5 },
+    variant: { pre: "Creased", ch: 0.2, hp: 1.15, atk: 1, xp: 1.3, col: "#c8e4ff" },
+  },
+  { // 60: amber wax patches slow ordinary foes standing in them (never the hero)
+    id: "honeycomb", name: "Honeycomb Auditorium", unlockDepth: 60, blurb: "amber wax slows foes that wade in",
+    vis: { tint: "rgba(120,80,0,0.1)", col: "#e8b02a", part: ["#e8b02a", "#fff0b0"], partK: "fall", dens: 3 },
+    paint: bioPaint("hex", "hex", "rgba(232,176,42,0.35)", "rgba(255,240,176,0.3)", "rgba(80,50,0,0.18)"),
+    feat: { kind: "patch", n: 3, cap: 6, size: 8 },
+    hook: {
+      world: (g, b, st, calm) => { if (calm || !BIO_MASK) return; for (const e of g.en) if (bioOrd(e) && BIO_MASK[e.y * MW + e.x]) e.slow = Math.max(e.slow, 2); },
+      drawFeat: (ctx, g, b, k, used, sx, sy) => { ctx.fillStyle = "rgba(232,176,42,0.3)"; ctx.fillRect(sx + 1, sy + 1, TS - 2, TS - 2); ctx.strokeStyle = "rgba(255,230,140,0.55)"; ctx.strokeRect(sx + 2.5, sy + 2.5, TS - 5, TS - 5); },
+    },
+    loot: { note: "royal jelly: +1 healing potion on the floor", pots: 1 },
+    variant: { pre: "Waxen", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#e8b02a" },
+  },
+  { // 80: slain ordinary foes leave an ink blot for 6 s; stepping into fresh ink pays an inkstone (max 12 per floor)
+    id: "ink", name: "Ink-Well Archives", unlockDepth: 80, blurb: "fallen foes leave ink - step in it for inkstones",
+    vis: { tint: "rgba(10,10,30,0.12)", col: "#8aa0d0", part: ["#1a1a22", "#3a4a6a", "#d0d0e0"], partK: "fall", dens: 3 },
+    paint: bioPaint("glyph", "glyph", "rgba(20,20,40,0.4)", "rgba(220,220,235,0.25)", "rgba(10,10,20,0.25)"),
+    hook: {
+      kill: (g, b, e, calm) => { if (calm || BIO_RT.n >= 12 || BIO_RT.list.length >= 8) return; BIO_RT.list.push({ x: e.x, y: e.y, t: 6 }); },
+      frame: (g, b, dt) => { bioDecay(dt); },
+      step: (g, b) => {
+        const h = g.hero, i = BIO_RT.list.findIndex((o: BioMark) => o.x === h.x && o.y === h.y && o.t > 0);
+        if (i < 0 || BIO_RT.n >= 12) return;
+        BIO_RT.list.splice(i, 1); BIO_RT.n++;
+        bioGive(g, h.x, h.y, bioGoldAmt(g.depth, 0.35)); floatTxt(g, h.x, h.y - 0.6, "INKSTONE", b.vis.col);
+      },
+      over: (ctx, g, b, cx, cy, t) => { for (const o of BIO_RT.list) { if (!g.vis[o.y * MW + o.x]) continue; const sx = o.x * TS - cx + 12, sy = o.y * TS - cy + 12; ctx.globalAlpha = Math.min(1, o.t / 2) * 0.75; ctx.fillStyle = "#14141e"; ctx.beginPath(); ctx.ellipse(sx, sy + 4, 9, 6, 0.3, 0, 6.2832); ctx.fill(); ctx.fillStyle = "#3a4a6a"; ctx.fillRect(sx - 2, sy + 2, 3, 2); ctx.globalAlpha = 1; } },
+    },
+    loot: { note: "inkstones from fresh ink (up to 12 per floor)" },
+    variant: { pre: "Inkbound", ch: 0.2, hp: 1.15, atk: 1, xp: 1.35, col: "#8aa0d0" },
+  },
+  { // 100: every 12 s the tide pushes ordinary foes near you one tile (2 s arrows first). Never the hero.
+    id: "tidegear", name: "Tidal Gearworks", unlockDepth: 100, blurb: "every 12 s the tide shoves nearby foes",
+    vis: { tint: "rgba(30,60,40,0.1)", col: "#c8a050", part: ["#c8a050", "#4a7a58"], partK: "drift", dens: 3, wall: true },
+    paint: bioPaint("gear", "gear", "rgba(200,160,80,0.32)", "rgba(74,122,88,0.4)", "rgba(40,50,30,0.2)"),
+    bad: ["ice"],
+    hook: {
+      frame: (g, b, dt, calm) => bioCycle(dt, 12, 2, 0.5, calm, true, () => {
+        const [dx, dy] = BIO_DIRS[BIO_RT.cy % 4], h = g.hero; let n = 0;
+        for (const e of g.en) {
+          if (!bioOrd(e) || Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y)) > 6) continue;
+          const nx = e.x + dx, ny = e.y + dy;
+          if (!walkable(g, nx, ny) || (nx === h.x && ny === h.y) || g.map[ny * MW + nx] !== 1 || portalAt(g, nx, ny)) continue;
+          e.x = nx; e.y = ny; n++;
+        }
+        if (n) floatTxt(g, h.x, h.y - 1, "TIDE x" + n, b.vis.col);
+      }),
+      over: (ctx, g, b, cx, cy, t, calm) => {
+        bioTicker(ctx, "TIDE", b.vis.col, calm);
+        if (BIO_RT.ph !== 1 || calm) return;
+        const [dx, dy] = BIO_DIRS[(BIO_RT.cy + 1) % 4], h = g.hero;
+        ctx.globalAlpha = 0.5 + 0.4 * Math.sin(t * 12); ctx.fillStyle = b.vis.col;
+        for (let y = h.y - 5; y <= h.y + 5; y += 2) for (let x = h.x - 6; x <= h.x + 6; x += 3) if (inb(x, y) && g.vis[y * MW + x] && g.map[y * MW + x] === 1) bioArrow(ctx, x * TS - cx + 12, y * TS - cy + 12, dx, dy, 5);
+        ctx.globalAlpha = 1;
+      },
+    },
+    loot: { note: "brine-oil: floor gold piles x1.1", goldPile: 1.1 },
+    variant: { pre: "Brinecog", ch: 0.2, hp: 1.25, atk: 1, xp: 1.35, col: "#4a7a58" },
+  },
+  { // 120: firefly orbs: the next 3 hits within 8 s deal +40% to ordinary foes
+    id: "carnival", name: "Carnival of Still Fireflies", unlockDepth: 120, blurb: "catch a firefly orb: your next 3 hits strike harder",
+    vis: { tint: "rgba(40,10,60,0.12)", col: "#d8ff70", part: ["#d8ff70", "#f8e0ff"], partK: "drift", dens: 5 },
+    paint: bioPaint("stripe", "stripe", "rgba(120,60,160,0.22)", "rgba(216,255,112,0.4)", "rgba(60,20,80,0.2)"),
+    feat: { kind: "spot", n: 3, cap: 4, gap: 8 },
+    hook: {
+      near: 0,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        if (bioCalm(g)) return false; // stays put until the swarm is over
+        BIO_RT.n = 3; BIO_RT.cd = 8; bioGive(g, k % MW, (k / MW) | 0, bioGoldAmt(g.depth, 0.6));
+        burst(g, (k % MW) * TS + 12, ((k / MW) | 0) * TS + 12, 18, ["#d8ff70", "#ffffff"], 80, -20); g.sfx("sparkle");
+        msg(g, "Firefly spotlight: your next 3 hits strike harder.", b.vis.col);
+      },
+      frame: (g, b, dt) => { if (BIO_RT.cd > 0) { BIO_RT.cd = Math.max(0, BIO_RT.cd - dt); if (!BIO_RT.cd) BIO_RT.n = 0; } },
+      hit: (g, b, e, dmg, calm) => { if (calm || BIO_RT.n <= 0 || BIO_RT.cd <= 0) return 0; BIO_RT.n--; return dmg * 0.4; },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "orb", sx, sy, t, used, "#d8ff70", "#f8e0ff"),
+      over: (ctx, g, b, cx, cy) => { if (BIO_RT.n > 0 && BIO_RT.cd > 0) bioAura(ctx, g, cx, cy, "#d8ff70", BIO_RT.n / 3); },
+    },
+    loot: { note: "each orb: a lantern-core cache (gold x0.6) + 3 empowered hits", gold: 0.6 },
+    variant: { pre: "Lanternlit", ch: 0.2, hp: 1.15, atk: 1, xp: 1.3, col: "#d8ff70" },
+  },
+  { // 140: every 20 s an eclipse ring settles near you for 8 s (2 s warning): inside it you take 30% less damage
+    id: "orrery", name: "Bone-Marble Orrery", unlockDepth: 140, blurb: "stand in the eclipse ring to take less damage",
+    vis: { tint: "rgba(40,40,70,0.1)", col: "#e8f0ff", part: ["#d8c8a8", "#e8f0ff"], partK: "drift", dens: 3 },
+    paint: bioPaint("vein", "vein", "rgba(216,200,168,0.35)", "rgba(232,240,255,0.3)", "rgba(230,220,200,0.12)"),
+    hook: {
+      frame: (g, b, dt, calm) => bioCycle(dt, 20, 2, 8, calm, true, undefined, () => bioZonePick(g, 4)),
+      hurt: (g, b, dmg, calm) => (!calm && BIO_RT.ph === 2 && Math.hypot(g.hero.x - BIO_RT.zx, g.hero.y - BIO_RT.zy) <= 3 ? 0.7 : 1),
+      over: (ctx, g, b, cx, cy, t, calm) => { bioTicker(ctx, "ECLIPSE", b.vis.col, calm); if (!calm && BIO_RT.ph > 0) bioZoneDraw(ctx, cx, cy, 3, "#e8f0ff", "rgba(60,60,110,0.22)", t, true); },
+    },
+    loot: { note: "moon-ivory: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Ivory", ch: 0.2, hp: 1.25, atk: 1, xp: 1.35, col: "#d8c8a8" },
+  },
+  { // 160: quilted patches snag ordinary foes (pinned 3 turns); each patch tile frays after one snag
+    id: "quilt", name: "Quilted Catacomb", unlockDepth: 160, blurb: "loose threads snag foes that cross the quilts",
+    vis: { tint: "rgba(80,30,40,0.08)", col: "#f0d0d8", part: ["#f0d0d8", "#d0e0a8"], partK: "drift", dens: 3 },
+    paint: bioPaint("patch", "patch", "rgba(200,80,110,0.28)", "rgba(140,200,110,0.28)", "rgba(80,40,50,0.15)"),
+    bad: ["ice"],
+    feat: { kind: "patch", n: 3, cap: 6, size: 6 },
+    hook: {
+      world: (g, b, st, calm) => {
+        const s = g.bio; if (calm || !BIO_MASK || !s) return;
+        for (const e of g.en) { const k = e.y * MW + e.x; if (!bioOrd(e) || !BIO_MASK[k] || s.u.includes(k)) continue; e.stun = Math.max(e.stun, 3); bioUse(g, k); floatTxt(g, e.x, e.y - 0.6, "SNAGGED", b.vis.col); }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy) => { ctx.fillStyle = used ? "rgba(120,100,100,0.18)" : ((k * 7) % 3 === 0 ? "rgba(220,90,120,0.3)" : (k * 7) % 3 === 1 ? "rgba(150,210,110,0.3)" : "rgba(240,200,90,0.3)"); ctx.fillRect(sx + 1, sy + 1, TS - 2, TS - 2); if (!used) { ctx.strokeStyle = "rgba(255,240,240,0.6)"; ctx.setLineDash([2, 2]); ctx.strokeRect(sx + 2.5, sy + 2.5, TS - 5, TS - 5); ctx.setLineDash([]); } },
+    },
+    loot: { note: "golden needles: floor gold piles x1.1", goldPile: 1.1 },
+    variant: { pre: "Patchwork", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#f0d0d8" },
+  },
+  { // 180: step next to a balloon to pop it: ordinary foes within 3 tiles are knocked 2 tiles away
+    id: "balloon", name: "Silent Balloon Atelier", unlockDepth: 180, blurb: "pop balloons to blow foes back",
+    vis: { tint: "rgba(255,200,230,0.07)", col: "#ffd0e8", part: ["#ffd0e8", "#c0e8ff"], partK: "rise", dens: 3 },
+    paint: bioPaint("dots", "dots", "rgba(255,190,220,0.35)", "rgba(180,220,255,0.35)", "rgba(255,220,240,0.1)"),
+    feat: { kind: "spot", n: 3, cap: 5, gap: 7 },
+    hook: {
+      near: 1,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        if (bioCalm(g)) return false;
+        const x = k % MW, y = (k / MW) | 0; let n = 0;
+        for (const e of g.en) if (bioOrd(e) && Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 3 && pushEn(g, e, x, y, 2) > 0) n++;
+        bioRing(g, x, y, "#ffffff", "#ffd0e8", 3 * TS, 0.45); burst(g, x * TS + 12, y * TS + 12, 20, ["#ffd0e8", "#c0e8ff", "#ffffff"], 110, 0); g.sfx("hit");
+        bioGive(g, x, y, bioGoldAmt(g.depth, 0.5)); floatTxt(g, x, y - 0.8, "POP" + (n ? " x" + n : ""), b.vis.col);
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "balloon", sx, sy, t, used, (k % 2) ? "#ffb0d8" : "#a8dcff", "#ffffff"),
+    },
+    loot: { note: "each balloon: a buoyant-core cache (gold x0.5)", gold: 0.5 },
+    variant: { pre: "Buoyant", ch: 0.2, hp: 1.1, atk: 1, xp: 1.3, col: "#c0e8ff" },
+  },
+  { // 200: linger 2 s beside a trophy and it roars: ordinary foes within 4 tiles flee for a few turns
+    id: "taxidermy", name: "Chromatic Taxidermy Hall", unlockDepth: 200, blurb: "linger by a trophy and it roars foes away",
+    vis: { tint: "rgba(60,20,10,0.1)", col: "#80d8ff", part: ["#e8c8b0", "#80d8ff"], partK: "drift", dens: 2, wall: true },
+    paint: bioPaint("plank", "plank", "rgba(110,60,30,0.3)", "rgba(232,200,176,0.3)", "rgba(70,35,15,0.22)"),
+    feat: { kind: "spot", n: 3, cap: 5, gap: 8 },
+    hook: {
+      frame: (g, b, dt, calm) => {
+        const s = g.bio; if (!s || calm) { BIO_RT.pt = 0; return; }
+        const h = g.hero, k = s.f.find((q: number) => !s.u.includes(q) && Math.max(Math.abs((q % MW) - h.x), Math.abs(((q / MW) | 0) - h.y)) <= 1);
+        if (k === undefined) { BIO_RT.pt = 0; BIO_RT.zt = -1; return; }
+        BIO_RT.zt = k; BIO_RT.pt += dt; if (BIO_RT.pt < 2) return;
+        BIO_RT.pt = 0; bioUse(g, k); const x = k % MW, y = (k / MW) | 0; let n = 0;
+        for (const e of g.en) if (bioOrd(e) && Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 4) { e.fear = Math.max(e.fear, 4); n++; }
+        bioRing(g, x, y, "#ffffff", "#80d8ff", 4 * TS, 0.6); bioGive(g, x, y, bioGoldAmt(g.depth, 1.2)); g.sfx("crit");
+        floatTxt(g, x, y - 0.8, "ROAR" + (n ? " x" + n : ""), b.vis.col);
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "trophy", sx, sy, t, used, "#e8c8b0", BIO_RT.zt === k ? "#ffffff" : "#80d8ff", BIO_RT.zt === k ? BIO_RT.pt / 2 : 0),
+    },
+    loot: { note: "each roaring trophy: a plaque cache (gold x1.2)", gold: 1.2 },
+    variant: { pre: "Glass-eyed", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#80d8ff" },
+  },
+  { // 220: walk the four numbered notes in order (1-2-3-4) for one bonus cache
+    id: "organum", name: "Halite Organum", unlockDepth: 220, blurb: "walk the notes 1-2-3-4 to open a cache",
+    vis: { tint: "rgba(255,230,210,0.07)", col: "#ffe8d0", part: ["#ffe8d0", "#e0fff8"], partK: "rise", dens: 3, wall: true },
+    paint: bioPaint("salt", "lift", "rgba(255,232,208,0.35)", "rgba(224,255,248,0.35)", "rgba(255,240,225,0.12)"),
+    feat: { kind: "spot", n: 4, cap: 4, gap: 4, fixed: true },
+    hook: {
+      near: 0,
+      touch: (g, b, k) => {
+        const s = g.bio!; if (s.u.length >= s.f.length) return; // already solved
+        if (bioCalm(g)) return false;
+        const i = s.f.indexOf(k);
+        if (i === BIO_RT.n) { BIO_RT.n++; floatTxt(g, k % MW, ((k / MW) | 0) - 0.6, "NOTE " + BIO_RT.n, b.vis.col); g.sfx("sparkle"); }
+        else { BIO_RT.n = i === 0 ? 1 : 0; floatTxt(g, k % MW, ((k / MW) | 0) - 0.6, i === 0 ? "NOTE 1" : "OUT OF TUNE", i === 0 ? b.vis.col : "#ff9090"); }
+        if (BIO_RT.n >= s.f.length) {
+          const x = k % MW, y = (k / MW) | 0;
+          bioGive(g, x, y, bioGoldAmt(g.depth, 2.5)); g.drops.push({ x, y, item: null, pot: true, gold: 0 });
+          for (const q of s.f) if (q !== k) bioUse(g, q);
+          bioRing(g, x, y, "#ffffff", "#e0fff8", 4 * TS, 0.8); msg(g, "The organ sings! A harmonic cache opens.", b.vis.col);
+          return; // k itself stays used
+        }
+        return false;
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "note", sx, sy, t, used || (g.bio ? g.bio.f.indexOf(k) < BIO_RT.n : false), "#ffe8d0", "#a0e0d0", 0, String((g.bio ? g.bio.f.indexOf(k) : 0) + 1)),
+    },
+    loot: { note: "the solved phrase: a big cache (gold x2.5) + a potion", gold: 2.5 },
+    variant: { pre: "Saltborn", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#ffe8d0" },
+  },
+  { // 240: every 15 s a 3x3 root-shade drips down near you for 8 s: you heal inside; ordinary foes in it are rooted
+    id: "greenhouse", name: "Inverted Greenhouse", unlockDepth: 240, blurb: "rest under the root-shade to heal",
+    vis: { tint: "rgba(120,200,255,0.07)", col: "#b8ffd0", part: ["#b8ffd0", "#e8fff0"], partK: "rise", dens: 4 },
+    paint: bioPaint("leaf", "leaf", "rgba(120,220,150,0.32)", "rgba(180,230,255,0.3)", "rgba(40,90,60,0.18)"),
+    hook: {
+      frame: (g, b, dt, calm) => bioCycle(dt, 15, 2, 8, calm, false, () => {
+        if (calm) return;
+        for (const e of g.en) if (bioOrd(e) && Math.max(Math.abs(e.x - BIO_RT.zx), Math.abs(e.y - BIO_RT.zy)) <= 1) e.stun = Math.max(e.stun, 3);
+      }, () => bioZonePick(g, 2)),
+      world: (g, b, st) => {
+        const h = g.hero; if (BIO_RT.ph !== 2 || h.hp <= 0 || h.hp >= st.maxHp || Math.max(Math.abs(h.x - BIO_RT.zx), Math.abs(h.y - BIO_RT.zy)) > 1) return;
+        const n = Math.max(1, Math.round(st.maxHp * 0.01)); h.hp = Math.min(st.maxHp, h.hp + n);
+        if (BIO_RT.tick % 3 === 0) floatTxt(g, h.x, h.y - 0.6, "+" + n, b.vis.col);
+      },
+      over: (ctx, g, b, cx, cy, t, calm) => { bioTicker(ctx, "SHADE", b.vis.col, false); if (BIO_RT.ph > 0) bioZoneDraw(ctx, cx, cy, 1, "#b8ffd0", "rgba(60,160,90,0.22)", t, false); },
+    },
+    loot: { note: "sky-soil: floor gold piles x1.1", goldPile: 1.1 },
+    variant: { pre: "Rootdrawn", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#b8ffd0" },
+  },
+  { // 260: step on a sigil to raise a 5 s decoy that nearby ordinary foes chase (8 s cooldown, one at a time)
+    id: "mercury", name: "Mercury Scriptoria", unlockDepth: 260, blurb: "step on a sigil to raise a decoy foes chase",
+    vis: { tint: "rgba(200,210,220,0.07)", col: "#d0d4d8", part: ["#d0d4d8", "#f0f4f8"], partK: "drift", dens: 3, wall: true },
+    paint: bioPaint("glyph", "glyph", "rgba(208,212,216,0.4)", "rgba(160,170,190,0.3)", "rgba(200,205,215,0.1)"),
+    feat: { kind: "spot", n: 3, cap: 5, gap: 7 },
+    hook: {
+      near: 0,
+      touch: (g, b, k) => {
+        if (bioCalm(g) || BIO_RT.cd > 0 || BIO_RT.zt > 0) return false;
+        BIO_RT.zx = k % MW; BIO_RT.zy = (k / MW) | 0; BIO_RT.zt = 5; BIO_RT.cd = 8;
+        bioRing(g, BIO_RT.zx, BIO_RT.zy, "#ffffff", "#d0d4d8", 2 * TS, 0.5); g.sfx("sparkle"); floatTxt(g, BIO_RT.zx, BIO_RT.zy - 0.8, "DECOY", b.vis.col);
+        return false; // sigils are reusable
+      },
+      frame: (g, b, dt) => { if (BIO_RT.cd > 0) BIO_RT.cd = Math.max(0, BIO_RT.cd - dt); if (BIO_RT.zt > 0) BIO_RT.zt = Math.max(0, BIO_RT.zt - dt); },
+      world: (g, b, st, calm) => {
+        if (calm || BIO_RT.zt <= 0) return;
+        for (const e of g.en) { if (!bioOrd(e) || Math.max(Math.abs(e.x - BIO_RT.zx), Math.abs(e.y - BIO_RT.zy)) > 6) continue; if (Math.abs(e.x - BIO_RT.zx) + Math.abs(e.y - BIO_RT.zy) > 1) stepToward(g, e, BIO_RT.zx, BIO_RT.zy); e.stun = Math.max(e.stun, 1); }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "sigil", sx, sy, t, BIO_RT.cd > 0, "#d0d4d8", "#ffffff"),
+      over: (ctx, g, b, cx, cy, t) => { if (BIO_RT.zt > 0) { const sx = BIO_RT.zx * TS - cx, sy = BIO_RT.zy * TS - cy; ctx.globalAlpha = 0.45 + 0.25 * Math.sin(t * 8); ctx.fillStyle = "#e8eef4"; ctx.fillRect(sx + 7, sy + 3, 10, 18); ctx.fillStyle = "#a0a8b8"; ctx.fillRect(sx + 9, sy + 6, 6, 4); ctx.globalAlpha = 1; } },
+    },
+    loot: { note: "quicksilver: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Quicksilver", ch: 0.2, hp: 1.1, atk: 1, xp: 1.35, col: "#d0d4d8" },
+  },
+  { // 280: every 15 s one side turns bright for 4 s (2 s spinning gem first): hits on foes on that side deal +25%
+    id: "kaleido", name: "Kaleidohall of Cleaverlight", unlockDepth: 280, blurb: "strike from the bright side for bonus damage",
+    vis: { tint: "rgba(80,20,40,0.08)", col: "#ffd060", part: ["#ff6a7a", "#60e0c0", "#ffd060"], partK: "drift", dens: 4 },
+    paint: bioPaint("facet", "facet", "rgba(255,106,122,0.25)", "rgba(96,224,192,0.25)", "rgba(80,30,50,0.15)"),
+    hook: {
+      frame: (g, b, dt, calm) => bioCycle(dt, 15, 2, 4, calm, true),
+      hit: (g, b, e, dmg, calm) => { if (calm || BIO_RT.ph !== 2) return 0; const [dx, dy] = BIO_DIRS[BIO_RT.cy % 4]; return (e.x - g.hero.x) * dx + (e.y - g.hero.y) * dy > 0 ? dmg * 0.25 : 0; },
+      over: (ctx, g, b, cx, cy, t, calm) => {
+        bioTicker(ctx, "BRIGHT", b.vis.col, calm);
+        if (calm || BIO_RT.ph !== 2) return;
+        const [dx, dy] = BIO_DIRS[BIO_RT.cy % 4], W = 18;
+        ctx.globalAlpha = 0.28; ctx.fillStyle = "#fff0b0";
+        if (dx > 0) ctx.fillRect(VW - W, HUD, W, VIEWH); else if (dx < 0) ctx.fillRect(0, HUD, W, VIEWH); else if (dy > 0) ctx.fillRect(0, HUD + VIEWH - W, VW, W); else ctx.fillRect(0, HUD, VW, W);
+        ctx.globalAlpha = 1;
+      },
+    },
+    loot: { note: "stained-glass offcuts: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Faceted", ch: 0.2, hp: 1.15, atk: 1, xp: 1.35, col: "#60e0c0" },
+  },
+  { // 300: every 10 s (2 s feather warning) your next step bounds 2 tiles instead of 1 (aborts before danger)
+    id: "levity", name: "The Levity Stalls", unlockDepth: 300, blurb: "every 10 s your next step becomes a bound",
+    vis: { tint: "rgba(60,40,90,0.08)", col: "#c8b8ff", part: ["#c8b8ff", "#ffffff"], partK: "rise", dens: 4 },
+    paint: bioPaint("lift", "plank", "rgba(200,184,255,0.3)", "rgba(255,255,255,0.2)", "rgba(60,40,90,0.15)"),
+    bad: ["ice"],
+    hook: {
+      frame: (g, b, dt, calm) => {
+        if (BIO_RT.arm > 0) { BIO_RT.arm = Math.max(0, BIO_RT.arm - dt); return; }
+        bioCycle(dt, 10, 2, 0.01, calm, true, () => { if (!calm) { BIO_RT.arm = 4; floatTxt(g, g.hero.x, g.hero.y - 1, "LIGHT!", b.vis.col); } });
+      },
+      step: (g, b, dx, dy, calm) => { if (BIO_RT.arm <= 0 || calm) return; BIO_RT.arm = 0; if (bioHop(g, dx, dy, 1)) burst(g, g.hero.x * TS + 12, g.hero.y * TS + 16, 8, ["#c8b8ff", "#ffffff"], 50, -30); },
+      over: (ctx, g, b, cx, cy, t, calm) => { bioTicker(ctx, "BOUND", b.vis.col, calm); if (BIO_RT.arm > 0) bioAura(ctx, g, cx, cy, "#c8b8ff", 1); },
+    },
+    loot: { note: "choir medals: floor gold piles x1.1", goldPile: 1.1 },
+    variant: { pre: "Weightless", ch: 0.15, hp: 0.85, atk: 1, xp: 1.4, fast: true, col: "#c8b8ff" },
+  },
+  { // 320: one serving cart rolls along a counter; meeting it spills broth (heal 8%) or grease (slows foes near it)
+    id: "banquet", name: "Porcelain Banquet Kitchen", unlockDepth: 320, blurb: "meet the serving cart for broth or grease",
+    vis: { tint: "rgba(240,230,210,0.07)", col: "#f4efe6", part: ["#f4efe6", "#d8c8a0"], partK: "rise", dens: 3, wall: true },
+    paint: bioPaint("crack", "crack", "rgba(120,110,90,0.35)", "rgba(244,239,230,0.3)", "rgba(244,239,230,0.1)"),
+    feat: { kind: "spot", n: 1, cap: 1, fixed: true },
+    hook: {
+      place: (g, b, r, cand) => bioTrack(g, r, cand),
+      frame: (g, b, dt, calm) => { if (!calm) BIO_RT.t += dt; if (BIO_RT.cd > 0) BIO_RT.cd = Math.max(0, BIO_RT.cd - dt); },
+      world: (g, b, st, calm) => {
+        const s = g.bio; if (calm || !s || !s.f.length || BIO_RT.cd > 0) return;
+        const k = bioCartTile(s.f), h = g.hero; if (h.y * MW + h.x !== k) return;
+        BIO_RT.cd = 10; BIO_RT.n++;
+        if (BIO_RT.n % 2 === 1) { const n = Math.max(1, Math.round(st.maxHp * 0.08)); h.hp = Math.min(st.maxHp, h.hp + n); floatTxt(g, h.x, h.y - 0.8, "BROTH +" + n, "#f4d890"); }
+        else { let n = 0; for (const e of g.en) if (bioOrd(e) && Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y)) <= 2) { e.slow = Math.max(e.slow, 4); n++; } floatTxt(g, h.x, h.y - 0.8, "GREASE" + (n ? " x" + n : ""), "#d8c8a0"); }
+        g.sfx("chest");
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy) => { ctx.fillStyle = "rgba(216,200,160,0.25)"; ctx.fillRect(sx, sy + 9, TS, 6); ctx.fillStyle = "rgba(120,100,70,0.4)"; ctx.fillRect(sx, sy + 9, TS, 1); ctx.fillRect(sx, sy + 14, TS, 1); },
+      over: (ctx, g, b, cx, cy, t, calm) => {
+        const s = g.bio; if (!s || !s.f.length) return; const k = bioCartTile(s.f); if (!g.seen[k]) return;
+        const sx = (k % MW) * TS - cx, sy = ((k / MW) | 0) * TS - cy;
+        ctx.fillStyle = "#f4efe6"; ctx.fillRect(sx + 3, sy + 6, 18, 11); ctx.fillStyle = "#c8b890"; ctx.fillRect(sx + 3, sy + 6, 18, 2);
+        ctx.fillStyle = "#806040"; ctx.fillRect(sx + 5, sy + 17, 3, 3); ctx.fillRect(sx + 16, sy + 17, 3, 3);
+        ctx.fillStyle = "#e0b040"; ctx.beginPath(); ctx.arc(sx + 12, sy + 6, 4, Math.PI, 0); ctx.fill();
+        if (!calm && BIO_RT.cd <= 0) { ctx.globalAlpha = 0.4 + 0.3 * Math.sin(t * 4); ctx.strokeStyle = "#fff0c0"; ctx.strokeRect(sx + 1.5, sy + 4.5, 21, 16); ctx.globalAlpha = 1; }
+      },
+    },
+    loot: { note: "soup-stones: floor gold piles x1.12", goldPile: 1.12 },
+    variant: { pre: "Glazed", ch: 0.2, hp: 1.25, atk: 1, xp: 1.3, col: "#f4efe6" },
+  },
+  { // 340: your last 6 steps linger as echoes; stepping back onto one readies your next attack at once (1.5 s cd)
+    id: "echo", name: "Echo-Museum of Lost Footsteps", unlockDepth: 340, blurb: "step on your own echoes to ready your next attack",
+    vis: { tint: "rgba(20,60,60,0.08)", col: "#80c0c8", part: ["#d8c4a0", "#80c0c8"], partK: "drift", dens: 3 },
+    paint: bioPaint("foot", "plank", "rgba(216,196,160,0.3)", "rgba(128,192,200,0.3)", "rgba(30,60,60,0.15)"),
+    hook: {
+      frame: (g, b, dt) => { if (BIO_RT.cd > 0) BIO_RT.cd = Math.max(0, BIO_RT.cd - dt); bioDecay(dt); },
+      step: (g, b, dx, dy, calm) => {
+        const h = g.hero, L = BIO_RT.list, i = L.findIndex((o: BioMark) => o.x === h.x && o.y === h.y);
+        if (i >= 0) { L.splice(i, 1); if (!calm && BIO_RT.cd <= 0) { BIO_RT.cd = 1.5; g.acd = 0; floatTxt(g, h.x, h.y - 0.6, "ECHO", b.vis.col); } }
+        const px = h.x - dx, py = h.y - dy; if (!hzAt(g, px, py)) L.push({ x: px, y: py, t: 8 });
+        while (L.length > 6) L.shift();
+      },
+      over: (ctx, g, b, cx, cy) => { for (const o of BIO_RT.list) { const sx = o.x * TS - cx, sy = o.y * TS - cy; ctx.globalAlpha = Math.min(1, o.t / 3) * 0.55; ctx.fillStyle = "#80c0c8"; ctx.fillRect(sx + 7, sy + 8, 4, 7); ctx.fillRect(sx + 13, sy + 11, 4, 7); ctx.globalAlpha = 1; } },
+    },
+    loot: { note: "plaster casts: floor gold piles x1.1", goldPile: 1.1 },
+    variant: { pre: "Echoing", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#80c0c8" },
+  },
+  { // 360: step on a spiked cactus: a small self-bleed, and needles fly 4 ways hitting the first ordinary foe each way
+    id: "cactus", name: "Coil-Cactus Coliseum", unlockDepth: 360, blurb: "step on a cactus to spray needles (it stings)",
+    vis: { tint: "rgba(90,20,60,0.09)", col: "#e8a0c0", part: ["#e8a0c0", "#70c060"], partK: "drift", dens: 3 },
+    paint: bioPaint("spiral", "spiral", "rgba(232,160,192,0.3)", "rgba(112,192,96,0.35)", "rgba(80,30,50,0.15)"),
+    feat: { kind: "spot", n: 3, cap: 5, gap: 7, noLavaAdj: true },
+    hook: {
+      near: 0,
+      touch: (g, b, k, first) => {
+        if (!first) return;
+        if (bioCalm(g)) return false;
+        const x = k % MW, y = (k / MW) | 0, h = g.hero, st = calc(g.lvl, g.eq);
+        h.hp = Math.max(1, h.hp - Math.max(1, Math.round(st.maxHp * 0.03)));
+        let n = 0;
+        for (const [dx, dy] of BIO_DIRS) for (let i = 1; i <= 4; i++) {
+          const tx = x + dx * i, ty = y + dy * i; if (!inb(tx, ty) || g.map[ty * MW + tx] === 0) break;
+          const e = enemyAt(g, tx, ty); if (!e) continue;
+          if (bioOrd(e)) { withHit({ ox: x, oy: y }, () => { hurtEn(g, e, Math.max(1, Math.round(e.mhp * 0.2)), { n: "Cactus Needles", t: "", c: "#70c060" }); if (e.hp <= 0) kill(g, e); }); n++; }
+          break;
+        }
+        burst(g, x * TS + 12, y * TS + 12, 16, ["#70c060", "#e8a0c0"], 120, 0); g.sfx("hit");
+        floatTxt(g, x, y - 0.8, "NEEDLES" + (n ? " x" + n : ""), b.vis.col);
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "cactus", sx, sy, t, used, "#70c060", "#e8a0c0"),
+    },
+    loot: { note: "cactus pearls: floor gold piles x1.12", goldPile: 1.12 },
+    variant: { pre: "Needled", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#70c060" },
+  },
+  { // 380: stand 2 s on a sun plate: for 6 s ordinary foes within 5 tiles burn 2%/tick (30 s cooldown)
+    id: "buriedsun", name: "The Buried-Sun Stacks", unlockDepth: 380, blurb: "stand on a sun plate to unbury the dawn",
+    vis: { tint: "rgba(60,30,0,0.12)", col: "#ffb040", part: ["#ffb040", "#ffe8a0"], partK: "rise", dens: 3 },
+    paint: bioPaint("ember", "plank", "rgba(255,176,64,0.3)", "rgba(255,232,160,0.35)", "rgba(30,20,10,0.25)"),
+    feat: { kind: "spot", n: 1, cap: 2, gap: 12 },
+    hook: {
+      frame: (g, b, dt, calm) => {
+        if (BIO_RT.cd > 0) BIO_RT.cd = Math.max(0, BIO_RT.cd - dt);
+        if (BIO_RT.zt > 0) BIO_RT.zt = Math.max(0, BIO_RT.zt - dt);
+        bioMaskSync(g);
+        const h = g.hero; if (calm || BIO_RT.cd > 0 || !BIO_MASK || !BIO_MASK[h.y * MW + h.x]) { BIO_RT.pt = 0; return; }
+        BIO_RT.pt += dt; if (BIO_RT.pt < 2) return;
+        BIO_RT.pt = 0; BIO_RT.cd = 30; BIO_RT.zt = 6; BIO_RT.zx = h.x; BIO_RT.zy = h.y;
+        bioRing(g, h.x, h.y, "#ffffff", "#ffb040", 5 * TS, 0.8); g.sfx("crit"); msg(g, "The buried sun rises!", b.vis.col);
+      },
+      world: (g, b, st, calm) => {
+        if (calm || BIO_RT.zt <= 0) return;
+        for (const e of g.en.slice()) { if (!bioOrd(e) || Math.hypot(e.x - BIO_RT.zx, e.y - BIO_RT.zy) > 5) continue; withHit({ ox: BIO_RT.zx, oy: BIO_RT.zy }, () => { hurtEn(g, e, Math.max(1, Math.round(e.mhp * 0.02)), { n: "Buried Sun", t: "", c: "#ffb040" }); if (e.hp <= 0) kill(g, e); }); }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "plate", sx, sy, t, BIO_RT.cd > 0, "#ffb040", "#ffe8a0", BIO_RT.pt / 2),
+      over: (ctx, g, b, cx, cy, t) => { if (BIO_RT.zt > 0) { ctx.globalAlpha = 0.16 * Math.min(1, BIO_RT.zt); ctx.fillStyle = "#ffc050"; ctx.beginPath(); ctx.arc(BIO_RT.zx * TS + 12 - cx, BIO_RT.zy * TS + 12 - cy, 5 * TS, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; } },
+    },
+    loot: { note: "bottled dawn: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Dawnburnt", ch: 0.2, hp: 1.2, atk: 1, xp: 1.35, col: "#ffb040" },
+  },
+  { // 400: board the marked car: after a 3 s chime the doors slam, shoving ordinary foes out (crate the first time)
+    id: "trainyard", name: "Clockless Trainyard", unlockDepth: 400, blurb: "board the car - the doors slam foes away",
+    vis: { tint: "rgba(80,40,0,0.12)", col: "#ffb020", part: ["#ffb020", "#302010"], partK: "drift", dens: 2, wall: true },
+    paint: bioPaint("rail", "plank", "rgba(255,176,32,0.25)", "rgba(80,60,40,0.4)", "rgba(40,25,10,0.22)"),
+    feat: { kind: "patch", n: 1, cap: 1, size: 8, fixed: true },
+    hook: {
+      frame: (g, b, dt, calm) => {
+        if (BIO_RT.cd > 0) BIO_RT.cd = Math.max(0, BIO_RT.cd - dt);
+        bioMaskSync(g);
+        const s = g.bio, h = g.hero; if (calm || !s || BIO_RT.cd > 0 || !BIO_MASK || !BIO_MASK[h.y * MW + h.x]) { BIO_RT.pt = 0; return; }
+        BIO_RT.pt += dt; if (BIO_RT.pt < 3) return;
+        BIO_RT.pt = 0; BIO_RT.cd = 12; let n = 0;
+        for (const e of g.en) { if (!bioOrd(e)) continue; const k = e.y * MW + e.x; let nearCar = !!BIO_MASK[k]; for (let dy = -1; dy <= 1 && !nearCar; dy++) for (let dx = -1; dx <= 1 && !nearCar; dx++) if (inb(e.x + dx, e.y + dy) && BIO_MASK[(e.y + dy) * MW + e.x + dx]) nearCar = true; if (nearCar && Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y)) <= 4) { pushEn(g, e, h.x, h.y, 2); e.stun = Math.max(e.stun, 2); n++; } }
+        bioRing(g, h.x, h.y, "#ffe0a0", "#ffb020", 3 * TS, 0.5); g.sfx("hit"); floatTxt(g, h.x, h.y - 1, "DOORS" + (n ? " x" + n : ""), b.vis.col);
+        if (!s.u.length) { bioUse(g, s.f[0]); bioGive(g, h.x, h.y, bioGoldAmt(g.depth, 1.5)); msg(g, "A crate of punch-tickets and coupler relics!", b.vis.col); }
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy) => { ctx.fillStyle = "rgba(60,50,40,0.45)"; ctx.fillRect(sx, sy, TS, TS); ctx.fillStyle = "rgba(255,176,32,0.35)"; ctx.fillRect(sx + 2, sy + 2, TS - 4, 2); ctx.fillRect(sx + 2, sy + TS - 4, TS - 4, 2); },
+      over: (ctx, g, b, cx, cy, t, calm) => { if (BIO_RT.pt > 0) bioAura(ctx, g, cx, cy, "#ffb020", BIO_RT.pt / 3); },
+    },
+    loot: { note: "the first slam: a crate (gold x1.5)", gold: 1.5 },
+    variant: { pre: "Coupled", ch: 0.2, hp: 1.25, atk: 1, xp: 1.3, col: "#ffb020" },
+  },
+  { // 420: bubble columns hop you 2 tiles onward (may cross water, never into lava/walls/stairs); 6 s cooldown each
+    id: "skycellar", name: "Fermented Sky-Cellar", unlockDepth: 420, blurb: "bubble columns hop you onward",
+    vis: { tint: "rgba(60,10,60,0.12)", col: "#e8c060", part: ["#6a2060", "#e8c060"], partK: "rise", dens: 4 },
+    paint: bioPaint("bubble", "plank", "rgba(232,192,96,0.3)", "rgba(160,60,150,0.35)", "rgba(40,10,40,0.2)"),
+    feat: { kind: "spot", n: 2, cap: 2, gap: 10 },
+    hook: {
+      near: 0,
+      touch: (g, b, k) => {
+        const now = BIO_RT.clock, ready = BIO_RT.m.get(k) ?? 0; if (now < ready) return false;
+        if (bioHop(g, BIO_RT.ldx, BIO_RT.ldy, 2)) { BIO_RT.m.set(k, now + (bioCalm(g) ? 12 : 6)); burst(g, g.hero.x * TS + 12, g.hero.y * TS + 12, 12, ["#e8c060", "#a04090"], 70, -40); g.sfx("skate"); }
+        return false;
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => bioGlyph(ctx, "column", sx, sy, t, BIO_RT.clock < (BIO_RT.m.get(k) ?? 0), "#e8c060", "#a04090"),
+    },
+    loot: { note: "vintage flasks: floor gold piles x1.12", goldPile: 1.12 },
+    variant: { pre: "Vintage", ch: 0.2, hp: 1.2, atk: 1, xp: 1.3, col: "#e8c060" },
+  },
+  { // 440: every 20 s a marked zone over the thickest pack (2 s warning) desyncs ordinary foes for a moment
+    id: "serverfarm", name: "Autumnal Server-Farm", unlockDepth: 440, blurb: "packet loss: foes in the marked zone stutter",
+    vis: { tint: "rgba(60,30,0,0.1)", col: "#40f0a0", part: ["#e87820", "#40f0a0"], partK: "fall", dens: 4, wall: true },
+    paint: bioPaint("led", "led", "rgba(232,120,32,0.32)", "rgba(64,240,160,0.5)", "rgba(20,15,10,0.25)"),
+    hook: {
+      frame: (g, b, dt, calm) => bioCycle(dt, 20, 2, 0.6, calm, true, () => {
+        let n = 0; for (const e of g.en) if (bioOrd(e) && Math.max(Math.abs(e.x - BIO_RT.zx), Math.abs(e.y - BIO_RT.zy)) <= 3) { e.stun = Math.max(e.stun, 3); n++; }
+        if (n) floatTxt(g, BIO_RT.zx, BIO_RT.zy - 1, "PACKET LOSS x" + n, b.vis.col);
+      }, () => bioPackZone(g)),
+      over: (ctx, g, b, cx, cy, t, calm) => { bioTicker(ctx, "LAG", b.vis.col, calm); if (!calm && BIO_RT.ph > 0) bioZoneDraw(ctx, cx, cy, 3, "#40f0a0", "rgba(64,240,160,0.14)", t, false); },
+    },
+    loot: { note: "cached cores: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Leafbit", ch: 0.2, hp: 1.15, atk: 1, xp: 1.35, col: "#40f0a0" },
+  },
+  { // 460: your first hit on each ordinary foe is hushed and deals +30%
+    id: "velvet", name: "Velvet Armory of Unstruck Blades", unlockDepth: 460, blurb: "your first strike on each foe is hushed and harder",
+    vis: { tint: "rgba(60,20,30,0.1)", col: "#e8d0d4", part: ["#e8d0d4", "#a09098"], partK: "drift", dens: 2 },
+    paint: bioPaint("dither", "stripe", "rgba(232,208,212,0.2)", "rgba(160,144,152,0.25)", "rgba(60,30,40,0.2)"),
+    hook: {
+      hit: (g, b, e, dmg, calm) => { const ee = e as En & { bvh?: number }; if (calm || ee.bvh) return 0; ee.bvh = 1; floatTxt(g, e.x, e.y - 0.9, "HUSH", b.vis.col); return dmg * 0.3; },
+    },
+    loot: { note: "velvet sheaths: floor gold piles x1.15", goldPile: 1.15 },
+    variant: { pre: "Velvet", ch: 0.2, hp: 1.25, atk: 1, xp: 1.35, col: "#e8d0d4" },
+  },
+  { // 480: kite rails ride you 3 tiles in their printed direction (stops before danger); 2 s cooldown each
+    id: "kites", name: "Needle-Sea of Kites", unlockDepth: 480, blurb: "kite rails carry you along",
+    vis: { tint: "rgba(20,60,100,0.08)", col: "#60d0ff", part: ["#ff6070", "#60d0ff", "#ffe060"], partK: "drift", dens: 4 },
+    paint: bioPaint("string", "string", "rgba(255,96,112,0.3)", "rgba(96,208,255,0.3)", "rgba(20,40,60,0.15)"),
+    bad: ["ice"],
+    feat: { kind: "spot", n: 3, cap: 5, gap: 7 },
+    hook: {
+      near: 0,
+      place: (g, b, r, cand) => bioSpots(g, cand.filter((k: number) => bioKiteOk(g, k)), b.feat!, r),
+      touch: (g, b, k) => {
+        const now = BIO_RT.clock, ready = BIO_RT.m.get(k) ?? 0; if (now < ready) return false;
+        const [dx, dy] = bioKiteDir(g, k);
+        if (bioHop(g, dx, dy, 3)) { BIO_RT.m.set(k, now + (bioCalm(g) ? 8 : 2)); burst(g, g.hero.x * TS + 12, g.hero.y * TS + 12, 10, ["#ff6070", "#60d0ff", "#ffe060"], 60, 0); g.sfx("skate"); }
+        return false;
+      },
+      drawFeat: (ctx, g, b, k, used, sx, sy, t) => { const [dx, dy] = bioKiteDir(g, k); ctx.fillStyle = "rgba(96,208,255,0.25)"; ctx.fillRect(sx + 1, sy + 1, TS - 2, TS - 2); ctx.globalAlpha = BIO_RT.clock < (BIO_RT.m.get(k) ?? 0) ? 0.35 : 0.9; ctx.fillStyle = "#ffe060"; bioArrow(ctx, sx + 12, sy + 12, dx, dy, 8); ctx.globalAlpha = 1; },
+    },
+    loot: { note: "string-reels: floor gold piles x1.12", goldPile: 1.12 },
+    variant: { pre: "Kitetail", ch: 0.2, hp: 1.15, atk: 1, xp: 1.35, col: "#ff6070" },
+  },
+  { // 500: every 25 s (5 s wind-up) an erasure pulse takes 10% of current HP from ordinary foes in view (never kills)
+    id: "white", name: "The White Between", unlockDepth: 500, blurb: "every 25 s the erasure pulse fades your foes",
+    vis: { tint: "rgba(255,255,255,0.07)", col: "#ffffff", part: ["#ffffff", "#d0d0d0"], partK: "drift", dens: 1 },
+    paint: bioPaint("chalk", "chalk", "rgba(255,255,255,0.2)", "rgba(208,208,208,0.25)", "rgba(255,255,255,0.12)"),
+    hook: {
+      frame: (g, b, dt, calm) => { if (BIO_RT.fl > 0) BIO_RT.fl = Math.max(0, BIO_RT.fl - dt); bioCycle(dt, 25, 5, 0.01, calm, true, () => {
+        let n = 0; for (const e of g.en) { if (!bioOrd(e) || !g.vis[e.y * MW + e.x]) continue; const d = Math.min(e.hp - 1, Math.floor(e.hp * 0.1)); if (d > 0) { e.hp -= d; n++; } }
+        BIO_RT.fl = 0.6; g.sfx("sparkle"); if (n) floatTxt(g, g.hero.x, g.hero.y - 1, "ERASED x" + n, "#ffffff");
+      }); },
+      over: (ctx, g, b, cx, cy, t, calm) => { bioTicker(ctx, "ERASE", "#ffffff", calm); if (BIO_RT.ph === 1 && !calm) { ctx.globalAlpha = 0.06 + 0.05 * Math.sin(t * 6); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, HUD, VW, VIEWH); } if (BIO_RT.fl > 0) { ctx.globalAlpha = BIO_RT.fl * 0.5; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, HUD, VW, VIEWH); } ctx.globalAlpha = 1; },
+    },
+    loot: { note: "blank relics: floor gold piles x1.2", goldPile: 1.2 },
+    variant: { pre: "Erased", ch: 0.2, hp: 1.2, atk: 1, xp: 1.4, col: "#ffffff" },
+  },
 ];
+// ---- shared helpers for the depth-unlock biomes (pure functions of the hook API; no engine data is changed) ----
+type BioMark = { x: number; y: number; t: number };
+const BIO_DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+// Ordinary foe: alive, not a boss / act boss / hunter / goblin, not a swarm spawn (shrine or spider), not an elite
+// (rare, super or ultra elite, pack leader). Biome mechanics only ever touch these.
+function bioOrd(e: En): boolean { return bioCalmFoe(e) && !e.sw && !e.ssw && !e.rare && !e.se && !e.ue && !e.lead && !isBossFoe(e); }
+// Mark a feature tile used (saved with the floor, so it can't be farmed by going back or reloading).
+function bioUse(g: Game, k: number): void {
+  const s = g.bio; if (!s || s.u.includes(k)) return;
+  s.u.push(k); for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.bi = packBio(s);
+}
+// Shared timer: idle (every - warn) s -> warning (warn s, telegraphed) -> active (act s). freeze: hold still while calm.
+function bioCycle(dt: number, every: number, warn: number, act: number, calm: boolean, freeze: boolean, onFire?: () => void, onWarn?: () => void): void {
+  BIO_RT.ev = Math.max(0.1, every - warn);
+  if (calm && freeze && BIO_RT.ph < 2) return;
+  if (BIO_RT.ph === 0) { BIO_RT.t += dt; if (BIO_RT.t >= every - warn) { BIO_RT.ph = 1; BIO_RT.pt = 0; if (onWarn) onWarn(); } }
+  else if (BIO_RT.ph === 1) { BIO_RT.pt += dt; if (BIO_RT.pt >= warn) { BIO_RT.ph = 2; BIO_RT.pt = 0; BIO_RT.cy++; if (onFire) onFire(); } }
+  else { BIO_RT.pt += dt; if (BIO_RT.pt >= act) { BIO_RT.ph = 0; BIO_RT.t = 0; BIO_RT.pt = 0; } }
+}
+function bioDecay(dt: number): void { const L = BIO_RT.list; for (const o of L) o.t -= dt; if (L.length && L[0].t <= 0) BIO_RT.list = L.filter((o: BioMark) => o.t > 0); }
+// Forced hero movement (bounds, rails, bubble hops): orthogonal only, tile by tile, and it stops BEFORE any wall, lava,
+// stairs, portal, enemy, chest, merchant, shrine or the artifact pocket. Water is fine (the hero can always walk water).
+function bioHop(g: Game, dx: number, dy: number, n: number): number {
+  if ((!dx && !dy) || (dx && dy)) return 0;
+  const h = g.hero; let m = 0;
+  for (; m < n; m++) {
+    const nx = h.x + dx, ny = h.y + dy;
+    if (slideBlocked(g, nx, ny) || hzAt(g, nx, ny) === HZ_LAVA || merchAt(g, nx, ny) || trophyHit(g, nx, ny) || artInBlock(g, nx, ny) || g.map[ny * MW + nx] !== 1) break;
+    h.x = nx; h.y = ny;
+  }
+  if (!m) return 0;
+  g.slide = null;
+  const prev = BIO_RT.busy; BIO_RT.busy = true;
+  try { pickup(g); } finally { BIO_RT.busy = prev; }
+  BIO_RT.px = h.x; BIO_RT.py = h.y;
+  computeVis(g); g.notify();
+  return m;
+}
+// Zone centre near the hero: plain floor, no hazard, in sight.
+function bioZonePick(g: Game, R0: number): void {
+  const h = g.hero; BIO_RT.zx = h.x; BIO_RT.zy = h.y;
+  for (let i = 0; i < 24; i++) {
+    const x = h.x + Math.floor(Math.random() * (2 * R0 + 1)) - R0, y = h.y + Math.floor(Math.random() * (2 * R0 + 1)) - R0;
+    if (inb(x, y) && g.map[y * MW + x] === 1 && !hzAt(g, x, y) && g.vis[y * MW + x]) { BIO_RT.zx = x; BIO_RT.zy = y; return; }
+  }
+}
+// Zone centre on the thickest group of ordinary foes within 6 tiles of the hero (or the hero if none).
+function bioPackZone(g: Game): void {
+  const h = g.hero; let best = -1; BIO_RT.zx = h.x; BIO_RT.zy = h.y;
+  const near = g.en.filter((e: En) => bioOrd(e) && Math.max(Math.abs(e.x - h.x), Math.abs(e.y - h.y)) <= 6);
+  for (const e of near) { let n = 0; for (const o of near) if (Math.max(Math.abs(o.x - e.x), Math.abs(o.y - e.y)) <= 3) n++; if (n > best) { best = n; BIO_RT.zx = e.x; BIO_RT.zy = e.y; } }
+}
+// One straight counter run (5-9 plain room tiles in a row) for the serving cart.
+function bioTrack(g: Game, r: () => number, cand: number[]): number[] {
+  const ok = new Uint8Array(MW * MH); for (const k of cand) ok[k] = 1;
+  const runs: number[][] = [];
+  for (let y = 2; y < MH - 2; y++) { let cur: number[] = []; for (let x = 2; x < MW - 1; x++) { const k = y * MW + x; if (ok[k]) cur.push(k); else { if (cur.length >= 5) runs.push(cur); cur = []; } } if (cur.length >= 5) runs.push(cur); }
+  if (!runs.length) return [];
+  const run = runs[Math.floor(r() * runs.length)], len = Math.min(run.length, 5 + Math.floor(r() * 5)), o = Math.floor(r() * (run.length - len + 1));
+  return run.slice(o, o + len);
+}
+function bioCartTile(f: number[]): number { const n = f.length; if (n < 2) return f[0]; const p = Math.floor(BIO_RT.t / 0.9) % (2 * n - 2); return f[p < n ? p : 2 * n - 2 - p]; }
+function bioKiteRun(g: Game, x: number, y: number, dx: number, dy: number): boolean { for (let j = 1; j <= 3; j++) { const tx = x + dx * j, ty = y + dy * j; if (!inb(tx, ty) || g.map[ty * MW + tx] !== 1 || hzAt(g, tx, ty) === HZ_LAVA || portalAt(g, tx, ty)) return false; } return true; }
+function bioKiteOk(g: Game, k: number): boolean { const x = k % MW, y = (k / MW) | 0; return BIO_DIRS.some(([dx, dy]) => bioKiteRun(g, x, y, dx, dy)); }
+// Spaced spots from a candidate list (same rules as the default "spot" layout).
+function bioSpots(g: Game, cand: number[], f: BioFeat, r: () => number): number[] {
+  if (!cand.length) return [];
+  const areaK = (MW * MH) / (BASE_MAP * BASE_MAP), n = f.fixed ? Math.min(f.cap, f.n) : Math.max(1, Math.min(f.cap, Math.round(f.n * areaK))), gap = f.gap ?? 6, out: number[] = [];
+  for (let tries = 0; tries < n * 40 && out.length < n; tries++) { const k = cand[Math.floor(r() * cand.length)], x = k % MW, y = (k / MW) | 0; if (out.some((o: number) => Math.abs((o % MW) - x) + Math.abs(((o / MW) | 0) - y) < gap)) continue; out.push(k); }
+  return out;
+}
+// A kite rail's printed direction: the first (hash-rotated) direction with 3 clear plain tiles ahead.
+function bioKiteDir(g: Game, k: number): [number, number] {
+  const x = k % MW, y = (k / MW) | 0, o = hash32(x, y, 0x417e) % 4;
+  for (let i = 0; i < 4; i++) { const [dx, dy] = BIO_DIRS[(o + i) % 4]; if (bioKiteRun(g, x, y, dx, dy)) return [dx, dy]; }
+  return BIO_DIRS[o];
+}
+// ---- drawing helpers ----
+function bioArrow(ctx: CanvasRenderingContext2D, x: number, y: number, dx: number, dy: number, s: number): void {
+  ctx.beginPath(); ctx.moveTo(x + dx * s, y + dy * s); ctx.lineTo(x - dx * s * 0.6 - dy * s * 0.7, y - dy * s * 0.6 + dx * s * 0.7); ctx.lineTo(x - dx * s * 0.6 + dy * s * 0.7, y - dy * s * 0.6 - dx * s * 0.7); ctx.closePath(); ctx.fill();
+}
+// Small countdown pill under the HUD: fills while idle, flashes during the warning, glows while active.
+function bioTicker(ctx: CanvasRenderingContext2D, label: string, col: string, calm: boolean): void {
+  const W = 54, H = 12, x0 = Math.round(VW / 2 - W / 2), y0 = HUD + VIEWH - H - 6; // bottom centre: clear of the HUD buttons and minimap
+  ctx.save();
+  ctx.fillStyle = "rgba(10,10,14,0.65)"; ctx.fillRect(x0, y0, W, H);
+  const fr = calm ? 0 : BIO_RT.ph === 0 ? Math.min(1, BIO_RT.t / BIO_RT.ev) : 1;
+  ctx.fillStyle = col; ctx.globalAlpha = calm ? 0.25 : BIO_RT.ph === 1 ? 0.55 + 0.45 * Math.sin(BIO_RT.clock * 14) : BIO_RT.ph === 2 ? 0.9 : 0.5;
+  ctx.fillRect(x0 + 1, y0 + 1, Math.round((W - 2) * Math.min(1, fr)), H - 2);
+  ctx.globalAlpha = 1; ctx.fillStyle = "#ffffff"; ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(calm ? "CALM" : BIO_RT.ph === 1 ? label + "!" : label, x0 + W / 2, y0 + H / 2 + 0.5);
+  ctx.restore();
+}
+function bioAura(ctx: CanvasRenderingContext2D, g: Game, cx: number, cy: number, col: string, fr: number): void {
+  const hx = g.hero.ax * TS + 12 - cx, hy = g.hero.ay * TS + 12 - cy;
+  ctx.save(); ctx.globalAlpha = 0.25 + 0.5 * Math.max(0, Math.min(1, fr)); ctx.strokeStyle = col; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(hx, hy, 13 + Math.sin(BIO_RT.clock * 6) * 1.5, 0, 6.2832); ctx.stroke(); ctx.restore();
+}
+function bioZoneDraw(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, col: string, fill: string, t: number, round: boolean): void {
+  const x = BIO_RT.zx * TS + 12 - cx, y = BIO_RT.zy * TS + 12 - cy, R0 = (r + 0.5) * TS;
+  ctx.save();
+  ctx.globalAlpha = BIO_RT.ph === 1 ? 0.5 + 0.4 * Math.sin(t * 12) : 0.9;
+  ctx.fillStyle = fill; ctx.strokeStyle = col; ctx.lineWidth = 2;
+  ctx.beginPath(); if (round) ctx.arc(x, y, R0, 0, 6.2832); else ctx.rect(x - R0, y - R0, R0 * 2, R0 * 2);
+  if (BIO_RT.ph === 2) ctx.fill();
+  ctx.setLineDash(BIO_RT.ph === 1 ? [6, 4] : []); ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
+function bioGlyph(ctx: CanvasRenderingContext2D, kind: string, sx: number, sy: number, t: number, used: boolean, a: string, b: string, prog = 0, label = ""): void {
+  const cx = sx + 12, cy = sy + 12;
+  ctx.save();
+  if (used) ctx.globalAlpha = 0.35;
+  switch (kind) {
+    case "bell": ctx.fillStyle = a; ctx.beginPath(); ctx.moveTo(cx - 7, cy + 6); ctx.quadraticCurveTo(cx - 6, cy - 8, cx, cy - 8); ctx.quadraticCurveTo(cx + 6, cy - 8, cx + 7, cy + 6); ctx.closePath(); ctx.fill(); ctx.fillStyle = b; ctx.fillRect(cx - 8, cy + 5, 16, 2); ctx.beginPath(); ctx.arc(cx, cy + 8, 2, 0, 6.2832); ctx.fill(); break;
+    case "crease": ctx.strokeStyle = a; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx + 3, sy + 3); ctx.lineTo(sx + 21, sy + 21); ctx.moveTo(sx + 21, sy + 3); ctx.lineTo(sx + 3, sy + 21); ctx.stroke(); ctx.strokeStyle = b; ctx.lineWidth = 1; ctx.strokeRect(sx + 2.5, sy + 2.5, 19, 19); break;
+    case "orb": ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha *= 0.4 + 0.25 * Math.sin(t * 5 + cx); ctx.fillStyle = a; ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 6.2832); ctx.fill(); ctx.globalAlpha = used ? 0.35 : 1; ctx.fillStyle = b; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.2832); ctx.fill(); break;
+    case "balloon": ctx.fillStyle = a; ctx.beginPath(); ctx.ellipse(cx, cy - 3 + Math.sin(t * 2 + cx) * 1.5, 7, 8, 0, 0, 6.2832); ctx.fill(); ctx.strokeStyle = b; ctx.beginPath(); ctx.moveTo(cx, cy + 5); ctx.lineTo(cx + 1, cy + 11); ctx.stroke(); ctx.fillStyle = b; ctx.fillRect(cx - 3, cy - 7, 2, 3); break;
+    case "trophy": ctx.fillStyle = "#5a3418"; ctx.fillRect(sx + 4, sy + 4, 16, 16); ctx.fillStyle = a; ctx.beginPath(); ctx.moveTo(cx - 6, cy + 5); ctx.lineTo(cx - 4, cy - 5); ctx.lineTo(cx, cy - 2); ctx.lineTo(cx + 4, cy - 5); ctx.lineTo(cx + 6, cy + 5); ctx.closePath(); ctx.fill(); ctx.fillStyle = b; ctx.fillRect(cx - 3, cy - 1, 2, 2); ctx.fillRect(cx + 1, cy - 1, 2, 2);
+      if (prog > 0) { ctx.globalAlpha = 0.25 + 0.5 * prog; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 11, -1.5708, -1.5708 + 6.2832 * prog); ctx.stroke(); } break;
+    case "note": ctx.fillStyle = used ? b : a; ctx.globalAlpha = used ? 0.55 : 0.85; ctx.fillRect(sx + 3, sy + 3, 18, 18); ctx.globalAlpha = 1; ctx.fillStyle = "#402818"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(label, cx, cy + 1); break;
+    case "sigil": ctx.strokeStyle = a; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, 8, 0, 6.2832); ctx.stroke(); ctx.fillStyle = b; ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.8); ctx.fillRect(-1, -7, 2, 14); ctx.fillRect(-7, -1, 14, 2); ctx.restore(); break;
+    case "cactus": ctx.fillStyle = a; ctx.fillRect(cx - 3, cy - 8, 6, 16); ctx.fillRect(cx - 8, cy - 3, 5, 3); ctx.fillRect(cx - 8, cy - 6, 2, 4); ctx.fillRect(cx + 3, cy - 1, 5, 3); ctx.fillRect(cx + 6, cy - 4, 2, 4); ctx.fillStyle = b; for (let i = 0; i < 5; i++) ctx.fillRect(cx - 4 + (i % 2) * 7, cy - 7 + i * 3, 1, 1); break;
+    case "plate": ctx.fillStyle = "rgba(40,24,8,0.8)"; ctx.fillRect(sx + 2, sy + 2, 20, 20); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha *= 0.45 + 0.25 * Math.sin(t * 3) + prog * 0.3; ctx.fillStyle = a; ctx.beginPath(); ctx.arc(cx, cy, 7 + prog * 4, 0, 6.2832); ctx.fill(); ctx.fillStyle = b; ctx.fillRect(cx - 1, cy - 9, 2, 18); ctx.fillRect(cx - 9, cy - 1, 18, 2); break;
+    case "column": ctx.fillStyle = "rgba(80,20,70,0.5)"; ctx.fillRect(sx + 3, sy + 3, 18, 18); for (let i = 0; i < 3; i++) { const yy = cy + 6 - ((t * 14 + i * 7) % 18); ctx.strokeStyle = i % 2 ? a : b; ctx.beginPath(); ctx.arc(cx - 3 + i * 3, yy, 2.5, 0, 6.2832); ctx.stroke(); } break;
+  }
+  ctx.restore();
+}
+// Tile paint kit: one motif for floors, one for walls, two accent colours and a wall wash.
+function bioPaint(fl: string, wl: string, a: string, b: string, wash: string): BiomeDef["paint"] {
+  return (x, v, r, wall) => { if (wall) { x.fillStyle = wash; x.fillRect(0, 0, TS, TS); bioMotif(wl, x, v, r, a, b); return; } bioMotif(fl, x, v, r, a, b); };
+}
+function bioMotif(m: string, x: CanvasRenderingContext2D, v: number, r: () => number, a: string, b: string): void {
+  const S = TS; x.lineWidth = 1;
+  switch (m) {
+    case "blot": for (let i = 0; i < 2; i++) { x.fillStyle = i ? b : a; x.beginPath(); x.ellipse(r() * S, r() * S, 3 + r() * 5, 2 + r() * 3, r() * 3, 0, 6.2832); x.fill(); } break;
+    case "crease": x.strokeStyle = a; x.beginPath(); if (v % 2) { x.moveTo(0, 0); x.lineTo(S, S); } else { x.moveTo(S, 0); x.lineTo(0, S); } x.stroke(); x.strokeStyle = b; x.beginPath(); x.moveTo(S / 2, 0); x.lineTo(S / 2 + (r() - 0.5) * 8, S); x.stroke(); break;
+    case "hex": { x.strokeStyle = a; x.beginPath(); for (let i = 0; i <= 6; i++) { const an = i * 1.0472, px = 12 + Math.cos(an) * 8, py = 12 + Math.sin(an) * 8; if (i) x.lineTo(px, py); else x.moveTo(px, py); } x.stroke(); if (v % 2) { x.fillStyle = b; x.beginPath(); x.arc(12, 12, 3, 0, 6.2832); x.fill(); } break; }
+    case "glyph": x.strokeStyle = a; for (let i = 0; i < 3; i++) { const gx = 3 + r() * 16, gy = 3 + r() * 16; x.beginPath(); x.moveTo(gx, gy); x.lineTo(gx + 3, gy + 1 + r() * 3); x.lineTo(gx + 1, gy + 5); x.stroke(); } if (v % 2) { x.fillStyle = b; x.fillRect(Math.floor(r() * 20), Math.floor(r() * 20), 3, 1); } break;
+    case "gear": { x.strokeStyle = a; const cx = 6 + r() * 12, cy = 6 + r() * 12; x.beginPath(); x.arc(cx, cy, 5, 0, 6.2832); x.stroke(); x.fillStyle = a; for (let i = 0; i < 8; i++) { const an = i * 0.785; x.fillRect(Math.round(cx + Math.cos(an) * 6) - 1, Math.round(cy + Math.sin(an) * 6) - 1, 2, 2); } x.fillStyle = b; x.fillRect(Math.floor(cx) - 1, Math.floor(cy) - 1, 2, 2); break; }
+    case "stripe": x.fillStyle = v % 2 ? a : b; for (let i = 0; i < S; i += 8) x.fillRect(i, 0, 4, S); break;
+    case "vein": x.strokeStyle = a; x.beginPath(); x.moveTo(0, r() * S); x.quadraticCurveTo(r() * S, r() * S, S, r() * S); x.stroke(); if (v % 2) { x.strokeStyle = b; x.beginPath(); x.arc(12, 12, 6 + r() * 3, r() * 3, r() * 3 + 2); x.stroke(); } break;
+    case "patch": x.fillStyle = v % 2 ? a : b; x.fillRect(v % 2 ? 0 : 12, v > 1 ? 0 : 12, 12, 12); x.strokeStyle = "rgba(255,240,240,0.35)"; x.setLineDash([2, 2]); x.strokeRect(0.5, 0.5, S - 1, S - 1); x.setLineDash([]); break;
+    case "dots": for (let i = 0; i < 3; i++) { x.fillStyle = i % 2 ? b : a; x.beginPath(); x.arc(r() * S, r() * S, 1.5 + r() * 1.5, 0, 6.2832); x.fill(); } break;
+    case "plank": x.fillStyle = a; for (let yy = 5; yy < S; yy += 7) x.fillRect(0, yy, S, 1); if (v % 2) { x.fillStyle = b; x.fillRect(Math.floor(r() * 20), Math.floor(r() * 20), 2, 2); } break;
+    case "salt": for (let i = 0; i < 3; i++) { x.fillStyle = i % 2 ? b : a; const px = r() * 20 + 2, py = r() * 20 + 2; x.beginPath(); x.moveTo(px, py - 3); x.lineTo(px + 2, py); x.lineTo(px, py + 3); x.lineTo(px - 2, py); x.closePath(); x.fill(); } break;
+    case "leaf": for (let i = 0; i < 2; i++) { x.fillStyle = i ? b : a; x.beginPath(); x.ellipse(4 + r() * 16, 4 + r() * 16, 4, 1.6, r() * 3, 0, 6.2832); x.fill(); } break;
+    case "facet": x.fillStyle = a; x.beginPath(); x.moveTo(0, 0); x.lineTo(S, v % 2 ? 0 : S); x.lineTo(0, S); x.closePath(); x.fill(); if (v > 1) { x.fillStyle = b; x.beginPath(); x.moveTo(S, S); x.lineTo(S / 2, S); x.lineTo(S, S / 2); x.closePath(); x.fill(); } break;
+    case "lift": x.fillStyle = a; for (let i = 0; i < 3; i++) x.fillRect(Math.floor(r() * 22), Math.floor(r() * 18), 1, 4 + Math.floor(r() * 3)); if (v % 2) { x.fillStyle = b; x.fillRect(Math.floor(r() * 22), Math.floor(r() * 22), 1, 1); } break;
+    case "crack": x.strokeStyle = a; x.beginPath(); x.moveTo(r() * S, 0); x.lineTo(r() * S, S / 2); x.lineTo(r() * S, S); x.stroke(); x.strokeStyle = b; x.strokeRect(0.5, 0.5, S - 1, S - 1); break;
+    case "foot": if (v % 2 === 0) { x.fillStyle = a; x.fillRect(7, 6, 3, 5); x.fillRect(13, 12, 3, 5); } else { x.fillStyle = b; x.fillRect(Math.floor(r() * 20), Math.floor(r() * 20), 2, 2); } break;
+    case "spiral": x.strokeStyle = a; x.beginPath(); for (let i = 0; i < 20; i++) { const an = i * 0.6, rr = i * 0.45; const px = 12 + Math.cos(an) * rr, py = 12 + Math.sin(an) * rr; if (i) x.lineTo(px, py); else x.moveTo(px, py); } x.stroke(); x.fillStyle = b; x.fillRect(Math.floor(r() * 22), Math.floor(r() * 22), 1, 1); break;
+    case "ember": x.fillStyle = a; x.fillRect(0, 11, S, 1); x.fillStyle = b; for (let i = 0; i < 2; i++) x.fillRect(Math.floor(r() * 22), 10 + Math.floor(r() * 3), 2, 1); break;
+    case "rail": x.fillStyle = b; for (let i = 2; i < S; i += 6) x.fillRect(i, 6, 3, 12); x.fillStyle = a; x.fillRect(0, 8, S, 1); x.fillRect(0, 15, S, 1); break;
+    case "bubble": for (let i = 0; i < 2; i++) { x.strokeStyle = i ? b : a; x.beginPath(); x.arc(4 + r() * 16, 4 + r() * 16, 2 + r() * 2, 0, 6.2832); x.stroke(); } break;
+    case "led": for (let yy = 3; yy < S; yy += 6) for (let xx = 3; xx < S; xx += 6) { x.fillStyle = r() < 0.2 ? b : a; x.fillRect(xx, yy, 1, 1); } break;
+    case "dither": x.fillStyle = a; for (let yy = 0; yy < S; yy += 2) for (let xx = (yy / 2) % 2; xx < S; xx += 4) x.fillRect(xx, yy, 1, 1); break;
+    case "string": x.strokeStyle = v % 2 ? a : b; x.beginPath(); x.moveTo(0, r() * S); x.lineTo(S, r() * S); x.stroke(); break;
+    case "chalk": x.fillStyle = a; x.beginPath(); x.ellipse(r() * S, r() * S, 5 + r() * 4, 2, r() * 3, 0, 6.2832); x.fill(); break;
+  }
+}
 const BIO_HG_SEC = 18, BIO_HG_STUN = 6, BIO_HG_R = 9;
 let BIO_DARK: HTMLCanvasElement | null = null;
 const BIO_PERF = { on: false, ms: 0, n: 0 }; // test-only draw-cost meter
@@ -7439,8 +8102,10 @@ function bioCands(g: Game): number[] {
 function bioPlace(g: Game, b: BiomeDef, r: () => number): number[] {
   const f = b.feat; if (!f) return [];
   const cand = bioCands(g); if (!cand.length) return [];
+  if (f.noLavaAdj) { const near = (k: number): boolean => { const x = k % MW, y = (k / MW) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (hzAt(g, x + dx, y + dy) === HZ_LAVA) return true; return false; }; for (let i = cand.length - 1; i >= 0; i--) if (near(cand[i])) cand.splice(i, 1); if (!cand.length) return []; }
+  if (b.hook.place) return b.hook.place(g, b, r, cand).slice(0, 240);
   const areaK = (MW * MH) / (BASE_MAP * BASE_MAP);
-  const n = Math.max(1, Math.min(f.cap, Math.round(f.n * areaK)));
+  const n = f.fixed ? Math.min(f.cap, f.n) : Math.max(1, Math.min(f.cap, Math.round(f.n * areaK)));
   const out: number[] = [];
   if (f.kind === "spot") {
     const gap = f.gap ?? 6;
@@ -7513,7 +8178,11 @@ function bioAnnounce(g: Game, b: BiomeDef, fresh: boolean): void {
   msg(g, "Biome: " + b.name + " - " + b.blurb + ".", b.vis.col);
   if (fresh) setBanner(g, b.name.toUpperCase(), "Depth " + g.depth + " \u00b7 " + b.blurb, b.vis.col, 3, 2.6);
 }
-function bioResetRt(g: Game): void { BIO_RT.key = g.depth + ":" + (g.wxs ?? 0); BIO_RT.lit = 0; BIO_RT.hg = 0; BIO_RT.pulse = 0; BIO_RT.amb = 1; }
+function bioResetRt(g: Game): void {
+  BIO_RT.key = g.depth + ":" + (g.wxs ?? 0); BIO_RT.lit = 0; BIO_RT.hg = 0; BIO_RT.pulse = 0; BIO_RT.amb = 1;
+  BIO_RT.t = 0; BIO_RT.ph = 0; BIO_RT.pt = 0; BIO_RT.cy = 0; BIO_RT.zx = g.hero.x; BIO_RT.zy = g.hero.y; BIO_RT.zt = 0; BIO_RT.n = 0; BIO_RT.cd = 0; BIO_RT.cd2 = 0; BIO_RT.arm = 0; BIO_RT.fl = 0;
+  BIO_RT.px = -1; BIO_RT.py = -1; BIO_RT.ldx = 1; BIO_RT.ldy = 0; BIO_RT.busy = false; BIO_RT.list = []; BIO_RT.m = new Map<number, number>();
+}
 // Floor restored from a snapshot (going back, reload): enemies are re-spawned there, so re-tag them; the biome itself
 // and its used features come from the snapshot, never from a fresh roll.
 function bioOnRestore(g: Game): void {
@@ -7539,14 +8208,38 @@ function unpackBio(raw: unknown, len: number): BioSt | null {
 }
 // Hero stepped (walk, run or slide).
 function bioStep(g: Game): void {
-  const b = bioOf(g), s = g.bio; if (!b || !s || !b.hook.touch || !s.f.length) return;
-  const h = g.hero, R0 = b.hook.near ?? 0;
-  for (const k of s.f) {
-    if (Math.max(Math.abs((k % MW) - h.x), Math.abs(((k / MW) | 0) - h.y)) > R0) continue;
-    const first = !s.u.includes(k);
-    if (first) { s.u.push(k); for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.bi = packBio(s); }
-    b.hook.touch(g, b, k, first);
-  }
+  const b = bioOf(g), s = g.bio; if (!b || !s || BIO_RT.busy) return;
+  const h = g.hero, dx = h.x - BIO_RT.px, dy = h.y - BIO_RT.py;
+  const stepped = BIO_RT.px >= 0 && (dx !== 0 || dy !== 0) && Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+  BIO_RT.px = h.x; BIO_RT.py = h.y;
+  BIO_RT.busy = true; // a hook that moves the hero (bioHop) calls pickup() again: no re-entry
+  try {
+    if (stepped) { BIO_RT.ldx = dx; BIO_RT.ldy = dy; if (b.hook.step) b.hook.step(g, b, dx, dy, bioCalm(g)); }
+    if (!b.hook.touch || !s.f.length) return;
+    const R0 = b.hook.near ?? 0;
+    for (const k of s.f.slice()) {
+      if (Math.max(Math.abs((k % MW) - g.hero.x), Math.abs(((k / MW) | 0) - g.hero.y)) > R0) continue;
+      const first = !s.u.includes(k);
+      if (first) s.u.push(k);
+      const keep = b.hook.touch(g, b, k, first);
+      if (first) { if (keep === false) s.u = s.u.filter((q: number) => q !== k); else for (const sn of [g.snapCur, g.snapPrev]) if (sn && sn.d === g.depth) sn.bi = packBio(s); }
+    }
+  } finally { BIO_RT.busy = false; }
+}
+// Engine taps (each a no-op unless the floor has a biome with that hook):
+function bioOnHit(g: Game, e: En, dmg: number): number {
+  const b = bioOf(g); if (!b || !b.hook.hit || !bioOrd(e) || dmg <= 0) return 0;
+  return Math.max(0, Math.min(Math.round(dmg * 0.5), Math.round(b.hook.hit(g, b, e, dmg, bioCalm(g)))));
+}
+function bioHeroDmg(g: Game, dmg: number): number {
+  const b = bioOf(g); if (!b || !b.hook.hurt) return dmg;
+  const m = Math.max(0.5, Math.min(1, b.hook.hurt(g, b, dmg, bioCalm(g))));
+  return m >= 1 ? dmg : Math.max(1, Math.round(dmg * m));
+}
+function bioOnKill(g: Game, e: En): void {
+  const b = bioOf(g); if (!b || !b.hook.kill) return;
+  if (!(e.cls < 2 && !e.act && !e.hunt && !e.gob && !e.sw && !e.ssw && !e.rare && !e.se && !e.ue && !e.lead && !isBossFoe(e))) return;
+  b.hook.kill(g, b, e, bioCalm(g));
 }
 function bioWorld(g: Game, st: Stats): void {
   const b = bioOf(g); if (!b || g.mode !== "play") return;
@@ -7558,6 +8251,7 @@ function bioFrame(g: Game, dt: number): void {
   const b = bioOf(g); if (!b) return;
   if (BIO_RT.key !== g.depth + ":" + (g.wxs ?? 0)) bioResetRt(g);
   if (g.mode !== "play" || g.paused) return;
+  BIO_RT.clock += dt;
   if (b.hook.frame) b.hook.frame(g, b, dt, bioCalm(g));
   // ambient particles (capped like themeAmbient)
   if (g.parts.length < 260 && Math.random() < b.vis.dens * dt * 2) {
@@ -7635,7 +8329,8 @@ function bioStairsOk(g: Game): boolean {
 }
 function bioInfo(g: Game): Record<string, unknown> {
   const b = bioOf(g);
-  return { depth: g.depth, size: MW, biome: b ? b.id : null, name: b ? b.name : null, feats: g.bio ? g.bio.f.length : 0, used: g.bio ? g.bio.u.length : 0, variants: g.en.filter((e: En) => !!(e as En & { bv?: number }).bv).length, hz: hzKindsOf(g), wx: floorWx(g), shrine: !!g.shrine, act: isActFloor(g.depth), req: hzRequiredOk(g), stairs: bioStairsOk(g), hero: [g.hero.x, g.hero.y] };
+  const featOk = !g.bio || g.bio.f.every((k: number) => g.map[k] === 1 && !hzAt(g, k % MW, (k / MW) | 0));
+  return { featOk, depth: g.depth, size: MW, biome: b ? b.id : null, name: b ? b.name : null, feats: g.bio ? g.bio.f.length : 0, used: g.bio ? g.bio.u.length : 0, variants: g.en.filter((e: En) => !!(e as En & { bv?: number }).bv).length, hz: hzKindsOf(g), wx: floorWx(g), shrine: !!g.shrine, act: isActFloor(g.depth), req: hzRequiredOk(g), stairs: bioStairsOk(g), hero: [g.hero.x, g.hero.y] };
 }
 try {
   (window as unknown as { __ED16_BIO?: object }).__ED16_BIO = {
@@ -7729,11 +8424,89 @@ try {
       return { pool: bioPool(depth).length + n, rate: hit / seeds, kinds: Object.keys(by).length };
     },
     calm: (): boolean => { const g = LIVE; return !!g && bioCalm(g); },
+    pool: (depth: number): string[] => bioPool(depth).map((b: BiomeDef) => b.id),
+    // mechanic probe for any biome: ordinary foe + boss near the hero, drive the mechanic, report what changed.
+    // calm=true runs the same probe with a shrine swarm active (mechanics must stay dormant / soften).
+    mech2: (calm?: boolean): Record<string, unknown> => {
+      const g = LIVE; const b = g ? bioOf(g) : null; if (!g || !b || !g.bio) return { ok: false };
+      const st = calc(g.lvl, g.eq), h = g.hero, s = g.bio, out: Record<string, unknown> = { id: b.id, calm: !!calm };
+      const prevSw = g.swarm, prevSp = g.spSw; g.spSw = null; g.swarm = calm ? ({ t: 999, kills: 0, acc: 0, spawned: 0, pool: [] } as unknown as Swarm) : null;
+      g.paused = false; g.mode = "play"; g.en = []; g.pend = []; h.hp = st.maxHp; bioResetRt(g); BIO_RT.key = g.depth + ":" + (g.wxs ?? 0);
+      const plain = (x: number, y: number): boolean => inb(x, y) && g.map[y * MW + x] === 1 && !hzAt(g, x, y) && walkable(g, x, y) && !(x === h.x && y === h.y) && !portalAt(g, x, y);
+      const near = (x0: number, y0: number, r0: number, r1: number): number[] | null => { for (let rr = r0; rr <= r1; rr++) for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { if (Math.max(Math.abs(dx), Math.abs(dy)) !== rr) continue; if (plain(x0 + dx, y0 + dy)) return [x0 + dx, y0 + dy]; } return null; };
+      const mk = (p: number[] | null, cls: number): En | null => { if (!p) return null; for (let i = 0; i < 8; i++) { const e = mkEnemy(g, p[0], p[1], cls); e.awake = true; e.stun = 0; e.slow = 0; e.fear = 0; if (cls === 2 ? isBossFoe(e) : bioOrd(e)) { g.en.push(e); return e; } } return null; };
+      const put = (x: number, y: number): void => { h.x = h.ax = x; h.y = h.ay = y; BIO_RT.px = -1; computeVis(g); };
+      const stepOn = (x: number, y: number, fx?: number, fy?: number): void => { h.x = h.ax = x; h.y = h.ay = y; if (fx !== undefined && fy !== undefined) { BIO_RT.px = fx; BIO_RT.py = fy; } else BIO_RT.px = -1; bioStep(g); computeVis(g); };
+      const frames = (sec: number): void => { for (let i = 0; i < Math.ceil(sec / 0.05); i++) bioFrame(g, 0.05); };
+      const ticks = (n: number): void => { for (let i = 0; i < n; i++) bioWorld(g, st); };
+      const snap = (e: En | null): Record<string, number> | null => (e ? { x: e.x, y: e.y, hp: e.hp, mhp: e.mhp, stun: e.stun, slow: e.slow, fear: e.fear } : null);
+      const f0 = s.f.length ? s.f[0] : -1, fx0 = f0 % MW, fy0 = (f0 / MW) | 0;
+      const g0 = g.gold;
+      // a roomy spot for the hero when the biome has no features
+      if (f0 < 0) { const p = near(h.x, h.y, 0, 6); if (p) put(p[0], p[1]); } else put(fx0, fy0);
+      let foe = null as En | null, boss = null as En | null;
+      const both = (cx: number, cy: number, r0 = 1, r1 = 3): void => { foe = mk(near(cx, cy, r0, r1), 0); boss = mk(near(cx, cy, r0, r1), 2); out.foe0 = snap(foe); out.boss0 = snap(boss); };
+      try {
+        switch (b.id) {
+          case "bells": put(fx0, fy0); both(fx0, fy0, 1, 2); frames(14.2); break;
+          case "origami": stepOn(fx0, fy0); out.ward = BIO_RT.cd2; out.dmg100 = bioHeroDmg(g, 100); break;
+          case "honeycomb": { foe = mk([fx0, fy0], 0); const k1 = s.f.find((k: number) => k !== f0 && plain(k % MW, (k / MW) | 0)); boss = k1 !== undefined ? mk([k1 % MW, (k1 / MW) | 0], 2) : null; ticks(2); break; }
+          case "ink": { const p = near(h.x, h.y, 1, 1); foe = mk(p, 0); if (foe) { foe.hp = 0; kill(g, foe); out.blots = BIO_RT.list.length; const q = near(foe.x, foe.y, 1, 1); if (q) stepOn(foe.x, foe.y, q[0], q[1]); out.left = BIO_RT.list.length; } foe = null; break; }
+          case "tidegear": {
+            const open4 = (x: number, y: number): boolean => plain(x, y) && BIO_DIRS.every(([dx, dy]) => plain(x + dx, y + dy));
+            const spots: number[][] = []; for (let r0 = 1; r0 <= 6 && spots.length < 2; r0++) for (let dy = -r0; dy <= r0; dy++) for (let dx = -r0; dx <= r0; dx++) { const x = h.x + dx, y = h.y + dy; if (Math.max(Math.abs(dx), Math.abs(dy)) === r0 && open4(x, y) && spots.every((q) => Math.abs(q[0] - x) + Math.abs(q[1] - y) > 3) && spots.length < 2) spots.push([x, y]); }
+            foe = mk(spots[0] || null, 0); boss = mk(spots[1] || null, 2); out.foe0 = snap(foe); out.boss0 = snap(boss);
+            frames(12.1); out.cy = BIO_RT.cy; break; // one tide (open4 spots: the push tile is always free)
+          }
+          case "carnival": stepOn(fx0, fy0); both(h.x, h.y, 1, 3); out.charges = BIO_RT.n; out.bonus = foe ? bioOnHit(g, foe, 100) : -1; out.bossBonus = boss ? bioOnHit(g, boss, 100) : -1; break;
+          case "orrery": frames(20.3); put(BIO_RT.zx, BIO_RT.zy); out.inRing = bioHeroDmg(g, 100); BIO_RT.zx = h.x + 9; out.outRing = bioHeroDmg(g, 100); out.ph = BIO_RT.ph; break;
+          case "quilt": { foe = mk([fx0, fy0], 0); const k1 = s.f.find((k: number) => k !== f0 && plain(k % MW, (k / MW) | 0)); boss = k1 !== undefined ? mk([k1 % MW, (k1 / MW) | 0], 2) : null; ticks(1); out.used = s.u.length; break; }
+          case "balloon": { const p = near(fx0, fy0, 1, 1); if (p) put(p[0], p[1]);
+            const room = (dx: number, dy: number): boolean => plain(fx0 + dx, fy0 + dy) && plain(fx0 + dx + Math.sign(dx), fy0 + dy + Math.sign(dy)) && plain(fx0 + dx + 2 * Math.sign(dx), fy0 + dy + 2 * Math.sign(dy));
+            const offs: number[][] = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === 2 && room(dx, dy)) offs.push([dx, dy]);
+            if (offs.length) { foe = mk([fx0 + offs[0][0], fy0 + offs[0][1]], 0); boss = offs.length > 1 ? mk([fx0 + offs[offs.length - 1][0], fy0 + offs[offs.length - 1][1]], 2) : null; out.foe0 = snap(foe); out.boss0 = snap(boss); } else both(fx0, fy0, 2, 3); const d0 = foe ? Math.max(Math.abs(foe.x - fx0), Math.abs(foe.y - fy0)) : -1; stepOn(h.x, h.y); out.foeDist = [d0, foe ? Math.max(Math.abs(foe.x - fx0), Math.abs(foe.y - fy0)) : -1]; out.used = s.u.length; break; }
+          case "taxidermy": { const p = near(fx0, fy0, 1, 1); if (p) put(p[0], p[1]); both(fx0, fy0, 1, 3); frames(2.2); out.used = s.u.length; break; }
+          case "organum": { const n = s.f.length; stepOn(s.f[Math.min(1, n - 1)] % MW, (s.f[Math.min(1, n - 1)] / MW) | 0); out.wrong = BIO_RT.n; for (const k of s.f) stepOn(k % MW, (k / MW) | 0); out.solved = s.u.length === n; out.notes = n; break; }
+          case "greenhouse": { frames(13.1); const pz = near(BIO_RT.zx, BIO_RT.zy, 1, 1); foe = mk(pz, 0); boss = mk(near(BIO_RT.zx, BIO_RT.zy, 0, 1), 2); frames(2.0); put(BIO_RT.zx, BIO_RT.zy); h.hp = Math.round(st.maxHp / 2); const hp0 = h.hp; ticks(4); out.healed = h.hp - hp0; out.ph = BIO_RT.ph; h.hp = st.maxHp; break; }
+          case "mercury": { stepOn(fx0, fy0); out.decoy = BIO_RT.zt; foe = mk(near(fx0, fy0, 3, 5), 0); boss = mk(near(fx0, fy0, 3, 5), 2); const d0 = foe ? Math.abs(foe.x - fx0) + Math.abs(foe.y - fy0) : -1; ticks(2); out.foeDist = [d0, foe ? Math.abs(foe!.x - fx0) + Math.abs(foe!.y - fy0) : -1]; break; }
+          case "kaleido": { frames(13.1); frames(0.1); frames(2); const [dx, dy] = BIO_DIRS[BIO_RT.cy % 4]; foe = mk([h.x + dx * 2, h.y + dy * 2], 0) || mkEnemy(g, h.x + dx * 2, h.y + dy * 2, 0); const back = mkEnemy(g, h.x - dx * 2, h.y - dy * 2, 0); out.ph = BIO_RT.ph; out.bright = bioOrd(foe) ? bioOnHit(g, foe, 100) : "n/a"; out.dark = bioOnHit(g, back, 100); foe = null; break; }
+          case "levity": case "skycellar": case "kites": {
+            // find a tile with 4 plain tiles in a row to the right/down; step onto it from the left
+            const cands = b.id === "levity" ? bioCands(g).slice(0, 400) : s.f;
+            let done = false;
+            for (const k of cands) for (const [dx, dy] of BIO_DIRS) {
+              if (done) break;
+              const x = k % MW, y = (k / MW) | 0;
+              const ddx = b.id === "kites" ? bioKiteDir(g, k)[0] : dx, ddy = b.id === "kites" ? bioKiteDir(g, k)[1] : dy;
+              if ((b.id !== "kites" && !plain(x - ddx, y - ddy)) || ![1, 2, 3].every((j) => plain(x + ddx * j, y + ddy * j))) continue;
+              if (b.id === "kites") put(x, y); else put(x - ddx, y - ddy);
+              if (b.id === "levity") { frames(8.2); frames(2.1); out.armed = BIO_RT.arm > 0; }
+              if (b.id === "kites") stepOn(x, y); else stepOn(x, y, x - ddx, y - ddy); out.moved = Math.abs(h.x - x) + Math.abs(h.y - y); done = true;
+            }
+            out.tested = done; break;
+          }
+          case "banquet": { BIO_RT.t = 0; put(s.f[0] % MW, (s.f[0] / MW) | 0); h.hp = Math.round(st.maxHp / 2); const hp0 = h.hp; ticks(1); out.healed = h.hp - hp0; out.track = s.f.length; h.hp = st.maxHp; break; }
+          case "echo": { const p = near(h.x, h.y, 1, 1); if (p) { const ax = h.x, ay = h.y; stepOn(p[0], p[1], ax, ay); g.acd = 5; stepOn(ax, ay, p[0], p[1]); out.acd = g.acd; out.marks = BIO_RT.list.length; } break; }
+          case "cactus": { put(fx0, fy0); let placed = false; for (const [dx, dy] of BIO_DIRS) { if (placed) break; if (plain(fx0 + dx, fy0 + dy) && plain(fx0 + dx * 2, fy0 + dy * 2)) { foe = mk([fx0 + dx * 2, fy0 + dy * 2], 0); placed = true; const bd = BIO_DIRS.find(([ex, ey]) => (ex !== dx || ey !== dy) && plain(fx0 + ex, fy0 + ey)); if (bd) boss = mk([fx0 + bd[0], fy0 + bd[1]], 2); } } const hp0 = h.hp; const f1 = snap(foe); stepOn(fx0, fy0); out.heroLost = hp0 - h.hp; out.heroPct = +((hp0 - h.hp) / st.maxHp).toFixed(3); out.foeBefore = f1; break; }
+          case "buriedsun": { put(fx0, fy0); both(fx0, fy0, 1, 3); frames(2.2); out.sun = BIO_RT.zt; ticks(3); break; }
+          case "trainyard": { put(fx0, fy0); both(fx0, fy0, 1, 1); const d0 = foe ? Math.max(Math.abs(foe.x - fx0), Math.abs(foe.y - fy0)) : -1; frames(3.2); out.foeDist = [d0, foe ? Math.max(Math.abs(foe!.x - fx0), Math.abs(foe!.y - fy0)) : -1]; out.used = s.u.length; break; }
+          case "serverfarm": both(h.x, h.y, 1, 2); frames(20.2); break;
+          case "velvet": both(h.x, h.y, 1, 3); out.first = foe ? bioOnHit(g, foe, 100) : -1; out.second = foe ? bioOnHit(g, foe, 100) : -1; out.bossBonus = boss ? bioOnHit(g, boss, 100) : -1; break;
+          case "white": { both(h.x, h.y, 1, 3); const low = mk(near(h.x, h.y, 1, 4), 0); if (low) low.hp = 1; computeVis(g); frames(25.2); out.low = low ? low.hp : -1; break; }
+          default: out.note = "no deep probe";
+        }
+      } finally { g.swarm = prevSw ?? null; g.spSw = prevSp ?? null; }
+      out.foe = snap(foe); out.boss = snap(boss); out.gold = g.gold - g0; out.calmNow = bioCalm(g);
+      if (calm) out.onHitCalm = (() => { const e = mkEnemy(g, h.x, h.y, 0); g.swarm = { t: 999, kills: 0, acc: 0, spawned: 0, pool: [] } as unknown as Swarm; const v = bioOnHit(g, e, 100); g.swarm = prevSw ?? null; return v; })();
+      g.en = []; h.hp = st.maxHp; IP.camOk = false; computeVis(g);
+      return out;
+    },
     clearSpider: (): void => { const g = LIVE; if (g) g.spSw = null; },
     // mechanic probes on the current (forced) biome floor
     mech: (): Record<string, unknown> => {
       const g = LIVE; const b = g ? bioOf(g) : null; if (!g || !b || !g.bio) return { ok: false };
       const st = calc(g.lvl, g.eq), h = g.hero, out: Record<string, unknown> = { id: b.id };
+      g.spSw = null; // a spider swarm may have armed on this test floor: probe the biome itself
       const free = (x0: number, y0: number, r: number): number[] | null => { for (let rr = 1; rr <= r; rr++) for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { const x = x0 + dx, y = y0 + dy; if (walkable(g, x, y) && (x !== h.x || y !== h.y)) return [x, y]; } return null; };
       const mk = (x: number, y: number, cls: number): En => { const e = mkEnemy(g, x, y, cls); e.awake = true; e.stun = 0; g.en.push(e); return e; };
       if (b.id === "ley") {
@@ -12842,6 +13615,7 @@ function kill(g: Game, e: En): void {
   const prevQ = LOOT_Q;
   LOOT_Q = lootBonusMult(g);
   try { mrOnKill(g, e); } catch { /* tracking never blocks a kill */ }
+  if (g.bio) { try { bioOnKill(g, e); } catch { /* biome flavour never blocks a kill */ } }
   try { killLoot(g, e); } finally { LOOT_Q = prevQ; }
 }
 function killLoot(g: Game, e: En): void {
@@ -18288,6 +19062,7 @@ function heroAttack(g: Game, e: En, st: Stats, dist: number, dx: number, dy: num
     if (st.stun > 0 && R() < st.stun && tg.hp > 0) { tg.stun = 1; floatTxt(g, tg.x, tg.y - 0.5, "STUN", "#80c0ff"); }
     const wk = main ? main.kind : "";
     if (wk === "flail" && tg.hp > 0 && R() < 0.15) { if (pushEn(g, tg, h.x, h.y, 1)) floatTxt(g, tg.x, tg.y - 0.7, "KNOCK", "#e0c080"); }
+    if (tg.hp > 0 && g.bio) { const bb = bioOnHit(g, tg, dmg); if (bb > 0) { const bd = withHit(hitV, () => hurtEn(g, tg, bb, { n: "Biome Bonus", t: "", c: "#ffe080" })); if (bd > 0) floatTxt(g, tg.x - 0.3, tg.y - 0.4, "+" + bd, "#ffe080"); } }
     const died = tg.hp <= 0;
     if (died) withHit(hitV, () => { kill(g, tg); });
     efOnHit(g, tg, dmg, crit || scrit, st, died);
