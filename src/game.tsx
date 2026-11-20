@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useGrokTheme } from "grok/canvas";
-import { ED16_BK_URL, ED16_BK_KEY } from "./bk-config";
+import { ED16_BK_URL, ED16_BK_KEY, ED16_BK_GIST } from "./bk-config";
 
 // STORAGE KEYS ARE STABLE ACROSS DEPLOYS. Never rename these, or existing
 // player saves will not load: ed16_save_v1_p1/p2/p3/p5 and their _bak keys,
@@ -10605,110 +10605,322 @@ function writeDurable(key: string, raw: string): boolean {
   }
   return durable;
 }
-// ---------- save backups (2026-11-20) ----------
-// Richard (p1), Jax (p2), Piper (p3) and Mike (p5); never Tester (p4). After every successful save (manual Save Game,
-// autosave, import, Recover) the profile's Save Code (the exact string the Save Code button makes) is:
-//  1. kept on this device in ed16_bk_hist_pN: the last 5 distinct codes with time, level and depth, listed under
-//     Profiles > Recover from backup. Works without the webhook.
-//  2. POSTed, if ED16_BK_URL is set, as {player, slot, savedAt, code} with Authorization: Bearer <key>, keepalive.
-// Autosaves are debounced to at most one capture per 60 s per profile; manual saves and restores always capture.
-// The work runs after the save returns (idle callback), every error is swallowed, nothing is shown to the player.
-// A failed POST leaves one queued send per profile in ed16_bk_pending_pN, retried on the next capture or load.
+// ---------- save backups + auto-heal (2026-11-20) ----------
+// Profiles Richard (p1), Jax (p2), Piper (p3), Mike (p5). Never Tester (p4).
+// 1. Every successful save (manual Save Game, autosave, import, Recover) captures the profile's Save Code (the exact
+//    string the Save Code button makes) into a local history, ed16_bk_hist_pN (last 5 distinct, newest first), mirrored
+//    to IndexedDB so it survives a localStorage-only clear. Listed under Profiles > Recover from backup.
+// 2. The same capture is POSTed to the Apps Script relay (ED16_BK_URL) as text/plain JSON {k, slot, player, savedAt, code}
+//    (a "simple" request: no CORS preflight). A failed send stays in ed16_bk_queue (latest per slot) and is flushed on
+//    the next capture, load, 'online' and every heal check. Manual saves send immediately; autosaves at most every
+//    BK_AUTO_MIN_MS per slot (Apps Script daily runtime quota) and never when the code is unchanged.
+// 3. Auto-heal, silent: on load, visibilitychange/focus/pageshow and every 5 minutes, each allowed slot (owner device:
+//    p1 p2 p3 p5; Mike-locked device: p5 only) is compared with its newest local history entry and the relay's latest
+//    file. If the slot is missing, unreadable, or older (savedAt, then level/depth) the newest valid one is written back.
+//    A newer valid slot is never overwritten. Nothing is shown to the player (internal log only).
+// 4. Heartbeat: on load and every heal check, POST {k, type:"state", device, slots:{pN:{savedAt,level,depth}|null}}.
+// Everything runs off the save path (idle callback / async), with long timeouts, and every error is swallowed.
 const BK_SLOTS: Partial<Record<ProfId, string>> = { 1: "p1", 2: "p2", 3: "p3", 5: "p5" };
-const BK_DEBOUNCE_MS = 60000;
 const BK_HIST_N = 5;
-const BK_TIMEOUT_MS = 8000;
+const BK_AUTO_MIN_MS = 30000;
+const BK_POST_TIMEOUT_MS = 25000;
+const BK_GET_TIMEOUT_MS = 25000;
+const BK_HEAL_EVERY_MS = 5 * 60 * 1000;
+const BK_HEAL_MIN_GAP_MS = 15000;
+const BK_QUEUE_KEY = "ed16_bk_queue";
+const BK_DEV_KEY = "ed16_bk_dev";
 const bkLastCap: Partial<Record<ProfId, number>> = {};
+const bkLastHash: Partial<Record<ProfId, string>> = {};
 const bkSched: Partial<Record<ProfId, boolean>> = {};
-const bkInFlight: Partial<Record<ProfId, boolean>> = {};
-const BK_STATS = { captured: 0, sent: 0, failed: 0, skipped: 0, hist: 0 };
+let bkFlushing = false;
+const BK_STATS = { captured: 0, sent: 0, failed: 0, skipped: 0, hist: 0, heals: 0, healChecks: 0, beats: 0 };
+const BK_LOG: string[] = [];
+function bkLog(s: string): void { try { BK_LOG.push(new Date().toISOString() + " " + s); if (BK_LOG.length > 60) BK_LOG.shift(); } catch { /* ignore */ } }
 type BkHist = { t: number; lvl: number; depth: number; h: string; code: string };
 function bkHistKey(id: ProfId): string { return "ed16_bk_hist_p" + id; }
-function bkPendKey(id: ProfId): string { return "ed16_bk_pending_p" + id; }
 function bkHash(s: string): string { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + "." + s.length; }
-function bkHistOf(id: ProfId): BkHist[] {
-  try { const a = JSON.parse(lsGet(bkHistKey(id)) || "[]") as BkHist[]; return Array.isArray(a) ? a.filter((e: BkHist) => e && typeof e.code === "string" && typeof e.t === "number") : []; } catch { return []; }
+function bkName(id: ProfId): string { return (PROFILES.find((p: { id: ProfId; name: string }) => p.id === id) || PROFILES[0]).name; }
+function bkParseHist(v: string | null): BkHist[] {
+  try { const a = JSON.parse(v || "[]") as BkHist[]; return Array.isArray(a) ? a.filter((e: BkHist) => e && typeof e.code === "string" && typeof e.t === "number") : []; } catch { return []; }
+}
+function bkMergeHist(a: BkHist[], b: BkHist[]): BkHist[] {
+  const seen: Record<string, number> = {}; const out: BkHist[] = [];
+  for (const e of a.concat(b).sort((x: BkHist, y: BkHist) => y.t - x.t)) { if (seen[e.h]) continue; seen[e.h] = 1; out.push(e); }
+  return out.slice(0, BK_HIST_N);
+}
+function bkHistOf(id: ProfId): BkHist[] { return bkParseHist(lsGet(bkHistKey(id))); }
+async function bkHistAll(id: ProfId): Promise<BkHist[]> {
+  let iv: string | null = null;
+  try { iv = await idbGet(bkHistKey(id)); } catch { iv = null; }
+  return bkMergeHist(bkHistOf(id), bkParseHist(iv));
 }
 function bkHistPush(id: ProfId, e: BkHist): void {
-  let a = bkHistOf(id).filter((x: BkHist) => x.h !== e.h);
-  a.unshift(e); a = a.slice(0, BK_HIST_N);
+  let a = bkMergeHist([e], bkHistOf(id));
+  try { idbPut(bkHistKey(id), JSON.stringify(a)); } catch { /* ignore */ }
   // Never compete with the real save for space: on a failed write keep fewer entries, never more.
   while (a.length > 0) { if (lsSet(bkHistKey(id), JSON.stringify(a))) { BK_STATS.hist++; return; } a = a.slice(0, a.length - 1); }
 }
-function bkWebhookOn(): boolean { return !!ED16_BK_URL && typeof fetch === "function"; }
-function bkSendPending(id: ProfId): void {
-  try {
-    if (!bkWebhookOn() || bkInFlight[id]) return;
-    const body = lsGet(bkPendKey(id));
-    if (!body) return;
-    const ctl = typeof AbortController === "function" ? new AbortController() : null;
-    const to = setTimeout(() => { try { if (ctl) ctl.abort(); } catch { /* ignore */ } }, BK_TIMEOUT_MS);
-    bkInFlight[id] = true;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (ED16_BK_KEY) headers["Authorization"] = "Bearer " + ED16_BK_KEY;
-    // keepalive lets a send started by the save-on-close finish after the tab goes away (browsers cap it at 64 KB).
-    void fetch(ED16_BK_URL, { method: "POST", headers, body, mode: "cors", credentials: "omit", cache: "no-store", keepalive: body.length < 60000, signal: ctl ? ctl.signal : undefined })
-      .then((r: Response) => r.ok, () => false)
-      .then((ok: boolean) => {
-        clearTimeout(to); bkInFlight[id] = false;
-        try { if (ok) { BK_STATS.sent++; if (lsGet(bkPendKey(id)) === body) lsRemove(bkPendKey(id)); } else BK_STATS.failed++; } catch { /* ignore */ }
-      }, () => { clearTimeout(to); bkInFlight[id] = false; BK_STATS.failed++; });
-  } catch { bkInFlight[id] = false; }
+function bkCodeStats(code: string): { lvl: number; depth: number } {
+  try { const o = JSON.parse(lzd(code.replace(/^ED2-/, "")) || "{}") as { l?: number; d?: number }; return { lvl: Number(o.l) || 0, depth: Number(o.d) || 0 }; } catch { return { lvl: 0, depth: 0 }; }
 }
-function bkCapture(id: ProfId, getCode: () => string, always: boolean): void {
+function bkOn(): boolean { return !!ED16_BK_KEY && (!!ED16_BK_URL || !!ED16_BK_GIST || !!bkLocalRelay()) && typeof fetch === "function"; }
+// ?bktest=1 sends to the relay's _test namespace (e2e only). ?bkrelay= is honoured only for a loopback test relay.
+function bkTest(): boolean { try { return new URLSearchParams(location.search).get("bktest") === "1"; } catch { return false; } }
+function bkLocalRelay(): string {
+  try { const u = new URLSearchParams(location.search).get("bkrelay") || ""; return bkTest() && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(u) ? u.replace(/\/+$/, "") : ""; } catch { return ""; }
+}
+const BK_RELAY_KEY = "ed16_bk_relay";
+let bkRelayMem = "";
+let bkRelayAt = 0;
+// The box relay sits behind a tunnel whose URL changes; its current URL is published in a secret gist.
+// Last good URL is cached in ed16_bk_relay; the gist is re-read every 10 min or after a failed request.
+async function bkRelayBase(refresh = false): Promise<string> {
+  const loc = bkLocalRelay();
+  if (loc) return loc;
+  if (ED16_BK_URL) return ED16_BK_URL;
+  if (!bkRelayMem) bkRelayMem = lsGet(BK_RELAY_KEY) || "";
+  const age = Date.now() - bkRelayAt;
+  if (ED16_BK_GIST && age > 5000 && (refresh || !bkRelayMem || age > 10 * 60 * 1000)) {
+    bkRelayAt = Date.now();
+    const p = fetch("https://gist.githubusercontent.com/" + ED16_BK_GIST + "/raw/relay.json?cb=" + Date.now(), { cache: "no-store", credentials: "omit" })
+      .then((r: Response) => r.json() as Promise<{ url?: string }>)
+      .then((o: { url?: string }) => (o && typeof o.url === "string" && /^https:\/\/[^\s]+$/.test(o.url) ? o.url.replace(/\/+$/, "") : ""), () => "");
+    const u = await bkTimeout(p, BK_GET_TIMEOUT_MS, "");
+    if (u) { bkRelayMem = u; lsSet(BK_RELAY_KEY, u); }
+  }
+  return bkRelayMem;
+}
+function bkDevice(): string {
+  let d = lsGet(BK_DEV_KEY);
+  if (!d) { d = "d" + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36); lsSet(BK_DEV_KEY, d); }
+  return d;
+}
+function bkTimeout<T>(p: Promise<T>, ms: number, dflt: T): Promise<T> {
+  return new Promise<T>((res) => { const to = setTimeout(() => res(dflt), ms); p.then((v: T) => { clearTimeout(to); res(v); }, () => { clearTimeout(to); res(dflt); }); });
+}
+// POST as text/plain: no preflight. On failure the relay URL is re-read from the gist and the send tried once more.
+function bkPostTo(base: string, body: string): Promise<boolean> {
+  const init: RequestInit = { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body, credentials: "omit", cache: "no-store", redirect: "follow", keepalive: body.length < 60000, mode: "cors" };
+  const p = fetch(base, init)
+    .then((r: Response) => r.text().then((t: string) => { try { return !!(JSON.parse(t) as { ok?: boolean }).ok; } catch { return false; } }), () => false);
+  return bkTimeout(p, BK_POST_TIMEOUT_MS, false);
+}
+async function bkPost(body: string): Promise<boolean> {
+  if (!bkOn()) return false;
+  if (bkTest()) { try { const o = JSON.parse(body) as Record<string, unknown>; o.test = true; body = JSON.stringify(o); } catch { /* ignore */ } }
+  const base = await bkRelayBase();
+  if (base && await bkPostTo(base, body)) return true;
+  const fresh = await bkRelayBase(true);
+  return !!fresh && fresh !== base ? bkPostTo(fresh, body) : false;
+}
+function bkQueue(): Record<string, string> { try { const o = JSON.parse(lsGet(BK_QUEUE_KEY) || "{}") as Record<string, string>; return o && typeof o === "object" ? o : {}; } catch { return {}; } }
+function bkQueueSet(slot: string, body: string | null): void {
+  const q = bkQueue();
+  if (body) q[slot] = body; else delete q[slot];
+  if (Object.keys(q).length) lsSet(BK_QUEUE_KEY, JSON.stringify(q)); else lsRemove(BK_QUEUE_KEY);
+}
+let bkRetryMs = 0;
+let bkRetryTimer: ReturnType<typeof setTimeout> | null = null;
+// Anything still queued is retried with backoff: 15 s, 30 s, 60 s ... capped at 10 min. Reset once the queue empties.
+function bkBackoff(): void {
+  try {
+    if (!Object.keys(bkQueue()).length) { bkRetryMs = 0; return; }
+    if (bkRetryTimer) return;
+    bkRetryMs = Math.min(600000, bkRetryMs ? bkRetryMs * 2 : 15000);
+    bkRetryTimer = setTimeout(() => { bkRetryTimer = null; bkFlush(); }, bkRetryMs);
+  } catch { /* ignore */ }
+}
+function bkFlush(): void {
+  try {
+    if (!bkOn() || bkFlushing) return;
+    const q = bkQueue(); const slots = Object.keys(q);
+    if (!slots.length) return;
+    bkFlushing = true;
+    void (async () => {
+      for (const slot of slots) {
+        const body = q[slot];
+        const ok = await bkPost(body);
+        if (ok) { BK_STATS.sent++; if (bkQueue()[slot] === body) bkQueueSet(slot, null); bkLog("sent " + slot); }
+        else { BK_STATS.failed++; bkLog("send failed " + slot + " (queued)"); }
+      }
+    })().then(() => { bkFlushing = false; bkBackoff(); }, () => { bkFlushing = false; bkBackoff(); });
+  } catch { bkFlushing = false; }
+}
+function bkCapture(id: ProfId, getCode: () => string, savedT0: number, manual: boolean, post = true): void {
   try {
     if (!BK_SLOTS[id]) return;
     const now = Date.now();
-    if (!always && now - (bkLastCap[id] ?? 0) < BK_DEBOUNCE_MS) { BK_STATS.skipped++; return; }
-    if (!always && bkSched[id]) return;
+    if (!manual && (bkSched[id] || now - (bkLastCap[id] ?? 0) < BK_AUTO_MIN_MS)) { BK_STATS.skipped++; return; }
     bkLastCap[id] = now; bkSched[id] = true;
     const work = (): void => {
       bkSched[id] = false;
       try {
         const code = getCode();
         if (!code) return;
-        let lvl = 0, depth = 0;
-        try { const o = JSON.parse(lzd(code.replace(/^ED2-/, "")) || "{}") as { l?: number; d?: number }; lvl = Number(o.l) || 0; depth = Number(o.d) || 0; } catch { /* stats are display-only */ }
-        const savedAt = new Date().toISOString();
-        bkHistPush(id, { t: Date.now(), lvl, depth, h: bkHash(code), code });
+        const h = bkHash(code);
+        const t = savedT0 > 0 ? savedT0 : Date.now();
+        const st = bkCodeStats(code);
+        bkHistPush(id, { t, lvl: st.lvl, depth: st.depth, h, code });
         BK_STATS.captured++;
-        if (bkWebhookOn()) {
-          const player = (PROFILES.find((p: { id: ProfId; name: string }) => p.id === id) || PROFILES[0]).name;
-          lsSet(bkPendKey(id), JSON.stringify({ player, slot: BK_SLOTS[id], savedAt, code }));
-          bkSendPending(id);
-        }
+        if (!post || !bkOn()) return;
+        if (!manual && bkLastHash[id] === h) { BK_STATS.skipped++; return; }
+        bkLastHash[id] = h;
+        bkQueueSet(BK_SLOTS[id] as string, JSON.stringify({ k: ED16_BK_KEY, slot: BK_SLOTS[id], player: bkName(id), savedAt: new Date(t).toISOString(), code }));
+        bkFlush();
       } catch { /* never surfaces */ }
     };
     const ric = (typeof window !== "undefined" ? (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback : undefined);
     if (typeof ric === "function") ric(work, { timeout: 1500 }); else setTimeout(work, 0);
   } catch { /* never surfaces */ }
 }
-function bkAfterSave(g: Game, manual: boolean): void {
-  try { const id = activeProf; bkCapture(id, () => (activeProf === id && g.mode === "play" ? makeCode(g) : ""), manual); } catch { /* ignore */ }
+function bkAfterSave(g: Game, manual: boolean, raw: string): void {
+  try { const id = activeProf; bkCapture(id, () => (activeProf === id && g.mode === "play" ? makeCode(g) : ""), savedT(raw), manual); } catch { /* ignore */ }
+}
+function bkCodeOfRaw(raw: string): string {
+  const mw = MW, mh = MH;
+  QUIET_ANNOUNCE++;
+  try { const l = loadGame(null, raw); return l ? makeCode(l) : ""; } catch { return ""; }
+  finally { QUIET_ANNOUNCE--; try { setMapSize(mw, mh); } catch { /* ignore */ } }
 }
 function bkAfterRestore(id: ProfId, raw: string): void {
-  try { bkCapture(id, () => { const l = loadGame(null, raw); return l ? makeCode(l) : ""; }, true); } catch { /* ignore */ }
+  try { bkCapture(id, () => bkCodeOfRaw(raw), savedT(raw), true); } catch { /* ignore */ }
 }
-function bkRetryAllPending(): void { try { for (const k of Object.keys(BK_SLOTS)) bkSendPending(Number(k) as ProfId); } catch { /* ignore */ } }
-// Recover from backup: put a history entry back into its profile. The current save is kept under
-// ed16_recover_prev_pN_<time> first (same as Recover lost profiles); nothing is deleted.
+// Write a code into a profile slot. The slot's current blob is kept under ed16_recover_prev_pN_<time> first.
+function bkWriteCode(id: ProfId, code: string): string | null {
+  if (!BK_SLOTS[id]) return null;
+  const raw = persistRawFromCode(code);
+  if (!raw) return null;
+  const existing = profBlob(id);
+  const keep: string[] = [];
+  for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== raw && keep.indexOf(r) < 0) keep.push(r);
+  keep.forEach((r: string, i: number) => { const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : ""); void idbPutDone(k, r); lsSet(k, r); });
+  if (id === activeProf) memSave = raw; else memSaveBy[id] = raw;
+  const ok = writeDurable(profSaveKey(id), raw) || lsGet(profSaveKey(id)) === raw;
+  return ok ? raw : null;
+}
 function bkRestoreHist(id: ProfId, e: BkHist): boolean {
+  try { const raw = bkWriteCode(id, e.code); if (raw) bkAfterRestore(id, raw); return !!raw; } catch { return false; }
+}
+// Relay file names start with yyyy-MM-dd_HHmmss in America/Chicago.
+function bkCtNameTime(name: string): number {
   try {
-    if (!BK_SLOTS[id]) return false;
-    const g = decodeCode(e.code, null);
-    if (!g) return false;
-    g.mode = "play";
-    const raw = buildPersistRaw(g);
-    if (!parseSaveRaw(raw)) return false;
-    const existing = profBlob(id);
-    const keep: string[] = [];
-    for (const r of [existing, lsGet(profSaveKey(id)), ssGet(profSaveKey(id)), hookGet(profSaveKey(id))]) if (r && r !== raw && keep.indexOf(r) < 0) keep.push(r);
-    keep.forEach((r: string, i: number) => { const k = "ed16_recover_prev_p" + id + "_" + Date.now() + (i ? "_" + i : ""); void idbPutDone(k, r); lsSet(k, r); });
-    if (id === activeProf) memSave = raw; else memSaveBy[id] = raw;
-    const ok = writeDurable(profSaveKey(id), raw) || lsGet(profSaveKey(id)) === raw;
-    if (ok) bkAfterRestore(id, raw);
-    return ok;
-  } catch { return false; }
+    const m = /^(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(name || "");
+    if (!m) return 0;
+    const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(guess));
+    const v = (ty: string): number => Number((parts.find((p: Intl.DateTimeFormatPart) => p.type === ty) || { value: "0" }).value);
+    const asCt = Date.UTC(v("year"), v("month") - 1, v("day"), v("hour") % 24, v("minute"), v("second"));
+    return guess - (asCt - guess);
+  } catch { return 0; }
+}
+async function bkRelayLatest(id: ProfId): Promise<{ t: number; code: string } | null> {
+  if (!bkOn()) return null;
+  const get = (base: string): Promise<{ t: number; code: string } | null | undefined> => {
+    const url = base + (base.indexOf("?") >= 0 ? "&" : "?") + "k=" + encodeURIComponent(ED16_BK_KEY) + "&slot=" + BK_SLOTS[id] + (bkTest() ? "&test=1" : "") + "&_=" + Date.now();
+    const p = fetch(url, { method: "GET", mode: "cors", credentials: "omit", cache: "no-store", redirect: "follow" })
+      .then((r: Response) => r.json() as Promise<{ ok?: boolean; name?: string; savedAt?: string; code?: string }>)
+      .then((o: { ok?: boolean; name?: string; savedAt?: string; code?: string }) => {
+        if (!o || !o.ok) return undefined;
+        if (typeof o.code !== "string" || !o.code) return null;
+        const ts = o.savedAt ? Date.parse(o.savedAt) : NaN;
+        return { t: isFinite(ts) ? ts : bkCtNameTime(o.name || ""), code: o.code };
+      }, () => undefined);
+    return bkTimeout(p, BK_GET_TIMEOUT_MS, undefined);
+  };
+  const base = await bkRelayBase();
+  let r = base ? await get(base) : undefined;
+  if (r === undefined) { const fresh = await bkRelayBase(true); if (fresh && fresh !== base) r = await get(fresh); }
+  return r || null;
+}
+function bkHealSlots(): ProfId[] {
+  try {
+    if (isMikeLocked() || mikeLinkVerdict === "yes") return [5];
+    if (ownerUnlockRemembered() || skipOwnerGateNow()) return [1, 2, 3, 5];
+  } catch { /* ignore */ }
+  return [];
+}
+function bkSlotState(id: ProfId): { savedAt: string; level: number; depth: number } | null {
+  const s = parseSaveRaw(profBlob(id));
+  if (!s) return null;
+  const t = typeof s.t === "number" && isFinite(s.t) ? s.t : 0;
+  return { savedAt: t ? new Date(t).toISOString() : "", level: Math.floor(Number(s.lvl) || 0), depth: Math.floor(Number(s.depth) || 0) };
+}
+function bkHeartbeat(): void {
+  try {
+    if (!bkOn()) return;
+    const slots: Record<string, unknown> = {};
+    for (const id of bkHealSlots()) slots[BK_SLOTS[id] as string] = bkSlotState(id);
+    void bkPost(JSON.stringify({ k: ED16_BK_KEY, type: "state", device: bkDevice(), at: new Date().toISOString(), build: buildIdNow(), slots })).then((ok: boolean) => { if (ok) BK_STATS.beats++; });
+  } catch { /* ignore */ }
+}
+let bkHealBusy = false;
+let bkHealLast = 0;
+// Returns the profiles that were healed. Never touches p4, never overwrites a newer valid slot.
+async function bkHealAll(force = false): Promise<ProfId[]> {
+  const healed: ProfId[] = [];
+  if (bkHealBusy || (!force && Date.now() - bkHealLast < BK_HEAL_MIN_GAP_MS)) return healed;
+  bkHealBusy = true; bkHealLast = Date.now(); BK_STATS.healChecks++;
+  try {
+    bkFlush();
+    for (const id of bkHealSlots()) {
+      try {
+        if (!BK_SLOTS[id]) continue;
+        const cur = parseSaveRaw(profBlob(id));
+        const curT = cur ? savedT(profBlob(id)) : -1;
+        const curRank = cur ? runProgressRank(Number(cur.lvl) || 0, Number(cur.depth) || 0, 0) : -1;
+        const cands: { t: number; code: string; src: string }[] = [];
+        const hist = await bkHistAll(id);
+        if (hist.length) cands.push({ t: hist[0].t, code: hist[0].code, src: "local" });
+        const rl = await bkRelayLatest(id);
+        if (rl && rl.t <= Date.now() + 60000) cands.push({ t: rl.t, code: rl.code, src: "relay" });
+        cands.sort((a: { t: number }, b: { t: number }) => b.t - a.t);
+        for (const c of cands) {
+          const st = bkCodeStats(c.code);
+          if (!st.lvl) continue; // not a decodable code
+          const rank = runProgressRank(st.lvl, st.depth, 0);
+          // A relay file name only has whole seconds, so allow 1.5 s when comparing times.
+          const older = !cur || curT + 1500 < c.t;
+          const sameTimeBehind = cur && Math.abs(curT - c.t) <= 1500 && curRank < rank;
+          if (!older && !sameTimeBehind) break;
+          // Re-read right before writing: a save may have landed while the relay was answering.
+          const now = parseSaveRaw(profBlob(id));
+          if (now && savedT(profBlob(id)) > curT) break;
+          const raw = bkWriteCode(id, c.code);
+          if (!raw) continue;
+          bkHistPush(id, { t: c.t, lvl: st.lvl, depth: st.depth, h: bkHash(c.code), code: c.code });
+          BK_STATS.heals++; healed.push(id);
+          bkLog("healed " + BK_SLOTS[id] + " from " + c.src + " (" + (cur ? "slot older" : "slot empty/unreadable") + ")");
+          break;
+        }
+      } catch { /* one slot never stops the others */ }
+    }
+    bkHeartbeat();
+  } catch { /* never surfaces */ }
+  finally { bkHealBusy = false; }
+  return healed;
+}
+let bkHealStarted = false;
+let bkOnActive: () => void = () => { /* set by bkStartAutoHeal */ };
+function bkRunHeal(force: boolean): void {
+  if (force && bkHealBusy) { setTimeout(() => bkRunHeal(true), 3000); return; }
+  void bkHealAll(force).then((ids: ProfId[]) => { try { if (ids.indexOf(activeProf) >= 0) bkOnActive(); } catch { /* ignore */ } }, () => { /* ignore */ });
+}
+// Called right after the Mike link unlocks: pull p5 from the relay at once (keyed to the slot, not the device).
+function bkKickHeal(): void { try { setTimeout(() => bkRunHeal(true), 300); } catch { /* ignore */ } }
+function bkStartAutoHeal(onActiveHealed: () => void): void {
+  if (bkHealStarted) return;
+  bkHealStarted = true;
+  bkOnActive = onActiveHealed;
+  const run = bkRunHeal;
+  try { const sm = navigator.storage as StorageManager | undefined; if (sm && sm.persist) void sm.persist().catch(() => false); } catch { /* ignore */ }
+  try {
+    setTimeout(() => run(true), 2000);
+    setInterval(() => run(true), BK_HEAL_EVERY_MS);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") run(false); });
+    window.addEventListener("focus", () => run(false));
+    window.addEventListener("pageshow", () => run(false));
+    window.addEventListener("online", () => { bkFlush(); run(false); });
+  } catch { /* ignore */ }
 }
 function saveGame(g: Game, quiet = false, force = false): boolean {
   syncMapSize(g);
@@ -10741,7 +10953,7 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
     // Only show "Saved" after a verified durable write.
     // A failed write used to toast anyway, so a stale slot (e.g. the level-1 beginNew) looked saved.
     if (ok && !quiet) g.toast = 1.4;
-    if (ok) bkAfterSave(g, SAVE_MANUAL);
+    if (ok) bkAfterSave(g, SAVE_MANUAL, raw);
     return ok;
   } catch (err) {
     lastPersistErr = viewerBlocksSaving() ? "this viewer blocks saving" : ("save threw: " + storeDeniedReason("save", err));
@@ -22228,7 +22440,8 @@ try {
     artAlertReset: (): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (g.artCave) g.artCave.al = 0; g.artAlert = null; ART_ALERT_LOG.length = 0; return { ok: true }; },
     mute: (on?: boolean): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; if (on === true || on === false) g.muted = on; return { ok: true, muted: !!g.muted }; },
     saveCode: (): string => { const g = LIVE; return g ? saveCodeOf(g) : ""; },
-    bkStats: (): Record<string, unknown> => ({ ...BK_STATS, webhook: bkWebhookOn(), hist: Object.keys(BK_SLOTS).map((k: string) => [k, bkHistOf(Number(k) as ProfId).length]) }),
+    bkStats: (): Record<string, unknown> => ({ ...BK_STATS, on: bkOn(), queue: Object.keys(bkQueue()), log: BK_LOG.slice(-10), hist: Object.keys(BK_SLOTS).map((k: string) => [k, bkHistOf(Number(k) as ProfId).length]) }),
+    bkHeal: (): Promise<number[]> => bkHealAll(true),
     bkAutoSave: (): boolean => { const g = LIVE; return g ? saveGame(g, true) : false; },
     goto: (x: number, y: number): Record<string, unknown> => { const g = LIVE; if (!g) return { ok: false }; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; g.slide = null; IP.camOk = false; computeVis(g); return { ok: true }; },
     gotoFront: (back = 1): Record<string, unknown> => { const g = LIVE; const a = g && g.artCave; if (!g || !a || a.ox === undefined) return { ok: false }; const x = a.ox - a.sx! * back, y = a.oy - a.sy! * back; g.hero.x = g.hero.ax = x; g.hero.y = g.hero.ay = y; IP.camOk = false; computeVis(g); return { ok: true, x, y, dir: [a.sx, a.sy] }; },
@@ -24924,9 +25137,12 @@ export default function App() {
   const openBkHist = (): void => {
     if (isMikeLocked()) return;
     if (bkList) { setBkList(null); return; }
-    const out: { id: ProfId; e: BkHist }[] = [];
-    for (const k of Object.keys(BK_SLOTS)) { const id = Number(k) as ProfId; for (const e of bkHistOf(id)) out.push({ id, e }); }
-    setBkNote(""); setBkList(out); bump();
+    setBkNote(""); setBkList([]);
+    void (async () => {
+      const out: { id: ProfId; e: BkHist }[] = [];
+      for (const k of Object.keys(BK_SLOTS)) { const id = Number(k) as ProfId; for (const e of await bkHistAll(id)) out.push({ id, e }); }
+      return out;
+    })().then((out: { id: ProfId; e: BkHist }[]) => { setBkList(out); bump(); }, () => { /* keep list */ });
   };
   const doBkRestore = (id: ProfId, e: BkHist): void => {
     if (isMikeLocked()) return;
@@ -25279,6 +25495,7 @@ export default function App() {
       else if (st === "unset") setMikePinPhase("setup");
       else { setMikePinPhase("ok"); }
       bump();
+      bkKickHeal();
     };
     const run = async (): Promise<void> => {
       if (readMikeLocked()) { finishLocked(); return; }
@@ -26392,7 +26609,17 @@ export default function App() {
       markStorageReady();
       const g2 = gRef.current; if (g2) g2.notify();
       bump();
-      try { setTimeout(bkRetryAllPending, 3000); } catch { /* backup retry is best-effort */ }
+      try {
+        bkStartAutoHeal(() => {
+          // The open profile was healed underneath a running game: swap the run so its next autosave cannot write the old state back.
+          const cur = gRef.current;
+          if (!cur || cur.mode !== "play") return;
+          const n = loadGame(cur);
+          if (!n) return;
+          n.mode = "play"; n.notify = bump; n.sfx = cur.sfx;
+          gRef.current = n; LIVE = n; bump();
+        });
+      } catch { /* backups are best-effort */ }
     }, () => { markStorageReady(); bump(); });
 
     // title demo gear
