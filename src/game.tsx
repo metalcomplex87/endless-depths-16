@@ -10142,14 +10142,15 @@ async function fetchGistRestorePayload(id: string): Promise<string> {
   let content = "";
   let rawUrl = "";
   let truncated = false;
-  const timed = (url: string, init?: RequestInit): Promise<Response> => {
+  // No custom headers: a non-safelisted Accept value triggers a CORS preflight
+  // that api.github.com rejects (Accept is not in Access-Control-Allow-Headers).
+  const timed = (url: string): Promise<Response> => {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => { try { ctrl.abort(); } catch { /* ignore */ } }, 8000);
-    const opts: RequestInit = { ...(init || {}), signal: ctrl.signal };
-    return fetch(url, opts).finally(() => window.clearTimeout(t));
+    return fetch(url, { method: "GET", credentials: "omit", signal: ctrl.signal }).finally(() => window.clearTimeout(t));
   };
   try {
-    const r = await timed(api, { headers: { Accept: "application/vnd.github+json" } });
+    const r = await timed(api);
     if (r.ok) {
       const data = await r.json() as { files?: Record<string, { content?: string; truncated?: boolean; raw_url?: string; filename?: string }> };
       const files = data && data.files ? data.files : {};
