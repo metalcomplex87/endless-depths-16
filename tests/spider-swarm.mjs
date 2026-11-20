@@ -52,15 +52,21 @@ async function main() {
 
     // (a) depth gate on the pure roll (20k seeds each)
     const smp = {};
-    for (const d of [26, 50, 51, 75, 150, 400]) smp[d] = await S(page, "sample", d, 20000);
+    for (const d of [26, 50, 51, 55, 75, 76, 150, 401]) smp[d] = await S(page, "sample", d, 20000);
     rec("(a) no swarm rolls below 51 (26, 50); shrine odds unchanged", smp[26].swarm === 0 && smp[50].swarm === 0 && Math.abs(smp[50].shrine / 20000 - 0.05) < 0.008, { 26: smp[26], 50: smp[50] });
-    rec("swarm rolls ~5% at 51, 75, 150, 400 (every depth >= 51); shrine still ~5%", [51, 75, 150, 400].every((d) => Math.abs(smp[d].swarm / 20000 - 0.05) < 0.008 && Math.abs(smp[d].shrine / 20000 - 0.05) < 0.008), [51, 75, 150, 400].map((d) => [d, smp[d].swarm, smp[d].shrine]));
+    rec("swarm rolls ~5% at 51, 76, 401 (non-boss depths >= 51); shrine still ~5%", [51, 76, 401].every((d) => Math.abs(smp[d].swarm / 20000 - 0.05) < 0.008 && Math.abs(smp[d].shrine / 20000 - 0.05) < 0.008), [51, 76, 401].map((d) => [d, smp[d].swarm, smp[d].shrine]));
+    rec("act-boss depths 55, 75, 150 roll 0 swarms (shrine roll unchanged)", [55, 75, 150].every((d) => smp[d].swarm === 0 && Math.abs(smp[d].shrine / 20000 - 0.05) < 0.008), [55, 75, 150].map((d) => [d, smp[d].swarm, smp[d].shrine]));
 
     // real genFloor path
     const gm = {};
-    for (const d of [50, 51, 75, 150]) gm[d] = await S(page, "genMany", d, 300);
+    for (const d of [50, 51, 55, 75, 76, 150]) gm[d] = await S(page, "genMany", d, 300);
     rec("(a) real floor gen: 0 swarms at depth 50 in 300 floors", gm[50].armed === 0, gm[50]);
-    rec("real floor gen arms swarms at 51, 75, 150 (~5%), never together with a shrine", [51, 75, 150].every((d) => gm[d].armed > 0 && gm[d].armed < 40 && gm[d].both === 0), [51, 75, 150].map((d) => ({ d, armed: gm[d].armed, shrine: gm[d].shrine, both: gm[d].both })));
+    rec("real floor gen arms swarms at 51 and 76 (~5%), never together with a shrine", [51, 76].every((d) => gm[d].armed > 0 && gm[d].armed < 40 && gm[d].both === 0), [51, 76].map((d) => ({ d, armed: gm[d].armed, shrine: gm[d].shrine, both: gm[d].both })));
+    rec("real floor gen: 0 swarms on act-boss depths 55, 75, 150 (300 floors each)", [55, 75, 150].every((d) => gm[d].armed === 0), [55, 75, 150].map((d) => ({ d, armed: gm[d].armed })));
+    await S(page, "force", true);
+    const fAct = await S(page, "genMany", 75, 20);
+    await S(page, "force", false);
+    rec("even forced, act-boss depth 75 never arms a swarm", fAct.armed === 0, fAct);
     await S(page, "force", true);
     const g50 = await HZ(page, "gen", 50); const st50 = await S(page, "state");
     rec("(a) even forced, depth 50 never arms a swarm", !st50.armed && !st50.active, { depth: g50.depth, armed: st50.armed });

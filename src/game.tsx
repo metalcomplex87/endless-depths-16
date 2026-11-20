@@ -19071,7 +19071,7 @@ function drawSwarmHud(ctx: CanvasRenderingContext2D, g: Game, t: number): void {
   ctx.restore();
 }
 // ---------- 2026-11-20: Spider Swarm event ----------
-// Depth 51 and deeper (every depth >= 51, not only 51). It uses the same per-floor roll as the event shrine:
+// Depth 51 and deeper (every depth >= 51, not only 51), except act-boss floors (depth % 5 === 0). It uses the same per-floor roll as the event shrine:
 // u = rng32(hash32(floorSeed, depth, 0x5821))(). The shrine keeps u < SHRINE_CH (5%) unchanged; on a depth >= 51 floor
 // the next 5% band (SHRINE_CH <= u < SHRINE_CH + SPSW_CH) becomes a Spider Swarm instead of an empty floor.
 // So a floor gets a shrine OR a swarm, never both, and each is about 5% of eligible floors.
@@ -19097,8 +19097,8 @@ function unpackSpSwD(raw: unknown): number[] {
   return out.slice(-SPSW_KEEP);
 }
 function spSwEligible(g: Game): boolean {
-  // every depth >= 51 (boss and act floors included: one per depth, so a death there can never loop it)
-  if (g.depth < SPSW_MIN_DEPTH || spSwDone(g, g.depth)) return false;
+  // every depth >= 51 except act-boss floors (depth % 5 === 0), which keep the plain shrine roll
+  if (g.depth < SPSW_MIN_DEPTH || isActFloor(g.depth) || spSwDone(g, g.depth)) return false;
   if (g.area === "camp" || g.vault || g.arena || g.gobCave || (g.area ?? "dungeon") !== "dungeon") return false;
   return true;
 }
@@ -19106,7 +19106,7 @@ function spSwEligible(g: Game): boolean {
 function spSwRollOf(seed: number, depth: number): "shrine" | "swarm" | "none" {
   const u = rng32(hash32(seed, depth, 0x5821) | 1)();
   if (u < SHRINE_CH) return "shrine";
-  if (depth >= SPSW_MIN_DEPTH && u < SHRINE_CH + SPSW_CH) return "swarm";
+  if (depth >= SPSW_MIN_DEPTH && !isActFloor(depth) && u < SHRINE_CH + SPSW_CH) return "swarm";
   return "none";
 }
 // Called at the top of maybeSpawnShrine (the shrine's roll slot). Returns true when this floor became a swarm floor.
