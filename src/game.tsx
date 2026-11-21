@@ -154,6 +154,7 @@ interface FloorSnap {
 interface Splat { x: number; y: number; wall: boolean; c: string; life: number; max: number; dots: { x: number; y: number; s: number; a: number }[] }
 interface Shard { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number; max: number; cv: HTMLCanvasElement; g: number; rest?: number; drag?: number; bounces?: number; streak?: number; age?: number; hzs?: number; sc?: number; ht?: number; burn?: number }
 interface Game {
+  pid?: ProfId; // profile this run belongs to (set when the run is created/loaded); a save never lands in another profile
   nk?: NkSt; nkr?: NkRt;
   mode: Mode; depth: number; map: Uint8Array; seen: Uint8Array; vis: Uint8Array; theme: number; tiles: HTMLCanvasElement[];
   hero: Hero; lvl: number; xp: number; gold: number; gems?: number; potions: number; eq: Eq; bag: Item[];
@@ -11164,6 +11165,7 @@ function restoreMikeFromText(text: string, prev: Game | null): Game | null {
   const g = loadMikeSaveText(text, prev);
   if (!g) return null;
   setActiveProf(MIKE_PROF);
+  g.pid = MIKE_PROF;
   lastPersistOk = false;
   try { lastPersistOk = commitImportedRun(g, true); } catch { lastPersistOk = false; }
   return g;
@@ -12195,8 +12197,38 @@ function bkHistPush(id: ProfId, e: BkHist): void {
   // Never compete with the real save for space: on a failed write keep fewer entries, never more.
   while (a.length > 0) { if (lsSet(bkHistKey(id), JSON.stringify(a))) { BK_STATS.hist++; return; } a = a.slice(0, a.length - 1); }
 }
-function bkCodeStats(code: string): { lvl: number; depth: number } {
-  try { const o = JSON.parse(lzd(code.replace(/^ED2-/, "")) || "{}") as { l?: number; d?: number }; return { lvl: Number(o.l) || 0, depth: Number(o.d) || 0 }; } catch { return { lvl: 0, depth: 0 }; }
+function bkCodeStats(code: string): { lvl: number; depth: number; xp: number; gold: number; kills: number } {
+  try { const o = JSON.parse(lzd(code.replace(/^ED2-/, "").replace(/=+$/, "")) || "{}") as { l?: number; d?: number; x?: number; g?: number; k?: number }; return { lvl: Number(o.l) || 0, depth: Number(o.d) || 0, xp: Number(o.x) || 0, gold: Number(o.g) || 0, kills: Number(o.k) || 0 }; } catch { return { lvl: 0, depth: 0, xp: 0, gold: 0, kills: 0 }; }
+}
+// ---- starter saves -------------------------------------------------------------------------------------------
+// A "starter" is a save nobody has played: the embedded Jax seed exactly as shipped (level/depth/xp/gold/kills all
+// equal), or an untouched level-1 game (depth 1, no xp, no kills) that was NOT made with a deliberate New Game on this
+// device. Starters count as an empty slot for healing, are never uploaded, and never become a heal source. Any real
+// progress (one kill, one xp, one gold) makes a save real again.
+let starterSigMem: number[] | null | undefined;
+function starterSig(): number[] | null {
+  if (starterSigMem !== undefined) return starterSigMem;
+  try { const st = bkCodeStats(JAX_SEED_CODE); starterSigMem = st.lvl ? [st.lvl, st.depth, st.xp, st.gold, st.kills] : null; } catch { starterSigMem = null; }
+  return starterSigMem;
+}
+function newGameKey(id: ProfId): string { return "ed16_newgame_p" + id; }
+function markNewGame(id: ProfId): void { try { lsSet(newGameKey(id), String(Date.now())); } catch { /* ignore */ } }
+function deliberateNewGame(id: ProfId): boolean { try { return !!lsGet(newGameKey(id)); } catch { return false; } }
+function isStarterStats(id: ProfId, lvl: number, depth: number, xp: number, gold: number, kills: number): boolean {
+  if (!lvl) return false;
+  const sig = starterSig();
+  if (sig && lvl === sig[0] && depth === sig[1] && Math.floor(xp) === sig[2] && Math.floor(gold) === sig[3] && kills === sig[4]) return true;
+  return lvl <= 1 && depth <= 1 && xp <= 0 && kills <= 0 && !deliberateNewGame(id);
+}
+function isStarterCode(id: ProfId, code: string): boolean {
+  try { const st = bkCodeStats(code); return isStarterStats(id, st.lvl, st.depth, st.xp, st.gold, st.kills); } catch { return false; }
+}
+function isStarterRaw(id: ProfId, raw: string | null): boolean {
+  try {
+    const s = parseSaveRaw(raw);
+    if (!s) return false;
+    return isStarterStats(id, Math.floor(Number(s.lvl) || 0), Math.floor(Number(s.depth) || 0), Number(s.xp) || 0, Number(s.gold) || 0, Math.floor(Number(s.kills) || 0));
+  } catch { return false; }
 }
 function bkOn(): boolean { return !!ED16_BK_KEY && (!!ED16_BK_URL || !!ED16_BK_GIST || !!bkLocalRelay()) && typeof fetch === "function"; }
 // ?bktest=1 sends to the relay's _test namespace (e2e only). ?bkrelay= is honoured only for a loopback test relay.
@@ -12282,6 +12314,11 @@ function bkFlush(): void {
     void (async () => {
       for (const slot of slots) {
         const body = q[slot];
+        try {
+          const o = JSON.parse(body) as { code?: string };
+          const sid = Number(Object.keys(BK_SLOTS).find((k: string) => BK_SLOTS[Number(k) as ProfId] === slot) || 0) as ProfId;
+          if (sid && typeof o.code === "string" && isStarterCode(sid, o.code)) { bkQueueSet(slot, null); BK_STATS.skipped++; bkLog("dropped queued starter " + slot); continue; }
+        } catch { /* send as before */ }
         const ok = await bkPost(body);
         if (ok) { BK_STATS.sent++; if (bkQueue()[slot] === body) bkQueueSet(slot, null); bkLog("sent " + slot); }
         else { BK_STATS.failed++; bkLog("send failed " + slot + " (queued)"); }
@@ -12300,6 +12337,7 @@ function bkCapture(id: ProfId, getCode: () => string, savedT0: number, manual: b
       try {
         const code = getCode();
         if (!code) return;
+        if (isStarterCode(id, code)) { BK_STATS.skipped++; bkLog("skipped starter " + BK_SLOTS[id]); return; } // never back up / upload an unplayed starter
         const h = bkHash(code);
         const t = savedT0 > 0 ? savedT0 : Date.now();
         const st = bkCodeStats(code);
@@ -12317,7 +12355,7 @@ function bkCapture(id: ProfId, getCode: () => string, savedT0: number, manual: b
   } catch { /* never surfaces */ }
 }
 function bkAfterSave(g: Game, manual: boolean, raw: string): void {
-  try { const id = activeProf; bkCapture(id, () => (activeProf === id && g.mode === "play" ? makeCode(g) : ""), savedT(raw), manual); } catch { /* ignore */ }
+  try { const id = activeProf; if (g.pid !== undefined && g.pid !== id) return; bkCapture(id, () => (activeProf === id && g.mode === "play" && (g.pid === undefined || g.pid === id) ? makeCode(g) : ""), savedT(raw), manual); } catch { /* ignore */ }
 }
 function bkCodeOfRaw(raw: string): string {
   const mw = MW, mh = MH;
@@ -12414,7 +12452,10 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
     for (const id of bkHealSlots()) {
       try {
         if (!BK_SLOTS[id]) continue;
-        const cur = parseSaveRaw(profBlob(id));
+        // A starter in the slot (seed or untouched level 1, e.g. after a storage wipe / fresh install / new browser)
+        // counts as empty: the best real save heals over it whatever its timestamp says.
+        const curStarter = isStarterRaw(id, profBlob(id));
+        const cur = curStarter ? null : parseSaveRaw(profBlob(id));
         const curT = cur ? savedT(profBlob(id)) : -1;
         const curRank = cur ? runProgressRank(Number(cur.lvl) || 0, Number(cur.depth) || 0, 0) : -1;
         const cands: { t: number; code: string; src: string }[] = [];
@@ -12426,6 +12467,7 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
         for (const c of cands) {
           const st = bkCodeStats(c.code);
           if (!st.lvl) continue; // not a decodable code
+          if (isStarterCode(id, c.code)) continue; // never heal *to* a starter
           const rank = runProgressRank(st.lvl, st.depth, 0);
           // A relay file name only has whole seconds, so allow 1.5 s when comparing times.
           // Never trade progress away silently: a newer-in-time copy only heals a readable slot if it is at least
@@ -12435,7 +12477,7 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
           if (!older && !sameTimeBehind) break;
           // Re-read right before writing: a save may have landed while the relay was answering.
           const now = parseSaveRaw(profBlob(id));
-          if (now && savedT(profBlob(id)) > curT) break;
+          if (now && savedT(profBlob(id)) > curT && !isStarterRaw(id, profBlob(id))) break;
           // persistRawFromCode always mints a new t, which used to look like an older slot on the next heal
           // and rewrite+snapshot the same save over and over.
           if (bkSameSave(profBlob(id), persistRawFromCode(c.code))) break;
@@ -12443,7 +12485,7 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
           if (!raw) continue;
           bkHistPush(id, { t: c.t, lvl: st.lvl, depth: st.depth, h: bkHash(c.code), code: c.code });
           BK_STATS.heals++; healed.push(id);
-          bkLog("healed " + BK_SLOTS[id] + " from " + c.src + " (" + (cur ? "slot older" : "slot empty/unreadable") + ")");
+          bkLog("healed " + BK_SLOTS[id] + " from " + c.src + " (" + (cur ? "slot older" : curStarter ? "slot held an unplayed starter" : "slot empty/unreadable") + ")");
           break;
         }
       } catch { /* one slot never stops the others */ }
@@ -12481,6 +12523,9 @@ function saveGame(g: Game, quiet = false, force = false): boolean {
   if (!profPersists(activeProf)) return false;
   if (GIB_SKIP_SAVE) return false;
   if (g.mode !== "play") return false;
+  // Cross-profile guard: a run that belongs to another profile (stale game still in memory after a profile switch)
+  // is never written into the active profile's slot or uploaded under its name.
+  if (g.pid !== undefined && g.pid !== activeProf) { lastPersistErr = "profile changed"; try { bkLog("blocked cross-profile save p" + g.pid + " -> p" + activeProf); } catch { /* ignore */ } return false; }
   lastPersistOk = false;
   lastPersistErr = "";
   if (!persistAsked) requestPersist();
@@ -13037,7 +13082,7 @@ function loadGame(prev: Game | null, rawIn?: string | null): Game | null {
 function newGame(prev: Game | null): Game {
   const [best, bestLvl] = loadBest();
   const g: Game = {
-    mode: "title", depth: 1, map: new Uint8Array(MW * MH), seen: new Uint8Array(MW * MH), vis: new Uint8Array(MW * MH), theme: 0, tiles: [],
+    pid: activeProf, mode: "title", depth: 1, map: new Uint8Array(MW * MH), seen: new Uint8Array(MW * MH), vis: new Uint8Array(MW * MH), theme: 0, tiles: [],
     hero: { x: 1, y: 1, ax: 1, ay: 1, face: 1, dir: 2, hp: baseHp(1), bump: 0, bdx: 0, bdy: 0 }, lvl: 1, xp: 0, gold: 0, gems: 0, potions: 2,
     eq: { head: null, chest: null, arms: null, legs: null, rh: makeItem(1, 0, "sword"), lh: makeItem(1, 0, "shield"), pet: null }, bag: [], thSeen: [],
     en: [], pend: [], chests: [], drops: [], parts: [], floats: [], shots: [], msgs: [], banner: null, turn: 0,
@@ -26875,6 +26920,7 @@ export default function App() {
     const g = gRef.current;
     if (!g) return;
     clearSave();
+    markNewGame(activeProf); // a deliberate New Game is never treated as an unplayed starter (never healed over)
     setConfirmNew(false); setTitleNote("");
     const n = g.mode === "title" ? newGame(g) : newGame(g);
     n.mode = "play"; n.muted = mutedRef.current; n.music = musicRef.current;
