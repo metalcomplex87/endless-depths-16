@@ -11070,6 +11070,7 @@ function ensureJaxSeed(): boolean {
     memSaveBy[JAX_SEED_PROF] = raw;
     if (activeProf === JAX_SEED_PROF) memSave = raw;
     writeDurable(profSaveKey(JAX_SEED_PROF), raw);
+    setProvisional(JAX_SEED_PROF, true); // auto-written seed: provisional until the relay confirms nothing better exists
     return true;
   } catch { return false; }
   finally { jaxSeedBusy = false; }
@@ -11607,6 +11608,7 @@ function restoreCandidate(c: RecoverCand, id: ProfId): boolean {
   keepSlotBackup(id, keep);
   if (id === activeProf) memSave = c.raw; else memSaveBy[id] = c.raw;
   const ok = writeDurable(profSaveKey(id), c.raw);
+  if (ok) setProvisional(id, false); // a deliberate restore is never provisional
   if (ok) bkAfterRestore(id, c.raw);
   RECOVERED.push(id);
   return ok || lsGet(profSaveKey(id)) === c.raw || hookGet(profSaveKey(id)) === c.raw;
@@ -11896,6 +11898,7 @@ function exportCode(g: Game | null): string {
 // slot kept a stale level-1 beginNew blob. Always set play and force-write after a valid import.
 function commitImportedRun(g: Game, quiet = false): boolean {
   g.mode = "play";
+  if (g.pid === undefined || g.pid === activeProf) setProvisional(activeProf, false); // an imported code is the kid's real run
   return saveGame(g, quiet, true);
 }
 function importCode(code: string, prev: Game | null): Game | null {
@@ -12212,7 +12215,16 @@ function starterSig(): number[] | null {
   return starterSigMem;
 }
 function newGameKey(id: ProfId): string { return "ed16_newgame_p" + id; }
-function markNewGame(id: ProfId): void { try { lsSet(newGameKey(id), String(Date.now())); } catch { /* ignore */ } }
+function markNewGame(id: ProfId): void { try { lsSet(newGameKey(id), String(Date.now())); } catch { /* ignore */ } setProvisional(id, false); }
+// ---- provisional slots ----------------------------------------------------------------------------------------
+// A slot the game filled by itself with the embedded Jax seed (empty slot after a storage wipe / new browser) is
+// "provisional": even after the kid plays a few floors on it, it is never uploaded and any better real save
+// (relay or local history, higher level/depth) heals over it regardless of timestamps. It becomes a normal slot as
+// soon as a heal check reaches the relay and finds nothing better, or after a heal, restore, import or New Game.
+function provKey(id: ProfId): string { return "ed16_prov_p" + id; }
+function isProvisional(id: ProfId): boolean { try { return !!lsGet(provKey(id)); } catch { return false; } }
+function setProvisional(id: ProfId, on: boolean): void { try { if (on) lsSet(provKey(id), String(Date.now())); else lsRemove(provKey(id)); } catch { /* ignore */ } }
+const bkRelayAnswered: Partial<Record<ProfId, boolean>> = {};
 function deliberateNewGame(id: ProfId): boolean { try { return !!lsGet(newGameKey(id)); } catch { return false; } }
 function isStarterStats(id: ProfId, lvl: number, depth: number, xp: number, gold: number, kills: number): boolean {
   if (!lvl) return false;
@@ -12343,6 +12355,7 @@ function bkCapture(id: ProfId, getCode: () => string, savedT0: number, manual: b
         const st = bkCodeStats(code);
         bkHistPush(id, { t, lvl: st.lvl, depth: st.depth, h, code });
         BK_STATS.captured++;
+        if (isProvisional(id)) { BK_STATS.skipped++; bkLog("kept provisional " + BK_SLOTS[id] + " local (not uploaded)"); return; }
         if (!post || !bkOn()) return;
         if (!manual && bkLastHash[id] === h) { BK_STATS.skipped++; return; }
         bkLastHash[id] = h;
@@ -12383,6 +12396,7 @@ function bkWriteCode(id: ProfId, code: string): string | null {
   keepSlotBackup(id, keep);
   if (id === activeProf) memSave = raw; else memSaveBy[id] = raw;
   const ok = writeDurable(profSaveKey(id), raw) || lsGet(profSaveKey(id)) === raw;
+  if (ok) setProvisional(id, false);
   return ok ? raw : null;
 }
 function bkRestoreHist(id: ProfId, e: BkHist): boolean {
@@ -12417,6 +12431,7 @@ async function bkRelayLatest(id: ProfId): Promise<{ t: number; code: string } | 
   const base = await bkRelayBase();
   let r = base ? await get(base) : undefined;
   if (r === undefined) { const fresh = await bkRelayBase(true); if (fresh && fresh !== base) r = await get(fresh); }
+  bkRelayAnswered[id] = r !== undefined;
   return r || null;
 }
 function bkHealSlots(): ProfId[] {
@@ -12464,6 +12479,33 @@ async function bkHealAll(force = false): Promise<ProfId[]> {
         const rl = await bkRelayLatest(id);
         if (rl && rl.t <= Date.now() + 60000) cands.push({ t: rl.t, code: rl.code, src: "relay" });
         cands.sort((a: { t: number }, b: { t: number }) => b.t - a.t);
+        if (cur && isProvisional(id)) {
+          // Provisional run (auto-seeded after a wipe, maybe played a little): the furthest real save wins, timestamps ignored.
+          let best: { t: number; code: string; src: string } | null = null;
+          let bestRank = -1;
+          for (const c of cands) {
+            const s2 = bkCodeStats(c.code);
+            if (!s2.lvl || isStarterCode(id, c.code)) continue;
+            const rk = runProgressRank(s2.lvl, s2.depth, 0);
+            if (rk > bestRank) { best = c; bestRank = rk; }
+          }
+          const nowS = parseSaveRaw(profBlob(id));
+          const nowRank = nowS ? runProgressRank(Number(nowS.lvl) || 0, Number(nowS.depth) || 0, 0) : -1;
+          if (best && bestRank > Math.max(curRank, nowRank)) {
+            const s2 = bkCodeStats(best.code);
+            const raw = bkWriteCode(id, best.code); // the provisional run is kept under ed16_recover_prev_pN first
+            if (raw) {
+              setProvisional(id, false);
+              bkHistPush(id, { t: best.t, lvl: s2.lvl, depth: s2.depth, h: bkHash(best.code), code: best.code });
+              BK_STATS.heals++; healed.push(id);
+              bkLog("healed " + BK_SLOTS[id] + " from " + best.src + " (provisional run L" + (Number(cur.lvl) || 0) + " was behind L" + s2.lvl + ")");
+            }
+          } else if (bkRelayAnswered[id]) {
+            setProvisional(id, false); // the relay has nothing better: this run is the real one from now on
+            bkLog("provisional " + BK_SLOTS[id] + " confirmed (relay has nothing further)");
+          }
+          continue;
+        }
         for (const c of cands) {
           const st = bkCodeStats(c.code);
           if (!st.lvl) continue; // not a decodable code
@@ -27206,6 +27248,7 @@ export default function App() {
     void verifyOwnerPass(pass).then((ok: boolean) => {
       if (ok) {
         rememberOwnerUnlock();
+        bkKickHeal(); // heal wiped slots right away, before a kid can start playing an auto-seeded starter
         setOwnerUnlocked(true);
         setOwnerNote("");
         setOwnerUntil(0);
