@@ -1,11 +1,11 @@
 /* Tiny service worker so Chrome can offer Install app.
    HTML and JS are network-first so a new deploy is not stuck behind an old cache.
    Icons stay cache-first. Cache name is stamped per build. */
-const CACHE = "ed16-20261120-151637";
+const CACHE = "ed16-20261126-183448";
 const ASSETS = [
   "./",
   "./index.html",
-  "./game.js?v=20261120-151637",
+  "./game.js?v=20261126-183448",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
